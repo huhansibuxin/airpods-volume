@@ -1,6 +1,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <notify.h>
 #import <dlfcn.h>
 
