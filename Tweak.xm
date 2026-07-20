@@ -29,11 +29,7 @@ static BOOL isNotificationCategory(id cat) {
 %end
 
 static void onStateChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *d, CFDictionaryRef u) {
-    if (d) {
-        int val;
-        memcpy(&val, &d, sizeof(int));
-        airPodsConnected = (val == 1);
-    }
+    airPodsConnected = ((int)(intptr_t)d == 1);
 }
 
 static void postState(int connected) {
