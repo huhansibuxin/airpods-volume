@@ -17,17 +17,22 @@ static BOOL isNotificationCategory(id category) {
     NSString *s = [category description];
     return [s containsString:@"Ringtone"] ||
            [s containsString:@"Alert"] ||
-           [s containsString:@"SoloAmbient"] ||
            [s containsString:@"Ambient"];
 }
 
-static BOOL isBluetoothConnected(void) {
+static BOOL isAirPodsProConnected(void) {
     AVAudioSession *s = [AVAudioSession sharedInstance];
     for (AVAudioSessionPortDescription *p in s.currentRoute.outputs) {
-        NSString *t = p.portType;
-        if ([t isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
-            [t isEqualToString:AVAudioSessionPortBluetoothHFP] ||
-            [t isEqualToString:AVAudioSessionPortBluetoothLE]) {
+        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL routeHasAirPodsPro(AVAudioSessionRouteDescription *route) {
+    for (AVAudioSessionPortDescription *p in route.outputs) {
+        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"]) {
             return YES;
         }
     }
@@ -40,7 +45,7 @@ static BOOL mediaDucked = NO;
 %hook AVSystemController
 
 - (BOOL)setVolumeTo:(float)volume forCategory:(id)category {
-    if (isBluetoothConnected()) {
+    if (isAirPodsProConnected()) {
         if (isNotificationCategory(category)) {
             volume = MIN(volume, MAX_VOLUME);
             if (!mediaDucked) {
@@ -62,7 +67,7 @@ static BOOL mediaDucked = NO;
 }
 
 - (BOOL)setActiveCategoryVolumeTo:(float)volume {
-    if (isBluetoothConnected()) {
+    if (isAirPodsProConnected()) {
         id active = [self activeCategory];
         if (isNotificationCategory(active)) {
             volume = MIN(volume, MAX_VOLUME);
@@ -77,7 +82,7 @@ static BOOL mediaDucked = NO;
 }
 
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)category {
-    if (isBluetoothConnected() && delta > 0 && isNotificationCategory(category)) {
+    if (isAirPodsProConnected() && delta > 0 && isNotificationCategory(category)) {
         float cur;
         if ([self getVolume:&cur forCategory:category] && cur >= MAX_VOLUME) {
             return YES;
@@ -89,18 +94,21 @@ static BOOL mediaDucked = NO;
 %end
 
 %ctor {
-    NSLog(@"[AirPodsVolume] installed, 3 hooks + duck media");
+    NSLog(@"[AirPodsVolume] installed, AirPods Pro only");
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
                                                            object:nil queue:[NSOperationQueue mainQueue]
                                                        usingBlock:^(NSNotification *note) {
-            NSInteger reason = [[note.userInfo objectForKey:AVAudioSessionRouteChangeReasonKey] integerValue];
-            NSLog(@"[AirPodsVolume] route change reason=%ld", (long)reason);
-            if (reason == 1) {
+            NSDictionary *info = note.userInfo;
+            NSInteger reason = [[info objectForKey:AVAudioSessionRouteChangeReasonKey] integerValue];
+            AVAudioSessionRouteDescription *prev = [info objectForKey:AVAudioSessionRouteChangePreviousRouteKey];
+            NSLog(@"[AirPodsVolume] route change reason=%ld prevHasAirPods=%d", (long)reason, routeHasAirPodsPro(prev));
+            if (routeHasAirPodsPro(prev)) {
                 id c = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
                 [c setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [c setVolumeTo:1.0f forCategory:@"Alert"];
                 [c setVolumeTo:savedMediaVolume forCategory:@"Audio/Video"];
+                NSLog(@"[AirPodsVolume] AirPods Pro gone, restored 100%%");
             }
         }];
     }
