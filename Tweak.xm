@@ -1,10 +1,10 @@
 #import <substrate.h>
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
-#import <CoreFoundation/CoreFoundation.h>
+#import <fcntl.h>
+#import <unistd.h>
 
-static BOOL airPodsConnected = NO;
-#define kAPNotify CFSTR("com.airpodsvolume.state")
+#define STATE_FILE "/tmp/.airpods_state"
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
@@ -16,10 +16,19 @@ static BOOL isNotificationCategory(id cat) {
     return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
 }
 
+static BOOL readAirPodsState(void) {
+    int fd = open(STATE_FILE, O_RDONLY);
+    if (fd < 0) return NO;
+    char c = '0';
+    read(fd, &c, 1);
+    close(fd);
+    return c == '1';
+}
+
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     if (isNotificationCategory(cat)) {
-        if (airPodsConnected)
+        if (readAirPodsState())
             vol = MIN(vol, 0.4f);
         else
             vol = 1.0f;
@@ -28,23 +37,16 @@ static BOOL isNotificationCategory(id cat) {
 }
 %end
 
-static void onStateChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *d, CFDictionaryRef u) {
-    airPodsConnected = ((int)(intptr_t)d == 1);
-}
-
-static void postState(int connected) {
-    int v = connected;
-    CFNotificationCenterPostNotification(
-        CFNotificationCenterGetDarwinNotifyCenter(), kAPNotify,
-        (const void *)(intptr_t)v, NULL, YES);
+static void writeAirPodsState(BOOL connected) {
+    int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0) {
+        char c = connected ? '1' : '0';
+        write(fd, &c, 1);
+        close(fd);
+    }
 }
 
 %ctor {
-    CFNotificationCenterAddObserver(
-        CFNotificationCenterGetDarwinNotifyCenter(),
-        NULL, onStateChanged, kAPNotify, NULL,
-        CFNotificationSuspensionBehaviorDeliverImmediately);
-
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
         AVAudioSession *s = [AVAudioSession sharedInstance];
         BOOL connected = NO;
@@ -52,8 +54,7 @@ static void postState(int connected) {
             if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
                 connected = YES;
         }
-        airPodsConnected = connected;
-        postState(connected);
+        writeAirPodsState(connected);
 
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
         if (!connected) {
@@ -68,13 +69,10 @@ static void postState(int connected) {
                 if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
                     now = YES;
             }
-            if (now != airPodsConnected) {
-                airPodsConnected = now;
-                postState(now);
-                if (!now) {
-                    [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
-                    [avc setVolumeTo:1.0f forCategory:@"Alert"];
-                }
+            writeAirPodsState(now);
+            if (!now) {
+                [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
+                [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
         }];
     }
