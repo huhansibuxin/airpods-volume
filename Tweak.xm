@@ -1,8 +1,8 @@
 #import <substrate.h>
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreFoundation/CoreFoundation.h>
 
-// Shared state via Darwin notification, no AVAudioSession in mediaserverd
 static BOOL airPodsConnected = NO;
 #define kAPNotify CFSTR("com.airpodsvolume.state")
 
@@ -29,21 +29,27 @@ static BOOL isNotificationCategory(id cat) {
 %end
 
 static void onStateChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *d, CFDictionaryRef u) {
-    CFNumberRef num = (CFNumberRef)d;
-    int val = 0;
-    if (num && CFNumberGetValue(num, kCFNumberIntType, &val))
-        airPodsConnected = (BOOL)val;
+    if (d) {
+        int val;
+        memcpy(&val, &d, sizeof(int));
+        airPodsConnected = (val == 1);
+    }
+}
+
+static void postState(int connected) {
+    int v = connected;
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(), kAPNotify,
+        (const void *)(intptr_t)v, NULL, YES);
 }
 
 %ctor {
-    // Listen for state changes from SpringBoard (works in all processes incl mediaserverd)
     CFNotificationCenterAddObserver(
         CFNotificationCenterGetDarwinNotifyCenter(),
         NULL, onStateChanged, kAPNotify, NULL,
         CFNotificationSuspensionBehaviorDeliverImmediately);
 
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
-        // Init state from current route
         AVAudioSession *s = [AVAudioSession sharedInstance];
         BOOL connected = NO;
         for (AVAudioSessionPortDescription *p in s.currentRoute.outputs) {
@@ -51,11 +57,7 @@ static void onStateChanged(CFNotificationCenterRef c, void *o, CFStringRef n, co
                 connected = YES;
         }
         airPodsConnected = connected;
-        int val = connected ? 1 : 0;
-        CFNumberRef num = CFNumberCreate(NULL, kCFNumberIntType, &val);
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(), kAPNotify, (__bridge const void *)num, NULL, YES);
-        CFRelease(num);
+        postState(connected);
 
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
         if (!connected) {
@@ -63,7 +65,6 @@ static void onStateChanged(CFNotificationCenterRef c, void *o, CFStringRef n, co
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
         }
 
-        // Listen for route changes
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
             object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
             BOOL now = NO;
@@ -73,11 +74,7 @@ static void onStateChanged(CFNotificationCenterRef c, void *o, CFStringRef n, co
             }
             if (now != airPodsConnected) {
                 airPodsConnected = now;
-                int v = now ? 1 : 0;
-                CFNumberRef n2 = CFNumberCreate(NULL, kCFNumberIntType, &v);
-                CFNotificationCenterPostNotification(
-                    CFNotificationCenterGetDarwinNotifyCenter(), kAPNotify, (__bridge const void *)n2, NULL, YES);
-                CFRelease(n2);
+                postState(now);
                 if (!now) {
                     [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                     [avc setVolumeTo:1.0f forCategory:@"Alert"];
