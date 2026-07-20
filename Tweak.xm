@@ -96,10 +96,29 @@ static NSLock *duckLock = nil;
 
 %end
 
+
+%group SpringBoardHUD
+
+// Left-side traditional volume HUD
+%hook SBVolumeHUDView
+- (void)showAnimated:(BOOL)animated { return; }
+%end
+
+// Dynamic Island ringer HUD
+%hook SBHUDController
+- (void)presentHUDView:(id)arg autoDismissWithDelay:(double)delay {
+    if (delay < 10.0) return; // volume HUD dismisses fast, keep others
+    %orig;
+}
+%end
+
+%end
+
 %ctor {
     duckLock = [[NSLock alloc] init];
     NSLog(@"[AirPodsVolume] installed, Ringtone/Alert only");
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
+        %init(SpringBoardHUD);
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
                                                            object:nil queue:[NSOperationQueue mainQueue]
                                                        usingBlock:^(NSNotification *note) {
