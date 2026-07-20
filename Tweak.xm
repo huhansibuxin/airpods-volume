@@ -2,22 +2,12 @@
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 
-#define MAX_VOLUME 0.4f
+static BOOL airPodsConnected = NO;
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
 @end
-
-static BOOL isAirPodsProConnected(void) {
-    AVAudioSession *s = [AVAudioSession sharedInstance];
-    if (!s) return NO;
-    for (AVAudioSessionPortDescription *p in s.currentRoute.outputs) {
-        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
-            return YES;
-    }
-    return NO;
-}
 
 static BOOL isNotificationCategory(id cat) {
     NSString *s = [cat description];
@@ -26,26 +16,45 @@ static BOOL isNotificationCategory(id cat) {
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
-    if (isAirPodsProConnected() && isNotificationCategory(cat))
-        vol = MIN(vol, MAX_VOLUME);
+    if (isNotificationCategory(cat)) {
+        if (airPodsConnected)
+            vol = MIN(vol, 0.4f);
+        else
+            vol = 1.0f; // always 100% without AirPods
+    }
     return %orig;
 }
 %end
 
 %ctor {
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
+        // Init state
+        AVAudioSession *s = [AVAudioSession sharedInstance];
+        for (AVAudioSessionPortDescription *p in s.currentRoute.outputs) {
+            if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
+                airPodsConnected = YES;
+        }
+
+        // Keep it at 100% initially
+        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+        if (!airPodsConnected) {
+            [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
+            [avc setVolumeTo:1.0f forCategory:@"Alert"];
+        }
+
+        // Listen for connect/disconnect
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
             object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-            AVAudioSessionRouteDescription *prev = n.userInfo[AVAudioSessionRouteChangePreviousRouteKey];
-            BOOL wasAirPods = NO;
-            for (AVAudioSessionPortDescription *p in prev.outputs) {
+            BOOL nowConnected = NO;
+            for (AVAudioSessionPortDescription *p in s.currentRoute.outputs) {
                 if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
-                    wasAirPods = YES;
+                    nowConnected = YES;
             }
-            if (wasAirPods) {
-                id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
-                [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            if (nowConnected != airPodsConnected) {
+                airPodsConnected = nowConnected;
+                if (!nowConnected)
+                    [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
+                    [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
         }];
     }
