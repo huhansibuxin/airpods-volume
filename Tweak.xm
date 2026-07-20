@@ -8,16 +8,32 @@
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)volume forCategory:(id)category;
 - (BOOL)getVolume:(float *)volume forCategory:(id)category;
+- (BOOL)changeVolumeBy:(float)delta forCategory:(id)category;
+- (id)activeCategory;
 @end
 
 static BOOL isNotificationCategory(id category) {
     if (!category) return NO;
     @try {
         NSString *s = [category description];
-        return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
+        return [s containsString:@"Ringtone"] ||
+               [s containsString:@"Alert"] ||
+               [s containsString:@"PhoneCall"] ||
+               [s containsString:@"VoIP"] ||
+               [s containsString:@"Communication"];
     } @catch (NSException *e) {
         return NO;
     }
+}
+
+static BOOL isActiveCallRelated(AVSystemController *avc) {
+    @try {
+        NSString *s = [[avc activeCategory] description];
+        return [s containsString:@"PhoneCall"] ||
+               [s containsString:@"VoIP"] ||
+               [s containsString:@"Communication"];
+    } @catch (NSException *e) {}
+    return NO;
 }
 
 static BOOL isAirPodsProConnected(void) {
@@ -29,9 +45,7 @@ static BOOL isAirPodsProConnected(void) {
                 return YES;
             }
         }
-    } @catch (NSException *e) {
-        NSLog(@"[AirPodsVolume] isAirPodsProConnected exception: %@", e);
-    }
+    } @catch (NSException *e) {}
     return NO;
 }
 
@@ -55,11 +69,21 @@ static NSLock *duckLock = nil;
 
 - (BOOL)setVolumeTo:(float)volume forCategory:(id)category {
     @try {
-        if (isAirPodsProConnected() && isNotificationCategory(category)) {
-            // Cap notification volume
+        BOOL shouldCap = NO;
+        if (isAirPodsProConnected()) {
+            if (isNotificationCategory(category)) {
+                shouldCap = YES;
+            }
+            else if (isActiveCallRelated(self)) {
+                // During a call (WeChat etc), any volume change (incl Audio/Video) must be capped
+                NSString *s = [category description];
+                if ([s containsString:@"Audio/Video"] || [s containsString:@"AVMedia"]) {
+                    shouldCap = YES;
+                }
+            }
+        }
+        if (shouldCap) {
             volume = MIN(volume, MAX_VOLUME);
-
-            // Duck media volume: save and force to 40%
             [duckLock lock];
             if (!mediaDucked) {
                 [self getVolume:&savedMediaVolume forCategory:@"Audio/Video"];
@@ -68,29 +92,35 @@ static NSLock *duckLock = nil;
             [duckLock unlock];
             [self setVolumeTo:MAX_VOLUME forCategory:@"Audio/Video"];
 
-            // Restore after 5s if notification ended
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC),
                            dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 @try {
                     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                    float cur;
-                    [avc getVolume:&cur forCategory:@"Ringtone"];
-                    // If ringtone volume is still at cap, notification may still be active, skip restore
-                    if (cur > MAX_VOLUME + 0.01f) {
+                    if (!isActiveCallRelated(avc)) {
                         [duckLock lock];
                         float restore = savedMediaVolume;
                         mediaDucked = NO;
                         [duckLock unlock];
                         [avc setVolumeTo:restore forCategory:@"Audio/Video"];
                     }
-                } @catch (NSException *e) {
-                    NSLog(@"[AirPodsVolume] restore exception: %@", e);
-                }
+                } @catch (NSException *e) {}
             });
         }
-    } @catch (NSException *e) {
-        NSLog(@"[AirPodsVolume] setVolumeTo exception: %@", e);
-    }
+    } @catch (NSException *e) {}
+    return %orig;
+}
+
+- (BOOL)changeVolumeBy:(float)delta forCategory:(id)category {
+    @try {
+        if (isAirPodsProConnected() && delta > 0) {
+            if (isNotificationCategory(category) || isActiveCallRelated(self)) {
+                float cur;
+                if ([self getVolume:&cur forCategory:category] && cur >= MAX_VOLUME) {
+                    return YES;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
     return %orig;
 }
 
@@ -100,23 +130,30 @@ static NSLock *duckLock = nil;
 %group SpringBoardHUD
 
 static void suppressVolumeHUDs(void) {
-    // Left-side traditional volume overlay
-    Class SBVolumeHUDView = NSClassFromString(@"SBVolumeHUDView");
-    if (SBVolumeHUDView) {
-        MSHookMessageEx(SBVolumeHUDView,
-            @selector(showAnimated:),
-            imp_implementationWithBlock(^(id self, BOOL animated) { return; }),
+    // Left-side media volume HUD
+    Class leftHUD = NSClassFromString(@"_UIVolumeHUDViewController");
+    if (leftHUD) {
+        MSHookMessageEx(leftHUD,
+            @selector(setVisible:animated:),
+            imp_implementationWithBlock(^(id self, BOOL v, BOOL a) { return; }),
+            NULL);
+    }
+
+    // Left-side HUD view fallback
+    Class leftView = NSClassFromString(@"_UIVolumeHUDView");
+    if (leftView) {
+        MSHookMessageEx(leftView,
+            @selector(showAtPoint:),
+            imp_implementationWithBlock(^(id self, CGPoint p) { return; }),
             NULL);
     }
 
     // Dynamic Island ringer HUD
-    Class SBHUDController = NSClassFromString(@"SBHUDController");
-    if (SBHUDController) {
-        MSHookMessageEx(SBHUDController,
-            @selector(presentHUDView:autoDismissWithDelay:),
-            imp_implementationWithBlock(^(id self, id view, double delay) {
-                if (delay < 10.0) return;
-            }),
+    Class dinHUD = NSClassFromString(@"_UIRingerHUDViewController");
+    if (dinHUD) {
+        MSHookMessageEx(dinHUD,
+            @selector(presentHUDWithVolume:),
+            imp_implementationWithBlock(^(id self, float v) { return; }),
             NULL);
     }
 }
@@ -125,7 +162,6 @@ static void suppressVolumeHUDs(void) {
 
 %ctor {
     duckLock = [[NSLock alloc] init];
-    NSLog(@"[AirPodsVolume] installed, Ringtone/Alert only");
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
         suppressVolumeHUDs();
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
@@ -138,11 +174,8 @@ static void suppressVolumeHUDs(void) {
                     [c setVolumeTo:1.0f forCategory:@"Ringtone"];
                     [c setVolumeTo:1.0f forCategory:@"Alert"];
                     [c setVolumeTo:savedMediaVolume forCategory:@"Audio/Video"];
-                    NSLog(@"[AirPodsVolume] AirPods Pro gone, restored 100%%");
                 }
-            } @catch (NSException *e) {
-                NSLog(@"[AirPodsVolume] route change exception: %@", e);
-            }
+            } @catch (NSException *e) {}
         }];
     }
 }
