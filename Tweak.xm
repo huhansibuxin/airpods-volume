@@ -9,6 +9,7 @@
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
+- (BOOL)getVolume:(float *)v forCategory:(id)c;
 @end
 
 static BOOL isNotificationCategory(id cat) {
@@ -70,7 +71,15 @@ static void writeAirPodsState(BOOL connected) {
                     now = YES;
             }
             writeAirPodsState(now);
-            if (!now) {
+            if (now) {
+                // Actively cap current volume on connect
+                float cur;
+                id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+                if ([avc2 getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
+                    [avc2 setVolumeTo:0.4f forCategory:@"Ringtone"];
+                if ([avc2 getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
+                    [avc2 setVolumeTo:0.4f forCategory:@"Alert"];
+            } else {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
