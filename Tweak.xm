@@ -52,9 +52,10 @@ static BOOL isNotificationCategory(id cat) {
             }
             if (nowConnected != airPodsConnected) {
                 airPodsConnected = nowConnected;
-                if (!nowConnected)
+                if (!nowConnected) {
                     [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                     [avc setVolumeTo:1.0f forCategory:@"Alert"];
+                }
             }
         }];
     }
