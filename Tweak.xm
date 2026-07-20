@@ -9,6 +9,9 @@
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
+- (BOOL)setActiveCategoryVolumeTo:(float)v;
+- (id)getActiveCategory:(BOOL)arg1;
+- (BOOL)changeVolumeBy:(float)v forCategory:(id)c;
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
 @end
 
@@ -26,13 +29,29 @@ static BOOL readAirPodsState(void) {
     return c == '1';
 }
 
+static float applyVolumeCap(float vol) {
+    if (readAirPodsState())
+        return MIN(vol, 0.4f);
+    return 1.0f;
+}
+
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
+    if (isNotificationCategory(cat))
+        vol = applyVolumeCap(vol);
+    return %orig;
+}
+- (BOOL)setActiveCategoryVolumeTo:(float)vol {
+    id cat = [self getActiveCategory:YES];
+    if (isNotificationCategory(cat))
+        vol = applyVolumeCap(vol);
+    return %orig;
+}
+- (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
     if (isNotificationCategory(cat)) {
-        if (readAirPodsState())
-            vol = MIN(vol, 0.4f);
-        else
-            vol = 1.0f;
+        float cur;
+        if ([self getVolume:&cur forCategory:cat])
+            return [self setVolumeTo:applyVolumeCap(cur + delta) forCategory:cat];
     }
     return %orig;
 }
