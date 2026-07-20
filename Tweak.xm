@@ -6,6 +6,10 @@
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
+- (BOOL)setVolumeTo:(float)volume forCategory:(id)category;
+- (BOOL)setActiveCategoryVolumeTo:(float)volume;
+- (BOOL)getVolume:(float *)volume forCategory:(id)category;
+- (BOOL)changeVolumeBy:(float)delta forCategory:(id)category;
 @end
 
 static BOOL isBluetoothConnected(void) {
@@ -22,6 +26,7 @@ static BOOL isBluetoothConnected(void) {
 }
 
 %hook AVSystemController
+
 - (BOOL)setVolumeTo:(float)volume forCategory:(id)category {
     if (isBluetoothConnected()) {
         volume = MIN(volume, MAX_VOLUME);
@@ -35,8 +40,19 @@ static BOOL isBluetoothConnected(void) {
     }
     return %orig;
 }
+
+- (BOOL)changeVolumeBy:(float)delta forCategory:(id)category {
+    if (isBluetoothConnected() && delta > 0) {
+        float current;
+        if ([self getVolume:&current forCategory:category] && current >= MAX_VOLUME) {
+            return YES;
+        }
+    }
+    return %orig;
+}
+
 %end
 
 %ctor {
-    NSLog(@"[AirPodsVolume] Hooks installed, max volume capped at 40%% when Bluetooth connected");
+    NSLog(@"[AirPodsVolume] Hooks installed, cap 40%% on Bluetooth");
 }
