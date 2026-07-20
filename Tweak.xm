@@ -99,6 +99,14 @@ static NSLock *duckLock = nil;
 
 %group SpringBoardHUD
 
+@interface SBVolumeHUDView : UIView
+- (void)showAnimated:(BOOL)animated;
+@end
+
+@interface SBHUDController : NSObject
+- (void)presentHUDView:(id)arg autoDismissWithDelay:(double)delay;
+@end
+
 // Left-side traditional volume HUD
 %hook SBVolumeHUDView
 - (void)showAnimated:(BOOL)animated { return; }
@@ -107,7 +115,7 @@ static NSLock *duckLock = nil;
 // Dynamic Island ringer HUD
 %hook SBHUDController
 - (void)presentHUDView:(id)arg autoDismissWithDelay:(double)delay {
-    if (delay < 10.0) return; // volume HUD dismisses fast, keep others
+    if (delay < 10.0) return;
     %orig;
 }
 %end
