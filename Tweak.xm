@@ -7,19 +7,14 @@
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)volume forCategory:(id)category;
-- (BOOL)setActiveCategoryVolumeTo:(float)volume;
 - (BOOL)getVolume:(float *)volume forCategory:(id)category;
-- (BOOL)changeVolumeBy:(float)delta forCategory:(id)category;
-- (id)activeCategory;
 @end
 
 static BOOL isNotificationCategory(id category) {
     if (!category) return NO;
     @try {
         NSString *s = [category description];
-        return [s containsString:@"Ringtone"] ||
-               [s containsString:@"Alert"] ||
-               [s containsString:@"Ambient"];
+        return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
     } @catch (NSException *e) {
         return NO;
     }
@@ -61,22 +56,27 @@ static NSLock *duckLock = nil;
 - (BOOL)setVolumeTo:(float)volume forCategory:(id)category {
     @try {
         if (isAirPodsProConnected() && isNotificationCategory(category)) {
+            // Cap notification volume
             volume = MIN(volume, MAX_VOLUME);
 
+            // Duck media volume: save and force to 40%
             [duckLock lock];
             if (!mediaDucked) {
                 [self getVolume:&savedMediaVolume forCategory:@"Audio/Video"];
                 mediaDucked = YES;
             }
             [duckLock unlock];
-
             [self setVolumeTo:MAX_VOLUME forCategory:@"Audio/Video"];
 
+            // Restore after 5s if notification ended
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
                            dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 @try {
                     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                    if (!isNotificationCategory([avc activeCategory])) {
+                    float cur;
+                    [avc getVolume:&cur forCategory:@"Ringtone"];
+                    // If ringtone volume is still at cap, notification may still be active, skip restore
+                    if (cur > MAX_VOLUME + 0.01f) {
                         [duckLock lock];
                         float restore = savedMediaVolume;
                         mediaDucked = NO;
@@ -94,44 +94,11 @@ static NSLock *duckLock = nil;
     return %orig;
 }
 
-- (BOOL)setActiveCategoryVolumeTo:(float)volume {
-    @try {
-        if (isAirPodsProConnected()) {
-            id active = [self activeCategory];
-            if (isNotificationCategory(active)) {
-                volume = MIN(volume, MAX_VOLUME);
-                [duckLock lock];
-                if (!mediaDucked) {
-                    [self getVolume:&savedMediaVolume forCategory:@"Audio/Video"];
-                    mediaDucked = YES;
-                }
-                [duckLock unlock];
-                [self setVolumeTo:MAX_VOLUME forCategory:@"Audio/Video"];
-            }
-        }
-    } @catch (NSException *e) {
-        NSLog(@"[AirPodsVolume] setActiveCategory exception: %@", e);
-    }
-    return %orig;
-}
-
-- (BOOL)changeVolumeBy:(float)delta forCategory:(id)category {
-    @try {
-        if (isAirPodsProConnected() && delta > 0 && isNotificationCategory(category)) {
-            float cur;
-            if ([self getVolume:&cur forCategory:category] && cur >= MAX_VOLUME) {
-                return YES;
-            }
-        }
-    } @catch (NSException *e) {}
-    return %orig;
-}
-
 %end
 
 %ctor {
     duckLock = [[NSLock alloc] init];
-    NSLog(@"[AirPodsVolume] installed v2");
+    NSLog(@"[AirPodsVolume] installed, Ringtone/Alert only");
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
                                                            object:nil queue:[NSOperationQueue mainQueue]
@@ -143,7 +110,7 @@ static NSLock *duckLock = nil;
                     [c setVolumeTo:1.0f forCategory:@"Ringtone"];
                     [c setVolumeTo:1.0f forCategory:@"Alert"];
                     [c setVolumeTo:savedMediaVolume forCategory:@"Audio/Video"];
-                    NSLog(@"[AirPodsVolume] AirPods Pro gone, ringtone 100%%");
+                    NSLog(@"[AirPodsVolume] AirPods Pro gone, restored 100%%");
                 }
             } @catch (NSException *e) {
                 NSLog(@"[AirPodsVolume] route change exception: %@", e);
