@@ -99,26 +99,27 @@ static NSLock *duckLock = nil;
 
 %group SpringBoardHUD
 
-@interface SBVolumeHUDView : UIView
-- (void)showAnimated:(BOOL)animated;
-@end
+static void suppressVolumeHUDs(void) {
+    // Left-side traditional volume overlay
+    Class SBVolumeHUDView = NSClassFromString(@"SBVolumeHUDView");
+    if (SBVolumeHUDView) {
+        MSHookMessageEx(SBVolumeHUDView,
+            @selector(showAnimated:),
+            imp_implementationWithBlock(^(id self, BOOL animated) { return; }),
+            NULL);
+    }
 
-@interface SBHUDController : NSObject
-- (void)presentHUDView:(id)arg autoDismissWithDelay:(double)delay;
-@end
-
-// Left-side traditional volume HUD
-%hook SBVolumeHUDView
-- (void)showAnimated:(BOOL)animated { return; }
-%end
-
-// Dynamic Island ringer HUD
-%hook SBHUDController
-- (void)presentHUDView:(id)arg autoDismissWithDelay:(double)delay {
-    if (delay < 10.0) return;
-    %orig;
+    // Dynamic Island ringer HUD
+    Class SBHUDController = NSClassFromString(@"SBHUDController");
+    if (SBHUDController) {
+        MSHookMessageEx(SBHUDController,
+            @selector(presentHUDView:autoDismissWithDelay:),
+            imp_implementationWithBlock(^(id self, id view, double delay) {
+                if (delay < 10.0) return;
+            }),
+            NULL);
+    }
 }
-%end
 
 %end
 
@@ -126,7 +127,7 @@ static NSLock *duckLock = nil;
     duckLock = [[NSLock alloc] init];
     NSLog(@"[AirPodsVolume] installed, Ringtone/Alert only");
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
-        %init(SpringBoardHUD);
+        suppressVolumeHUDs();
         [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
                                                            object:nil queue:[NSOperationQueue mainQueue]
                                                        usingBlock:^(NSNotification *note) {
