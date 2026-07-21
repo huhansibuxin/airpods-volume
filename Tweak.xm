@@ -74,13 +74,6 @@ static float applyVolumeCap(float vol) {
 // Also disable touch on HUD slider — volume only via physical buttons.
 // (Control Center volume module is a different view hierarchy, not affected.)
 %hook SBHUDWindow
-- (void)willRemoveSubview:(UIView *)subview {
-    // Block the collapse: wide bar (>50px) stays forever
-    if (subview.frame.size.width > 50) {
-        return;
-    }
-    %orig;
-}
 - (void)addSubview:(UIView *)view {
     // Disable touch on all HUD subviews — buttons only
     view.userInteractionEnabled = NO;
@@ -88,7 +81,8 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// Also disable touch on the narrow elastic bar (always-on narrow element)
+// Force the volume slider to always stay wide — never collapse to narrow bar
+// Also disable touch
 @interface SBElasticVolumeSliderView : UIView
 @end
 %hook SBElasticVolumeSliderView
@@ -96,6 +90,12 @@ static float applyVolumeCap(float vol) {
     self = %orig;
     self.userInteractionEnabled = NO;
     return self;
+}
+- (void)setFrame:(CGRect)frame {
+    if (frame.size.width < 100) {
+        frame.size.width = 200;
+    }
+    %orig;
 }
 %end
 
