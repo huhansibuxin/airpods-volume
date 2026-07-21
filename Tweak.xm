@@ -69,18 +69,10 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// Force volume HUD to always stay narrow (small bar, never expand to wide slider)
+// Force volume HUD to always stay narrow bar, never expand to wide slider
 @interface SBElasticVolumeSliderView : UIView
-- (void)setExpanded:(BOOL)expanded;
-- (void)_setExpanded:(BOOL)expanded;
 @end
 %hook SBElasticVolumeSliderView
-- (void)setExpanded:(BOOL)expanded {
-    %orig(NO);
-}
-- (void)_setExpanded:(BOOL)expanded {
-    %orig(NO);
-}
 - (void)layoutSubviews {
     %orig;
     // Lock width to narrow bar (7px), keep existing height + position
