@@ -70,27 +70,31 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// Force volume HUD to always stay narrow bar, never expand to wide slider.
-// Two views appear in SBHUDWindow: a wide bar (speaker icon + slider, fades out)
-// and SBElasticVolumeSliderView (narrow bar, stays). Block both.
-@interface SBElasticVolumeSliderView : UIView
-@end
-%hook SBElasticVolumeSliderView
-- (void)setFrame:(CGRect)frame {
-    if (frame.size.width > 8.0) {
-        frame.size.width = 7.0;
-    }
-    %orig(frame);
-}
-%end
-
-// Block the wide bar from even being added to the HUD window
+// Keep volume HUD always wide, never collapse to narrow bar.
+// Also disable touch — volume only adjustable via physical buttons.
 %hook SBHUDWindow
-- (void)addSubview:(UIView *)view {
-    if (view.frame.size.width > 50) {
+- (void)willRemoveSubview:(UIView *)subview {
+    // Block the collapse: wide bar (>50px) stays forever
+    if (subview.frame.size.width > 50) {
         return;
     }
     %orig;
+}
+- (void)addSubview:(UIView *)view {
+    // Disable touch on all HUD subviews — buttons only
+    view.userInteractionEnabled = NO;
+    %orig;
+}
+%end
+
+// Also disable touch on the narrow elastic bar (always-on narrow element)
+@interface SBElasticVolumeSliderView : UIView
+@end
+%hook SBElasticVolumeSliderView
+- (id)initWithFrame:(CGRect)frame {
+    id self = %orig;
+    self.userInteractionEnabled = NO;
+    return self;
 }
 %end
 
