@@ -69,6 +69,20 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
+// Hide replaykit CC modules (mic mode / video effects) during calls
+@interface CCSModuleSettingsProvider : NSObject
++ (id)sharedInstance;
+- (BOOL)isModuleEnabled:(id)identifier;
+@end
+%hook CCSModuleSettingsProvider
+- (BOOL)isModuleEnabled:(id)identifier {
+    NSString *s = [identifier description];
+    if ([s containsString:@"replaykit"])
+        return NO;
+    return %orig;
+}
+%end
+
 static void writeAirPodsState(BOOL connected) {
     int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
