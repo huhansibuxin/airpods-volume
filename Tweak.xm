@@ -70,21 +70,7 @@ static float applyVolumeCap(float vol) {
 %end
 
 // Hide replaykit CC modules (mic mode / video effects) during calls
-// Approach 1: settings provider (registered modules)
-@interface CCSModuleSettingsProvider : NSObject
-+ (id)sharedInstance;
-- (BOOL)isModuleEnabled:(id)identifier;
-@end
-%hook CCSModuleSettingsProvider
-- (BOOL)isModuleEnabled:(id)identifier {
-    NSString *s = [identifier description];
-    if ([s containsString:@"replaykit"])
-        return NO;
-    return %orig;
-}
-%end
-
-// Approach 2: prevent the bundle's principal class from loading
+// Block the bundle's principal class so the module never instantiates
 %hook NSBundle
 - (Class)principalClass {
     NSString *bid = [self bundleIdentifier];
@@ -93,22 +79,6 @@ static float applyVolumeCap(float vol) {
         return nil;
     }
     return %orig;
-}
-%end
-
-// Approach 3: nuke the module view controller classes at init
-@interface RPCCAudioSettingsModule : NSObject
-@end
-@interface RPCCVideoSettingsModule : NSObject
-@end
-%hook RPCCAudioSettingsModule
-- (id)init {
-    return nil;
-}
-%end
-%hook RPCCVideoSettingsModule
-- (id)init {
-    return nil;
 }
 %end
 
