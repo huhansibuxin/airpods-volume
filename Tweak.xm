@@ -1,7 +1,6 @@
 #import <substrate.h>
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
-#import <UIKit/UIKit.h>
 #import <fcntl.h>
 #import <unistd.h>
 
@@ -10,7 +9,6 @@
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
-- (BOOL)setActiveCategoryVolumeTo:(float)v;
 - (id)getActiveCategory:(BOOL)arg1;
 - (BOOL)changeVolumeBy:(float)v forCategory:(id)c;
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
@@ -43,12 +41,6 @@ static float applyVolumeCap(float vol) {
         vol = applyVolumeCap(vol);
     return %orig;
 }
-- (BOOL)setActiveCategoryVolumeTo:(float)vol {
-    id cat = [self getActiveCategory:YES];
-    if (isNotificationCategory(cat))
-        vol = applyVolumeCap(vol);
-    return %orig;
-}
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
     if (isNotificationCategory(cat)) {
         float cur;
@@ -75,7 +67,7 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// HUD: suppress auto-triggered, only show manual. Also force compact mode in Dynamic Island.
+// HUD: suppress auto-triggered, only show manual
 @interface SBHUDManager : NSObject
 + (instancetype)sharedInstance;
 - (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason;
@@ -84,18 +76,6 @@ static float applyVolumeCap(float vol) {
 - (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason {
     if ([reason containsString:@"ExplicitVolumeChange"]) {
         %orig;
-    }
-}
-%end
-
-%hook UIView
-- (void)layoutSubviews {
-    %orig;
-    if ([NSStringFromClass([self class]) containsString:@"HUD"] && 
-        [NSStringFromClass([self class]) containsString:@"Volume"]) {
-        CGRect frame = self.frame;
-        frame.size.width = 8;
-        self.frame = frame;
     }
 }
 %end
