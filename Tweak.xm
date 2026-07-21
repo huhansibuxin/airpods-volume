@@ -88,9 +88,15 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-%hook SBHUDView
-- (void)_setExpanded:(BOOL)expanded animated:(BOOL)animated {
-    %orig(NO, animated);
+%hook UIView
+- (void)layoutSubviews {
+    %orig;
+    if ([NSStringFromClass([self class]) containsString:@"HUD"] && 
+        [NSStringFromClass([self class]) containsString:@"Volume"]) {
+        CGRect frame = self.frame;
+        frame.size.width = 8;
+        self.frame = frame;
+    }
 }
 %end
 
