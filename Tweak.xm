@@ -88,16 +88,8 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-@interface SBVolumeHUDView : UIView
-- (void)setExpanded:(BOOL)expanded animated:(BOOL)animated;
-@end
-%hook SBVolumeHUDView
-- (instancetype)initWithFrame:(CGRect)frame {
-    %orig;
-    [self setExpanded:NO animated:NO];
-    return self;
-}
-- (void)setExpanded:(BOOL)expanded animated:(BOOL)animated {
+%hook SBHUDView
+- (void)_setExpanded:(BOOL)expanded animated:(BOOL)animated {
     %orig(NO, animated);
 }
 %end
