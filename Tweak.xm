@@ -13,6 +13,7 @@
 - (id)getActiveCategory:(BOOL)arg1;
 - (BOOL)changeVolumeBy:(float)v forCategory:(id)c;
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
+- (BOOL)getActiveCategoryVolume:(float *)v;
 @end
 
 static BOOL isNotificationCategory(id cat) {
@@ -54,6 +55,22 @@ static float applyVolumeCap(float vol) {
             return [self setVolumeTo:applyVolumeCap(cur + delta) forCategory:cat];
     }
     return %orig;
+}
+// Cap getters so HUD always reads capped value (no flicker)
+- (BOOL)getVolume:(float *)vol forCategory:(id)cat {
+    BOOL r = %orig;
+    if (r && isNotificationCategory(cat))
+        *vol = applyVolumeCap(*vol);
+    return r;
+}
+- (BOOL)getActiveCategoryVolume:(float *)vol {
+    BOOL r = %orig;
+    if (r) {
+        id cat = [self getActiveCategory:YES];
+        if (isNotificationCategory(cat))
+            *vol = applyVolumeCap(*vol);
+    }
+    return r;
 }
 %end
 
