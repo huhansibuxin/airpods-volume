@@ -1,6 +1,7 @@
 #import <substrate.h>
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
+#import <UIKit/UIKit.h>
 #import <fcntl.h>
 #import <unistd.h>
 
@@ -87,12 +88,17 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-@interface SBHUDController : NSObject
-- (double)autoCollapseDelay;
+@interface SBVolumeHUDView : UIView
+- (void)setExpanded:(BOOL)expanded animated:(BOOL)animated;
 @end
-%hook SBHUDController
-- (double)autoCollapseDelay {
-    return 0.0;
+%hook SBVolumeHUDView
+- (instancetype)initWithFrame:(CGRect)frame {
+    %orig;
+    [self setExpanded:NO animated:NO];
+    return self;
+}
+- (void)setExpanded:(BOOL)expanded animated:(BOOL)animated {
+    %orig(NO, animated);
 }
 %end
 
