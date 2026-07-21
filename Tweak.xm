@@ -69,6 +69,29 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
+// Force volume HUD to always stay narrow (small bar, never expand to wide slider)
+@interface SBElasticVolumeSliderView : UIView
+- (void)setExpanded:(BOOL)expanded;
+- (void)_setExpanded:(BOOL)expanded;
+@end
+%hook SBElasticVolumeSliderView
+- (void)setExpanded:(BOOL)expanded {
+    %orig(NO);
+}
+- (void)_setExpanded:(BOOL)expanded {
+    %orig(NO);
+}
+- (void)layoutSubviews {
+    %orig;
+    // Lock width to narrow bar (7px), keep existing height + position
+    CGRect f = self.frame;
+    if (f.size.width > 8.0) {
+        f.size.width = 7.0;
+        self.frame = f;
+    }
+}
+%end
+
 // Hide replaykit CC modules (mic mode / video effects) during calls
 // Block the bundle's principal class so the module never instantiates
 %hook NSBundle
