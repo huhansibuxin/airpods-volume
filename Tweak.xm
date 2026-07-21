@@ -75,15 +75,17 @@ static float applyVolumeCap(float vol) {
 %end
 
 // HUD suppression: block system-triggered volume HUD, allow manual button presses
-@interface SBHUDManager : NSObject
+// Also force Dynamic Island volume to compact mode (skip expanded wide bar)
+@interface SBHUDController : NSObject
 + (instancetype)sharedInstance;
-- (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason;
+- (void)presentVolumeHUDWithVolume:(float)volume forCategory:(NSString *)category;
+- (void)setPreferCompact:(BOOL)compact;
+- (BOOL)showingInDynamicIsland;
 @end
-%hook SBHUDManager
-- (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason {
-    if ([reason containsString:@"ExplicitVolumeChange"]) {
-        %orig;
-    }
+%hook SBHUDController
+- (void)presentVolumeHUDWithVolume:(float)volume forCategory:(NSString *)category {
+    [self setPreferCompact:YES];
+    %orig;
 }
 %end
 
