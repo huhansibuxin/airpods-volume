@@ -74,14 +74,11 @@ static float applyVolumeCap(float vol) {
 @interface SBElasticVolumeSliderView : UIView
 @end
 %hook SBElasticVolumeSliderView
-- (void)layoutSubviews {
-    %orig;
-    // Lock width to narrow bar (7px), keep existing height + position
-    CGRect f = self.frame;
-    if (f.size.width > 8.0) {
-        f.size.width = 7.0;
-        self.frame = f;
+- (void)setFrame:(CGRect)frame {
+    if (frame.size.width > 8.0) {
+        frame.size.width = 7.0;
     }
+    %orig(frame);
 }
 %end
 
