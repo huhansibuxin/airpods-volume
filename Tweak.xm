@@ -70,7 +70,9 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// Force volume HUD to always stay narrow bar, never expand to wide slider
+// Force volume HUD to always stay narrow bar, never expand to wide slider.
+// Two views appear in SBHUDWindow: a wide bar (speaker icon + slider, fades out)
+// and SBElasticVolumeSliderView (narrow bar, stays). Block both.
 @interface SBElasticVolumeSliderView : UIView
 @end
 %hook SBElasticVolumeSliderView
@@ -79,6 +81,16 @@ static float applyVolumeCap(float vol) {
         frame.size.width = 7.0;
     }
     %orig(frame);
+}
+%end
+
+// Block the wide bar from even being added to the HUD window
+%hook SBHUDWindow
+- (void)addSubview:(UIView *)view {
+    if (view.frame.size.width > 50) {
+        return;
+    }
+    %orig;
 }
 %end
 
