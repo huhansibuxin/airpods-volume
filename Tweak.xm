@@ -1,5 +1,6 @@
 #import <substrate.h>
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <fcntl.h>
 #import <unistd.h>
