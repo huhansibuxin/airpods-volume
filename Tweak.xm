@@ -87,15 +87,12 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-@interface SBHUDController : NSObject
-+ (instancetype)sharedInstance;
-- (void)presentVolumeHUDWithVolume:(float)volume forCategory:(NSString *)category;
-- (void)setPreferCompact:(BOOL)compact;
+@interface SBHUDView : UIView
+- (void)setExpanded:(BOOL)expanded animated:(BOOL)animated;
 @end
-%hook SBHUDController
-- (void)presentVolumeHUDWithVolume:(float)volume forCategory:(NSString *)category {
-    [self setPreferCompact:YES];
-    %orig;
+%hook SBHUDView
+- (void)setExpanded:(BOOL)expanded animated:(BOOL)animated {
+    %orig(NO, animated);
 }
 %end
 
