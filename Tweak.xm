@@ -57,6 +57,19 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
+// HUD suppression: block system-triggered volume HUD, allow manual button presses
+@interface SBHUDManager : NSObject
++ (instancetype)sharedInstance;
+- (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason;
+@end
+%hook SBHUDManager
+- (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason {
+    if ([reason containsString:@"ExplicitVolumeChange"]) {
+        %orig;
+    }
+}
+%end
+
 static void writeAirPodsState(BOOL connected) {
     int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
