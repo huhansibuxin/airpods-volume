@@ -57,22 +57,7 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// HUD: suppress auto-triggered, only show manual
-@interface SBHUDManager : NSObject
-+ (instancetype)sharedInstance;
-- (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason;
-@end
-%hook SBHUDManager
-- (void)presentVolumeHUDForCategory:(NSString *)category reason:(NSString *)reason {
-    if ([reason containsString:@"ExplicitVolumeChange"]) {
-        %orig;
-    }
-}
-%end
-
-// Keep volume HUD always wide, never collapse to narrow bar.
-// Also disable touch on HUD slider — volume only via physical buttons.
-// (Control Center volume module is a different view hierarchy, not affected.)
+// Disable touch on HUD slider — volume only via physical buttons.
 %hook SBHUDWindow
 - (void)addSubview:(UIView *)view {
     // Disable touch on all HUD subviews — buttons only
@@ -81,8 +66,7 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// Force the volume slider to always stay wide — never collapse to narrow bar
-// Also disable touch
+// Also disable touch on the elastic slider
 @interface SBElasticVolumeSliderView : UIView
 @end
 %hook SBElasticVolumeSliderView
@@ -90,12 +74,6 @@ static float applyVolumeCap(float vol) {
     self = %orig;
     self.userInteractionEnabled = NO;
     return self;
-}
-- (void)setFrame:(CGRect)frame {
-    if (frame.size.width < 100) {
-        frame.size.width = 200;
-    }
-    %orig;
 }
 %end
 
