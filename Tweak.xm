@@ -90,6 +90,41 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
+// --- Media volume duck on notification (AirPods only) ---
+// Each new notification resets a 5-second timer; continuous ringing keeps duck active.
+static float s_savedMediaVol = -1;
+static dispatch_block_t s_restoreBlock = nil;
+
+static void duckMediaVolume(void) {
+    if (!readAirPodsState()) return;
+    id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+    float cur;
+    if ([avc getVolume:&cur forCategory:@"Audio/Video"]) {
+        if (s_savedMediaVol < 0)
+            s_savedMediaVol = cur;
+        float target = cur * 0.5f;
+        if (target < 0.01f) target = 0.01f;
+        [avc setVolumeTo:target forCategory:@"Audio/Video"];
+    }
+}
+
+static void restoreMediaVolume(void) {
+    if (s_savedMediaVol >= 0) {
+        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+        [avc setVolumeTo:s_savedMediaVol forCategory:@"Audio/Video"];
+        s_savedMediaVol = -1;
+    }
+}
+
+static void scheduleRestore(void) {
+    if (s_restoreBlock) dispatch_block_cancel(s_restoreBlock);
+    s_restoreBlock = dispatch_block_create(0, ^{
+        restoreMediaVolume();
+        s_restoreBlock = nil;
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), s_restoreBlock);
+}
+
 static void writeAirPodsState(BOOL connected) {
     int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
@@ -134,6 +169,17 @@ static void writeAirPodsState(BOOL connected) {
             } else {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            }
+        }];
+
+        // Media duck on secondary audio (notifications/ringing) — AirPods only
+        [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionSilenceSecondaryAudioHintNotification
+            object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+            if (!readAirPodsState()) return;
+            NSInteger type = [n.userInfo[AVAudioSessionSilenceSecondaryAudioHintTypeKey] integerValue];
+            if (type == AVAudioSessionSilenceSecondaryAudioHintTypeBegin) {
+                duckMediaVolume();
+                scheduleRestore();
             }
         }];
     }
