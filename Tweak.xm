@@ -90,17 +90,6 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// Duck media volume when any alert tone plays — TLAlert fires for all notifications/ringing
-@interface TLAlert : NSObject
-@end
-%hook TLAlert
-- (void)play {
-    duckMediaVolume();
-    scheduleRestore();
-    %orig;
-}
-%end
-
 // --- Media volume duck on notification (AirPods only) ---
 // Each new notification resets a 5-second timer; continuous ringing keeps duck active.
 static float s_savedMediaVol = -1;
@@ -136,6 +125,17 @@ static void scheduleRestore(void) {
         }
     });
 }
+
+// Duck media volume when any alert tone plays — TLAlert fires for all notifications/ringing
+@interface TLAlert : NSObject
+@end
+%hook TLAlert
+- (void)play {
+    duckMediaVolume();
+    scheduleRestore();
+    %orig;
+}
+%end
 
 static void writeAirPodsState(BOOL connected) {
     int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
