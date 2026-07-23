@@ -82,9 +82,11 @@ static float applyVolumeCap(float vol) {
 %hook NSBundle
 - (Class)principalClass {
     NSString *bid = [self bundleIdentifier];
-    if (bid && ([bid isEqualToString:@"com.apple.replaykit.AudioConferenceControlCenterModule"] ||
-                [bid isEqualToString:@"com.apple.replaykit.VideoConferenceControlCenterModule"])) {
-        return nil;
+    if (bid && [bid hasPrefix:@"com.apple.replaykit."]) {
+        if ([bid isEqualToString:@"com.apple.replaykit.AudioConferenceControlCenterModule"] ||
+            [bid isEqualToString:@"com.apple.replaykit.VideoConferenceControlCenterModule"]) {
+            return nil;
+        }
     }
     return %orig;
 }
@@ -126,11 +128,10 @@ static void writeAirPodsState(BOOL connected) {
             if (now) {
                 // Actively cap current volume on connect
                 float cur;
-                id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                if ([avc2 getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
-                    [avc2 setVolumeTo:0.4f forCategory:@"Ringtone"];
-                if ([avc2 getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
-                    [avc2 setVolumeTo:0.4f forCategory:@"Alert"];
+                if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
+                    [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
+                if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
+                    [avc setVolumeTo:0.4f forCategory:@"Alert"];
             } else {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
