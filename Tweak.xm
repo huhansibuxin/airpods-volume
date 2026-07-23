@@ -90,51 +90,6 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
-// --- Media volume duck on notification (AirPods only) ---
-// Each new notification resets a 5-second timer; continuous ringing keeps duck active.
-static float s_savedMediaVol = -1;
-
-static void duckMediaVolume(void) {
-    if (!readAirPodsState()) return;
-    id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    float cur;
-    if ([avc getVolume:&cur forCategory:@"Audio/Video"]) {
-        if (s_savedMediaVol < 0)
-            s_savedMediaVol = cur;
-        float target = cur * 0.5f;
-        if (target < 0.01f) target = 0.01f;
-        [avc setVolumeTo:target forCategory:@"Audio/Video"];
-    }
-}
-
-static void restoreMediaVolume(void) {
-    if (s_savedMediaVol >= 0) {
-        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        [avc setVolumeTo:s_savedMediaVol forCategory:@"Audio/Video"];
-        s_savedMediaVol = -1;
-    }
-}
-
-static void scheduleRestore(void) {
-    static int restoreKey = 0;
-    restoreKey++;
-    int myKey = restoreKey;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        if (myKey == restoreKey) {
-            restoreMediaVolume();
-        }
-    });
-}
-
-// Duck media volume when SpringBoard plays any sound (notifications/ringing)
-%hook AVAudioPlayer
-- (BOOL)play {
-    duckMediaVolume();
-    scheduleRestore();
-    return %orig;
-}
-%end
-
 static void writeAirPodsState(BOOL connected) {
     int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
