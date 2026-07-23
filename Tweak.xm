@@ -126,14 +126,12 @@ static void scheduleRestore(void) {
     });
 }
 
-// Duck media volume when any alert tone plays — TLAlert fires for all notifications/ringing
-@interface TLAlert : NSObject
-@end
-%hook TLAlert
-- (void)play {
+// Duck media volume when SpringBoard plays any sound (notifications/ringing)
+%hook AVAudioPlayer
+- (BOOL)play {
     duckMediaVolume();
     scheduleRestore();
-    %orig;
+    return %orig;
 }
 %end
 
