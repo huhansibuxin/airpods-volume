@@ -130,7 +130,7 @@ static void scheduleRestore(void) {
 %hookf(void, AudioServicesPlaySystemSound, SystemSoundID inSystemSoundID) {
     duckMediaVolume();
     scheduleRestore();
-    _AudioServicesPlaySystemSound(inSystemSoundID);
+    %orig(inSystemSoundID);
 }
 
 static void writeAirPodsState(BOOL connected) {
