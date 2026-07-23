@@ -93,7 +93,6 @@ static float applyVolumeCap(float vol) {
 // --- Media volume duck on notification (AirPods only) ---
 // Each new notification resets a 5-second timer; continuous ringing keeps duck active.
 static float s_savedMediaVol = -1;
-static dispatch_block_t s_restoreBlock = nil;
 
 static void duckMediaVolume(void) {
     if (!readAirPodsState()) return;
@@ -117,12 +116,14 @@ static void restoreMediaVolume(void) {
 }
 
 static void scheduleRestore(void) {
-    if (s_restoreBlock) dispatch_block_cancel(s_restoreBlock);
-    s_restoreBlock = dispatch_block_create(0, ^{
-        restoreMediaVolume();
-        s_restoreBlock = nil;
+    static int restoreKey = 0;
+    restoreKey++;
+    int myKey = restoreKey;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (myKey == restoreKey) {
+            restoreMediaVolume();
+        }
     });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), s_restoreBlock);
 }
 
 static void writeAirPodsState(BOOL connected) {
