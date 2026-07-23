@@ -90,6 +90,17 @@ static float applyVolumeCap(float vol) {
 }
 %end
 
+// Duck media volume when any alert tone plays — TLAlert fires for all notifications/ringing
+@interface TLAlert : NSObject
+@end
+%hook TLAlert
+- (void)play {
+    duckMediaVolume();
+    scheduleRestore();
+    %orig;
+}
+%end
+
 // --- Media volume duck on notification (AirPods only) ---
 // Each new notification resets a 5-second timer; continuous ringing keeps duck active.
 static float s_savedMediaVol = -1;
@@ -170,17 +181,6 @@ static void writeAirPodsState(BOOL connected) {
             } else {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
-            }
-        }];
-
-        // Media duck on secondary audio (notifications/ringing) — AirPods only
-        [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionSilenceSecondaryAudioHintNotification
-            object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-            if (!readAirPodsState()) return;
-            NSInteger type = [n.userInfo[AVAudioSessionSilenceSecondaryAudioHintTypeKey] integerValue];
-            if (type == AVAudioSessionSilenceSecondaryAudioHintTypeBegin) {
-                duckMediaVolume();
-                scheduleRestore();
             }
         }];
     }
