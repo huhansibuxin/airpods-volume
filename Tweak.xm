@@ -133,6 +133,12 @@ static void scheduleRestore(void) {
     %orig(inSystemSoundID);
 }
 
+%hookf(void, AudioServicesPlayAlertSound, SystemSoundID inSystemSoundID) {
+    duckMediaVolume();
+    scheduleRestore();
+    %orig(inSystemSoundID);
+}
+
 static void writeAirPodsState(BOOL connected) {
     int fd = open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
