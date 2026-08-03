@@ -1,20 +1,89 @@
+#import <substrate.h>
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
-#import <notify.h>
-#import <substrate.h>
 
-// Hook 2: AVSystemController - redirect route picking to AirPods + volume control
+
+@interface AVSystemController : NSObject
++ (id)sharedAVSystemController;
+- (BOOL)setVolumeTo:(float)v forCategory:(id)c;
+- (BOOL)changeVolumeBy:(float)v forCategory:(id)c;
+- (BOOL)getVolume:(float *)v forCategory:(id)c;
+- (void)overrideToPartnerRoute;
+- (void)setPickedRouteWithPassword:(id)route withPassword:(id)password;
+@end
+
+@interface MPAVRoutingController : NSObject
+- (void)fetchAvailableRoutesWithCompletionHandler:(void(^)(NSArray *))handler;
+- (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion;
+@end
+
+static void apv_log(NSString *fmt, ...) __attribute__((format(NSString, 1, 2)));
+
+static BOOL isNotificationCategory(id cat) {
+    NSString *s = [cat description];
+    return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
+}
+
+static BOOL sAirPodsCached = NO;
+
+static void updateAirPodsCache(void) {
+    sAirPodsCached = NO;
+    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
+        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"]) {
+            sAirPodsCached = YES;
+            break;
+        }
+    }
+}
+
+static BOOL isAirPodsConnected(void) {
+    return sAirPodsCached;
+}
+
+static BOOL isAirPodsCurrentRoute(void) {
+    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].currentRoute.outputs) {
+        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
+            return YES;
+    }
+    return NO;
+}
+
+static float applyVolumeCap(float vol) {
+    if (isAirPodsConnected())
+        return MIN(vol, 0.4f);
+    return 1.0f;
+}
+
 %hook AVSystemController
-// Minimal test: just pass-through
-- (void)setPickedRouteWithPassword:(id)route withPassword:(id)password { %orig; }
-- (BOOL)changeActiveCategoryVolumeBy:(float)delta forRoute:(id)route andDeviceIdentifier:(id)identifier { return %orig; }
-- (BOOL)changeVolumeForRouteBy:(float)delta forCategory:(id)category mode:(id)mode route:(id)route deviceIdentifier:(id)identifier andRouteSubtype:(id)subtype { return %orig; }
+- (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
+    if (isNotificationCategory(cat))
+        vol = applyVolumeCap(vol);
+    return %orig;
+}
+- (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
+    if (isNotificationCategory(cat)) {
+        float cur;
+        if ([self getVolume:&cur forCategory:cat])
+            return [self setVolumeTo:applyVolumeCap(cur + delta) forCategory:cat];
+    }
+    return %orig;
+}
+// Cap getters so HUD always reads capped value (no flicker)
+- (BOOL)getVolume:(float *)vol forCategory:(id)cat {
+    BOOL r = %orig;
+    if (r && isNotificationCategory(cat))
+        *vol = applyVolumeCap(*vol);
+    return r;
+}
+// Spy on hijack attempts
+- (BOOL)shouldClientWithAudioScore:(unsigned int)score hijackRoute:(id)route hijackDeniedReason:(id *)reason {
+    BOOL r = %orig;
+    apv_log(@"APV: HIJACK score=%u route=%@ deniedReason=%@ result=%@", score, route, reason ? *reason : nil, r ? @"ALLOW" : @"DENY");
+    return r;
+}
 %end
-
-// ============================================================
-// Constructor
-// ============================================================
 
 %ctor {
     if ([[[NSProcessInfo processInfo] processName] isEqualToString:@"SpringBoard"]) {
