@@ -201,64 +201,60 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
 // Constructor
 // ============================================================
 %ctor {
-    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
-    isSpringBoard = [bundleID isEqualToString:@"com.apple.springboard"];
-    isMediaserverd = [bundleID isEqualToString:@"com.apple.mediaserverd"];
+    isSpringBoard = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"];
+    isMediaserverd = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.mediaserverd"];
 
-    if (!isSpringBoard && !isMediaserverd) return;
+    if (isSpringBoard || isMediaserverd) {
+        notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
 
-    notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
+        if (isSpringBoard) {
+            updateAirPodsCache();
 
-    if (isSpringBoard) {
-        updateAirPodsCache();
+            [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
+                                                     selector:@selector(airpods_routeChangeForState:)
+                                                         name:AVAudioSessionRouteChangeNotification
+                                                       object:nil];
 
-        [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
-                                                 selector:@selector(airpods_routeChangeForState:)
-                                                     name:AVAudioSessionRouteChangeNotification
-                                                   object:nil];
-
-        NSLog(@"[AirPodsVolume] SpringBoard v1.0: volume control + state detection");
-    }
-
-    if (isMediaserverd) {
-        // Hook C-level AudioSessionSetProperty
-        AudioSessionSetProperty_t func = (AudioSessionSetProperty_t)dlsym(RTLD_DEFAULT, "AudioSessionSetProperty");
-        if (func) {
-            MSHookFunction(func, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
+            NSLog(@"[AirPodsVolume] SpringBoard v1.0: volume control + state detection");
         }
 
-        // Darwin notification dispatch: when state changes, try to force route
-        dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-        int token;
-        notify_register_dispatch(kDarwinNotifyName, &token, q, ^(int t) {
-            readAirPodsCache();
-            if (!sAirPodsConnected || sAirPodsCurrentRoute) return;
+        if (isMediaserverd) {
+            AudioSessionSetProperty_t func = (AudioSessionSetProperty_t)dlsym(RTLD_DEFAULT, "AudioSessionSetProperty");
+            if (func) {
+                MSHookFunction(func, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
+            }
 
-            // Throttle 3s
-            static CFAbsoluteTime lastForce = 0;
-            CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-            if (now - lastForce < 3.0) return;
-            lastForce = now;
-
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), q, ^{
+            dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+            int token;
+            notify_register_dispatch(kDarwinNotifyName, &token, q, ^(int t) {
                 readAirPodsCache();
                 if (!sAirPodsConnected || sAirPodsCurrentRoute) return;
 
-                AVSystemController *avs = [objc_getClass("AVSystemController") sharedAVSystemController];
-                id routes = [avs pickableRoutesForCategory:@"AVAudioSessionCategoryPlayback" andMode:@"AVAudioSessionModeDefault"];
-                if (![routes isKindOfClass:[NSArray class]]) return;
+                static CFAbsoluteTime lastForce = 0;
+                CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+                if (now - lastForce < 3.0) return;
+                lastForce = now;
 
-                for (id r in (NSArray *)routes) {
-                    NSString *type = [r valueForKey:@"routeType"] ?: [r valueForKey:@"type"];
-                    if (type && ([type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothA2DP"])) {
-                        [avs changeActiveCategoryVolumeBy:0 forRoute:r andDeviceIdentifier:nil];
-                        NSLog(@"[AirPodsVolume] media: Darwin notify triggered force-route to AirPods");
-                        break;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), q, ^{
+                    readAirPodsCache();
+                    if (!sAirPodsConnected || sAirPodsCurrentRoute) return;
+
+                    AVSystemController *avs = [objc_getClass("AVSystemController") sharedAVSystemController];
+                    id routes = [avs pickableRoutesForCategory:@"AVAudioSessionCategoryPlayback" andMode:@"AVAudioSessionModeDefault"];
+                    if (![routes isKindOfClass:[NSArray class]]) return;
+
+                    for (id r in (NSArray *)routes) {
+                        NSString *type = [r valueForKey:@"routeType"] ?: [r valueForKey:@"type"];
+                        if (type && ([type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothA2DP"])) {
+                            [avs changeActiveCategoryVolumeBy:0 forRoute:r andDeviceIdentifier:nil];
+                            NSLog(@"[AirPodsVolume] media: Darwin notify triggered force-route to AirPods");
+                            break;
+                        }
                     }
-                }
+                });
             });
-        });
 
-        NSLog(@"[AirPodsVolume] mediaserverd v1.0: route switching + volume control");
+            NSLog(@"[AirPodsVolume] mediaserverd v1.0: route switching + volume control");
+        }
     }
 }
