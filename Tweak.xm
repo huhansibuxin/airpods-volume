@@ -207,10 +207,15 @@ static BOOL isMediaserverd = NO;
     NSString *curPort = [[cur.outputs firstObject] portName] ?: @"?";
     NSString *prevPort = [[prev.outputs firstObject] portName] ?: @"?";
     apv_log(@"APV: SB routeChange reason=%ld prev=%@ -> cur=%@", (long)reason, prevPort, curPort);
-    updateAirPodsCache();
     BOOL isBT = NO;
     for (AVAudioSessionPortDescription *p in cur.outputs) {
         if (isBluetoothPort(p)) { isBT = YES; break; }
+    }
+    sAirPodsCached = isBT;
+    if (!sAirPodsCached) {
+        for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
+            if (isBluetoothPort(p)) { sAirPodsCached = YES; break; }
+        }
     }
     writeAirPodsCache(sAirPodsCached, sAirPodsCached && isBT);
     apv_log(@"APV: SB cache=%d connected=%d currentRoute=%d", sAirPodsCached, sAirPodsConnected, sAirPodsCurrentRoute);
@@ -316,7 +321,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.1.3 initialized");
+            apv_log(@"APV: SpringBoard v1.1.5 initialized");
         }
 
         if (isMediaserverd) {
@@ -344,7 +349,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.1.3 initialized");
+            apv_log(@"APV: mediaserverd v1.1.5 initialized");
         }
     }
 }
