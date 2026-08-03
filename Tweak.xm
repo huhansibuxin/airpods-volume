@@ -1,197 +1,278 @@
+#import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
-#import <AudioToolbox/AudioToolbox.h>
-#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <notify.h>
-#import <dlfcn.h>
+#import <substrate.h>
 
-// ============================================================================
-// AirPodsVolume - Prevent ear-blasting ringer/notification volume
-// when Bluetooth headphones (AirPods, etc.) are connected.
-//
-// iOS keeps ringer/alert volume separate from media volume. When you wear
-// AirPods and set media volume to a comfortable level, incoming calls/
-// notifications still play at max ringer volume because the ringer channel
-// is independent. This tweak clamps ringer volume when headphones are connected
-// and restores it when disconnected.
-// ============================================================================
+// ============================================================
+// Config
+// ============================================================
+static const float kVolumeCap = 0.0625;
+static const char *kDarwinNotifyName = "com.huhansibuxin.airpodsvolume.state";
 
-// Safe max volume for ringer/notifications when headphones are connected (0.0 ~ 1.0)
-static const float kSafeRingerVolume = 0.5;
+// ============================================================
+// Process detection
+// ============================================================
+static BOOL isSpringBoard = NO;
+static BOOL isMediaserverd = NO;
 
-// UserDefaults for persisting ringer state across resprings
-static NSUserDefaults *g_defaults = nil;
+// ============================================================
+// AirPods state cache
+// ============================================================
+static BOOL sAirPodsConnected = NO;
+static BOOL sAirPodsCurrentRoute = NO;
+static int _airpodsStateToken = -1;
 
-// Track current headphone connection state
-static BOOL g_headphonesConnected = NO;
+static void updateAirPodsCache(void) {
+    if (!isSpringBoard) return;
 
-// Saved ringer volume before clamping (restored on disconnect)
-static float g_savedRingerVolume = -1.0;
+    AVAudioSession *session = [AVAudioSession sharedInstance];
 
-// ============================================================================
-// Audio Route Detection
-// ============================================================================
-
-static BOOL isHeadphoneRouteActive(void) {
-    AVAudioSessionRouteDescription *route = [[AVAudioSession sharedInstance] currentRoute];
-    for (AVAudioSessionPortDescription *output in route.outputs) {
-        NSString *portType = output.portType;
-        if ([portType isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
-            [portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
-            [portType isEqualToString:AVAudioSessionPortBluetoothLE] ||
-            [portType isEqualToString:AVAudioSessionPortHeadphones] ||
-            [portType isEqualToString:AVAudioSessionPortUSBAudio]) {
-            return YES;
+    BOOL found = NO;
+    for (AVAudioSessionPortDescription *input in session.availableInputs) {
+        if ([input.portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+            [input.portType isEqualToString:AVAudioSessionPortBluetoothA2DP]) {
+            found = YES;
+            break;
         }
     }
-    return NO;
+
+    BOOL isCurrent = NO;
+    for (AVAudioSessionPortDescription *output in session.currentRoute.outputs) {
+        if ([output.portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+            [output.portType isEqualToString:AVAudioSessionPortBluetoothA2DP]) {
+            isCurrent = YES;
+            break;
+        }
+    }
+
+    sAirPodsConnected = found;
+    sAirPodsCurrentRoute = isCurrent;
+
+    uint64_t state = (found ? 1 : 0) | (isCurrent ? 2 : 0);
+    notify_set_state(_airpodsStateToken, state);
+    notify_post(kDarwinNotifyName);
+
+    NSLog(@"[AirPodsVolume] State: connected=%d currentRoute=%d", found, isCurrent);
 }
 
-// ============================================================================
-// AVSystemController — private class in Celestial.framework
-// Controls system-wide volume (ringer, media, etc.)
-// ============================================================================
+static void readAirPodsCache(void) {
+    uint64_t state = 0;
+    notify_get_state(_airpodsStateToken, &state);
+    sAirPodsConnected = (state & 1) != 0;
+    sAirPodsCurrentRoute = (state & 2) != 0;
+}
 
+// ============================================================
+// Forward declarations
+// ============================================================
 @interface AVSystemController : NSObject
-+ (instancetype)sharedAVSystemController;
-- (BOOL)getVolume:(float *)outVolume forCategory:(NSString *)category;
-- (BOOL)setVolumeTo:(float)volume forCategory:(NSString *)category;
++ (id)sharedAVSystemController;
+- (BOOL)changeActiveCategoryVolumeBy:(float)delta forRoute:(id)route andDeviceIdentifier:(id)identifier;
+- (BOOL)changeVolumeForRouteBy:(float)delta forCategory:(id)category mode:(id)mode route:(id)route deviceIdentifier:(id)identifier andRouteSubtype:(id)subtype;
+- (id)pickableRoutesForCategory:(id)category andMode:(id)mode;
 @end
 
-static NSString * const kRingerCategory = @"Ringtone";
-static NSString * const kNotificationCategory = @"Alert";
+// ============================================================
+// C API hook: AudioSessionSetProperty
+// ============================================================
+typedef UInt32 AudioSessionPropertyID;
+static const AudioSessionPropertyID kPropertyOverrideAudioRoute = 'ovrd';
 
-static void clampRingerVolume(void) {
-    AVSystemController *avs = [objc_getClass("AVSystemController") sharedAVSystemController];
-    if (!avs) return;
+typedef OSStatus (*AudioSessionSetProperty_t)(AudioSessionPropertyID inID,
+    UInt32 inDataSize, const void *inData);
+static AudioSessionSetProperty_t original_AudioSessionSetProperty = NULL;
 
-    float currentVolume = 0;
-    [avs getVolume:&currentVolume forCategory:kRingerCategory];
-
-    // Save current volume if not already clamped
-    if (g_savedRingerVolume < 0) {
-        g_savedRingerVolume = currentVolume;
-        [g_defaults setFloat:g_savedRingerVolume forKey:@"savedRingerVolume"];
+static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
+    UInt32 inDataSize, const void *inData) {
+    if (isMediaserverd && inID == kPropertyOverrideAudioRoute && inDataSize == sizeof(UInt32)) {
+        UInt32 override = *(const UInt32 *)inData;
+        if (override == 'spkr') {  // kAudioSessionOverrideAudioRoute_Speaker
+            readAirPodsCache();
+            if (sAirPodsConnected) {
+                NSLog(@"[AirPodsVolume] Blocked AudioSessionSetProperty override to speaker");
+                return 0;
+            }
+        }
     }
+    return original_AudioSessionSetProperty(inID, inDataSize, inData);
+}
 
-    // Clamp to safe level if too loud
-    if (currentVolume > kSafeRingerVolume) {
-        [avs setVolumeTo:kSafeRingerVolume forCategory:kRingerCategory];
-        [avs setVolumeTo:kSafeRingerVolume forCategory:kNotificationCategory];
-        NSLog(@"[AirPodsVolume] Clamped ringer from %.2f to %.2f", currentVolume, kSafeRingerVolume);
-    } else {
-        // Volume already low enough, save as-is
-        g_savedRingerVolume = currentVolume;
-        [g_defaults setFloat:g_savedRingerVolume forKey:@"savedRingerVolume"];
+// ============================================================
+// mediaserverd: Route switching group
+// ============================================================
+%group MediaServerd
+
+// Hook 1: AVAudioSessionRouteDescription - mark AirPods routes as active
+%hook AVAudioSessionRouteDescription
+- (id)initWithRouteDictionary:(NSDictionary *)dict {
+    if (!isMediaserverd) return %orig;
+
+    readAirPodsCache();
+    if (!sAirPodsConnected) return %orig;
+
+    NSMutableDictionary *mDict = [dict mutableCopy];
+    for (NSString *key in @[@"Inputs", @"Outputs"]) {
+        NSArray *ports = mDict[key];
+        if (!ports) continue;
+        NSMutableArray *mPorts = [ports mutableCopy];
+        for (NSUInteger i = 0; i < mPorts.count; i++) {
+            NSMutableDictionary *port = [mPorts[i] mutableCopy];
+            NSString *type = port[@"RouteType"] ?: port[@"routeType"];
+            if ([type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothA2DP"]) {
+                port[@"Active"] = @YES;
+            }
+            mPorts[i] = port;
+        }
+        mDict[key] = mPorts;
     }
+    return %orig(mDict);
 }
-
-static void restoreRingerVolume(void) {
-    if (g_savedRingerVolume < 0) return;
-
-    AVSystemController *avs = [objc_getClass("AVSystemController") sharedAVSystemController];
-    if (!avs) return;
-
-    [avs setVolumeTo:g_savedRingerVolume forCategory:kRingerCategory];
-    [avs setVolumeTo:g_savedRingerVolume forCategory:kNotificationCategory];
-    NSLog(@"[AirPodsVolume] Restored ringer to %.2f", g_savedRingerVolume);
-
-    g_savedRingerVolume = -1.0;
-    [g_defaults removeObjectForKey:@"savedRingerVolume"];
-}
-
-// ============================================================================
-// Hook: AVAudioSession — detect route changes
-// ============================================================================
-
-%hook AVAudioSession
-
-- (BOOL)setActive:(BOOL)active withOptions:(AVAudioSessionSetActiveOptions)options error:(NSError **)outError {
-    BOOL ret = %orig;
-    return ret;
-}
-
 %end
 
-// ============================================================================
-// Hook: AudioServicesPlaySystemSound — intercept notification/ring sounds
-// ============================================================================
+// Hook 2: AVSystemController - redirect route picking to AirPods
+%hook AVSystemController
+- (void)setPickedRouteWithPassword:(id)route withPassword:(id)password {
+    if (!isMediaserverd) { %orig; return; }
 
-static void (*orig_AudioServicesPlaySystemSound)(SystemSoundID);
-static void hook_AudioServicesPlaySystemSound(SystemSoundID inSystemSoundID) {
-    if (g_headphonesConnected) {
-        // Before playing the system sound, ensure ringer volume is clamped.
-        // This catches the case where route changed but ringer wasn't yet clamped
-        // (e.g., right after connection before the notification fires).
-        clampRingerVolume();
+    readAirPodsCache();
+    if (!sAirPodsConnected || sAirPodsCurrentRoute) { %orig; return; }
+
+    // AirPods connected but not current → try to redirect to AirPods route
+    id routes = [self pickableRoutesForCategory:@"AVAudioSessionCategoryPlayback" andMode:@"AVAudioSessionModeDefault"];
+    if (![routes isKindOfClass:[NSArray class]]) { %orig; return; }
+
+    for (id r in (NSArray *)routes) {
+        NSString *type = [r valueForKey:@"routeType"] ?: [r valueForKey:@"type"];
+        if (type && ([type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothA2DP"])) {
+            // Redirect: pick AirPods route instead of whatever was requested
+            %orig(r, password);
+            NSLog(@"[AirPodsVolume] media: redirected setPickedRoute to AirPods");
+            return;
+        }
     }
-    orig_AudioServicesPlaySystemSound(inSystemSoundID);
+    %orig;
+}
+%end
+
+%end // MediaServerd
+
+// ============================================================
+// SpringBoard: Volume control only
+// ============================================================
+%group SpringBoard
+
+%hook AVSystemController
+- (BOOL)changeActiveCategoryVolumeBy:(float)delta forRoute:(id)route andDeviceIdentifier:(id)identifier {
+    if (sAirPodsConnected && delta > 0) {
+        static float sApproxVolume = 0.1;
+        float maxDelta = kVolumeCap - sApproxVolume;
+        if (maxDelta <= 0) {
+            return YES;
+        }
+        if (maxDelta < delta) delta = maxDelta;
+        BOOL result = %orig(delta, route, identifier);
+        if (result) {
+            sApproxVolume += delta;
+            if (sApproxVolume > kVolumeCap) sApproxVolume = kVolumeCap;
+        }
+        return result;
+    }
+    return %orig;
 }
 
-// ============================================================================
-// Core: Route change handler
-// ============================================================================
-
-static void handleRouteChange(NSNotification *note) {
-    BOOL nowConnected = isHeadphoneRouteActive();
-
-    if (nowConnected && !g_headphonesConnected) {
-        // Headphones just connected
-        NSLog(@"[AirPodsVolume] Headphones connected — clamping ringer");
-        g_headphonesConnected = YES;
-        g_savedRingerVolume = [g_defaults floatForKey:@"savedRingerVolume"];
-        if (g_savedRingerVolume == 0) g_savedRingerVolume = -1.0;
-        clampRingerVolume();
-    } else if (!nowConnected && g_headphonesConnected) {
-        // Headphones just disconnected
-        NSLog(@"[AirPodsVolume] Headphones disconnected — restoring ringer");
-        g_headphonesConnected = NO;
-        restoreRingerVolume();
+- (BOOL)changeVolumeForRouteBy:(float)delta forCategory:(id)category mode:(id)mode route:(id)route deviceIdentifier:(id)identifier andRouteSubtype:(id)subtype {
+    if (sAirPodsConnected && delta > 0) {
+        static float sApproxVolume2 = 0.1;
+        float maxDelta = kVolumeCap - sApproxVolume2;
+        if (maxDelta <= 0) return YES;
+        if (maxDelta < delta) delta = maxDelta;
+        BOOL result = %orig(delta, category, mode, route, identifier, subtype);
+        if (result) {
+            sApproxVolume2 += delta;
+            if (sApproxVolume2 > kVolumeCap) sApproxVolume2 = kVolumeCap;
+        }
+        return result;
     }
+    return %orig;
 }
+%end
 
-// ============================================================================
+// SpringBoard: route change for state tracking only
+%hook AVAudioSession
+%new
+- (void)airpods_routeChangeForState:(NSNotification *)notification {
+    updateAirPodsCache();
+}
+%end
+
+%end // SpringBoard
+
+// ============================================================
 // Constructor
-// ============================================================================
-
+// ============================================================
 %ctor {
-    // Only inject into SpringBoard — ringer volume is a system-wide setting
     NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
-    if (![bundleID isEqualToString:@"com.apple.springboard"]) {
-        return;
+    isSpringBoard = [bundleID isEqualToString:@"com.apple.springboard"];
+    isMediaserverd = [bundleID isEqualToString:@"com.apple.mediaserverd"];
+
+    if (!isSpringBoard && !isMediaserverd) return;
+
+    notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
+
+    if (isSpringBoard) {
+        updateAirPodsCache();
+
+        [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
+                                                 selector:@selector(airpods_routeChangeForState:)
+                                                     name:AVAudioSessionRouteChangeNotification
+                                                   object:nil];
+
+        %init(SpringBoard);
+        NSLog(@"[AirPodsVolume] SpringBoard v0.0.1-4: volume control + state detection");
     }
 
-    NSLog(@"[AirPodsVolume] Initializing...");
+    if (isMediaserverd) {
+        // Hook C-level AudioSessionSetProperty
+        AudioSessionSetProperty_t func = (AudioSessionSetProperty_t)dlsym(RTLD_DEFAULT, "AudioSessionSetProperty");
+        if (func) {
+            MSHookFunction(func, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
+        }
 
-    g_defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.apple.UIKit"];
+        // Darwin notification dispatch: when state changes, try to force route
+        dispatch_queue_t q = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+        int token;
+        notify_register_dispatch(kDarwinNotifyName, &token, q, ^(int t) {
+            readAirPodsCache();
+            if (!sAirPodsConnected || sAirPodsCurrentRoute) return;
 
-    // Init state
-    g_headphonesConnected = isHeadphoneRouteActive();
-    g_savedRingerVolume = [g_defaults floatForKey:@"savedRingerVolume"];
-    if (g_savedRingerVolume == 0) g_savedRingerVolume = -1.0;
+            // Throttle 3s
+            static CFAbsoluteTime lastForce = 0;
+            CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+            if (now - lastForce < 3.0) return;
+            lastForce = now;
 
-    if (g_headphonesConnected) {
-        clampRingerVolume();
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), q, ^{
+                readAirPodsCache();
+                if (!sAirPodsConnected || sAirPodsCurrentRoute) return;
+
+                AVSystemController *avs = [objc_getClass("AVSystemController") sharedAVSystemController];
+                id routes = [avs pickableRoutesForCategory:@"AVAudioSessionCategoryPlayback" andMode:@"AVAudioSessionModeDefault"];
+                if (![routes isKindOfClass:[NSArray class]]) return;
+
+                for (id r in (NSArray *)routes) {
+                    NSString *type = [r valueForKey:@"routeType"] ?: [r valueForKey:@"type"];
+                    if (type && ([type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothA2DP"])) {
+                        [avs changeActiveCategoryVolumeBy:0 forRoute:r andDeviceIdentifier:nil];
+                        NSLog(@"[AirPodsVolume] media: Darwin notify triggered force-route to AirPods");
+                        break;
+                    }
+                }
+            });
+        });
+
+        %init(MediaServerd);
+        %init(SpringBoard);  // volume capping in mediaserverd (reads cached state)
+        NSLog(@"[AirPodsVolume] mediaserverd v0.0.1-4: route switching + volume control");
     }
-
-    // Hook AudioServicesPlaySystemSound via fishhook / MSHookFunction
-    void *AudioToolbox = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_LAZY);
-    if (AudioToolbox) {
-        MSHookFunction(dlsym(AudioToolbox, "AudioServicesPlaySystemSound"),
-                       (void *)hook_AudioServicesPlaySystemSound,
-                       (void **)&orig_AudioServicesPlaySystemSound);
-        dlclose(AudioToolbox);
-    }
-
-    %init;
-
-    // Listen for audio route changes
-    [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
-                                                       object:nil
-                                                        queue:[NSOperationQueue mainQueue]
-                                                   usingBlock:^(NSNotification *note) {
-        handleRouteChange(note);
-    }];
-
-    NSLog(@"[AirPodsVolume] Ready. Headphones: %@", g_headphonesConnected ? @"YES" : @"NO");
 }
