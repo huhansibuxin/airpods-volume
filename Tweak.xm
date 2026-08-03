@@ -1,19 +1,6 @@
 #import <substrate.h>
-
-typedef int (*AudioSessionSetProperty_t)(unsigned int, unsigned int, const void *);
-static int (*original_AudioSessionSetProperty)(unsigned int, unsigned int, const void *) = NULL;
-
-static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inDataSize, const void *inData) {
-    readAirPodsCache();
-    if (sAirPodsConnected && inID == 'ovrt' && inDataSize >= sizeof(unsigned int)) {
-        unsigned int route = *(unsigned int *)inData;
-        if (route == 'spkr') {
-            return original_AudioSessionSetProperty(inID, inDataSize, inData);
-        }
-    }
-    return original_AudioSessionSetProperty(inID, inDataSize, inData);
-}
-
+#import <notify.h>
+#import <dlfcn.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -72,6 +59,8 @@ static BOOL sAirPodsConnected = NO;
 static BOOL sAirPodsCurrentRoute = NO;
 #define kDarwinNotifyName "com.apv.airpods.state"
 
+static void readAirPodsCache(void);
+
 static void readAirPodsCache(void) {
     uint64_t state = 0;
     if (notify_get_state(_airpodsStateToken, &state) == NOTIFY_STATUS_OK) {
@@ -85,6 +74,20 @@ static void writeAirPodsCache(BOOL connected, BOOL current) {
     notify_set_state(_airpodsStateToken, state);
     sAirPodsConnected = connected;
     sAirPodsCurrentRoute = current;
+}
+
+typedef int (*AudioSessionSetProperty_t)(unsigned int, unsigned int, const void *);
+static int (*original_AudioSessionSetProperty)(unsigned int, unsigned int, const void *) = NULL;
+
+static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inDataSize, const void *inData) {
+    readAirPodsCache();
+    if (sAirPodsConnected && inID == 'ovrt' && inDataSize >= sizeof(unsigned int)) {
+        unsigned int route = *(unsigned int *)inData;
+        if (route == 'spkr') {
+            return original_AudioSessionSetProperty(inID, inDataSize, inData);
+        }
+    }
+    return original_AudioSessionSetProperty(inID, inDataSize, inData);
 }
 
 
