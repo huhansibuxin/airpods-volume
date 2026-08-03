@@ -99,9 +99,8 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
 }
 
 // ============================================================
-// mediaserverd: Route switching group
+// mediaserverd: Route switching hooks
 // ============================================================
-%group MediaServerd
 
 // Hook 1: AVAudioSessionRouteDescription - mark AirPods routes as active
 %hook AVAudioSessionRouteDescription
@@ -130,7 +129,7 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
 }
 %end
 
-// Hook 2: AVSystemController - redirect route picking to AirPods
+// Hook 2: AVSystemController - redirect route picking to AirPods + volume control
 %hook AVSystemController
 - (void)setPickedRouteWithPassword:(id)route withPassword:(id)password {
     if (!isMediaserverd) { %orig; return; }
@@ -153,16 +152,8 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
     }
     %orig;
 }
-%end
 
-%end // MediaServerd
-
-// ============================================================
-// SpringBoard: Volume control only
-// ============================================================
-%group SpringBoard
-
-%hook AVSystemController
+// Volume control (both processes, reads cached state)
 - (BOOL)changeActiveCategoryVolumeBy:(float)delta forRoute:(id)route andDeviceIdentifier:(id)identifier {
     if (sAirPodsConnected && delta > 0) {
         static float sApproxVolume = 0.1;
@@ -206,8 +197,6 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
 }
 %end
 
-%end // SpringBoard
-
 // ============================================================
 // Constructor
 // ============================================================
@@ -219,8 +208,6 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
     if (!isSpringBoard && !isMediaserverd) return;
 
     notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
-
-    %init(SpringBoard);  // volume control & state detection (both processes)
 
     if (isSpringBoard) {
         updateAirPodsCache();
@@ -272,7 +259,6 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
             });
         });
 
-        %init(MediaServerd);
         NSLog(@"[AirPodsVolume] mediaserverd v1.0: route switching + volume control");
     }
 }
