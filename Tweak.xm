@@ -13,6 +13,7 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
     }
     return original_AudioSessionSetProperty(inID, inDataSize, inData);
 }
+
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -65,6 +66,27 @@ static float applyVolumeCap(float vol) {
 
 static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
+
+static int _airpodsStateToken = -1;
+static BOOL sAirPodsConnected = NO;
+static BOOL sAirPodsCurrentRoute = NO;
+#define kDarwinNotifyName "com.apv.airpods.state"
+
+static void readAirPodsCache(void) {
+    uint64_t state = 0;
+    if (notify_get_state(_airpodsStateToken, &state) == NOTIFY_STATUS_OK) {
+        sAirPodsConnected = (state & 1);
+        sAirPodsCurrentRoute = (state & 2);
+    }
+}
+
+static void writeAirPodsCache(BOOL connected, BOOL current) {
+    uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
+    notify_set_state(_airpodsStateToken, state);
+    sAirPodsConnected = connected;
+    sAirPodsCurrentRoute = current;
+}
+
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
@@ -229,8 +251,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                     if (sAirPodsConnected) {
                         static dispatch_once_t onceToken;
                         dispatch_once(&onceToken, ^{
-                            NSError *err = nil;
-                            [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&err];
+                            [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
                         });
                     }
                 });
