@@ -32,10 +32,20 @@ static BOOL sAirPodsCached = NO;
 
 static void updateAirPodsCache(void) {
     sAirPodsCached = NO;
-    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
-        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"]) {
+    AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+    for (AVAudioSessionPortDescription *p in route.outputs) {
+        if ([p.portName containsString:@"AirPods"]) {
             sAirPodsCached = YES;
             break;
+        }
+    }
+    // fallback: check inputs (for earbuds with mic)
+    if (!sAirPodsCached) {
+        for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
+            if ([p.portName containsString:@"AirPods"]) {
+                sAirPodsCached = YES;
+                break;
+            }
         }
     }
 }
