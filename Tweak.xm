@@ -57,6 +57,7 @@ static float applyVolumeCap(float vol) {
 }
 
 
+static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
 
 %hook AVSystemController
