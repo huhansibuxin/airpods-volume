@@ -1,6 +1,5 @@
 #import <substrate.h>
 #import <notify.h>
-#import <dlfcn.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -40,26 +39,14 @@ static void updateAirPodsCache(void) {
     }
 }
 
-static BOOL isAirPodsConnected(void) {
-    return sAirPodsCached;
-}
 
-static float applyVolumeCap(float vol) {
-    if (isAirPodsConnected())
-        return MIN(vol, 0.4f);
-    return 1.0f;
-}
-
-
-static BOOL isSpringBoard = NO;
-static BOOL isMediaserverd = NO;
-
-static int _airpodsStateToken = -1;
-static BOOL sAirPodsConnected = NO;
-static BOOL sAirPodsCurrentRoute = NO;
 #define kDarwinNotifyName "com.apv.airpods.state"
+static int _airpodsStateToken = -1;
 
 static void readAirPodsCache(void);
+
+static BOOL sAirPodsConnected = NO;
+static BOOL sAirPodsCurrentRoute = NO;
 
 static void readAirPodsCache(void) {
     uint64_t state = 0;
@@ -69,7 +56,7 @@ static void readAirPodsCache(void) {
     }
 }
 
-static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current) {
+static void writeAirPodsCache(BOOL connected, BOOL current) {
     uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
     notify_set_state(_airpodsStateToken, state);
     sAirPodsConnected = connected;
@@ -90,6 +77,19 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
     return original_AudioSessionSetProperty(inID, inDataSize, inData);
 }
 
+static BOOL isAirPodsConnected(void) {
+    return sAirPodsCached;
+}
+
+static float applyVolumeCap(float vol) {
+    if (isAirPodsConnected())
+        return MIN(vol, 0.4f);
+    return 1.0f;
+}
+
+
+static BOOL isSpringBoard = NO;
+static BOOL isMediaserverd = NO;
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
@@ -239,11 +239,6 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
         }
 
         if (isMediaserverd) {
-            extern void *dlopen(const char *path, int mode);
-            extern void *dlsym(void *handle, const char *symbol);
-            extern int dlclose(void *handle);
-            extern const int RTLD_NOW;
-
             void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
             if (aHandle) {
                 void *sym = dlsym(aHandle, "AudioSessionSetProperty");
@@ -253,15 +248,11 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 dlclose(aHandle);
             }
 
-            int token = -1;
-            notify_register_dispatch(kDarwinNotifyName, &token,
-                dispatch_get_main_queue(), ^(int t) {
+            notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
+                dispatch_get_main_queue(), ^(int token) {
                     readAirPodsCache();
                     if (sAirPodsConnected) {
-                        static dispatch_once_t onceToken;
-                        dispatch_once(&onceToken, ^{
-                            [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
-                        });
+                        [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
                     }
                 });
 
