@@ -1,5 +1,6 @@
 #import <substrate.h>
 #import <notify.h>
+#import <dlfcn.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -242,7 +243,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
             void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
             if (aHandle) {
                 void *sym = dlsym(aHandle, "AudioSessionSetProperty");
-                if (sym) {
+                if (sym && original_AudioSessionSetProperty == NULL) {
                     MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
                 }
                 dlclose(aHandle);
