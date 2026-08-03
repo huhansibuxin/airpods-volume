@@ -71,8 +71,15 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
     readAirPodsCache();
     if (sAirPodsConnected && inID == 'ovrt' && inDataSize >= sizeof(unsigned int)) {
         unsigned int route = *(unsigned int *)inData;
+        char routeStr[5] = {0};
+        memcpy(routeStr, &route, 4);
+        apv_log(@"APV: AudioSessionSetProperty ovrt=%.4s connected=%d currentRoute=%d", routeStr, sAirPodsConnected, sAirPodsCurrentRoute);
         if (route == 'spkr') {
-            return original_AudioSessionSetProperty(inID, inDataSize, inData);
+            apv_log(@"APV: blocked speaker route, forcing AirPods");
+            dispatch_async(dispatch_get_main_queue(), ^{
+                forceRouteToAirPods(99);
+            });
+            return 0; // block speaker route
         }
     }
     return original_AudioSessionSetProperty(inID, inDataSize, inData);
@@ -171,7 +178,16 @@ static BOOL isMediaserverd = NO;
 %hook AVAudioSession
 %new
 - (void)airpods_routeChangeForState:(NSNotification *)notification {
+    NSDictionary *info = notification.userInfo;
+    NSInteger reason = [info[AVAudioSessionRouteChangeReasonKey] integerValue];
+    AVAudioSessionRouteDescription *prev = info[AVAudioSessionRouteChangePreviousRouteKey];
+    AVAudioSessionRouteDescription *cur = [AVAudioSession sharedInstance].currentRoute;
+    NSString *curPort = [[cur.outputs firstObject] portName] ?: @"?";
+    NSString *prevPort = [[prev.outputs firstObject] portName] ?: @"?";
+    apv_log(@"APV: SB routeChange reason=%ld prev=%@ -> cur=%@", (long)reason, prevPort, curPort);
     updateAirPodsCache();
+    writeAirPodsCache(sAirPodsCached, sAirPodsCached && [curPort containsString:@"AirPods"]);
+    apv_log(@"APV: SB cache=%d connected=%d currentRoute=%d", sAirPodsCached, sAirPodsConnected, sAirPodsCurrentRoute);
 }
 %end
 
@@ -252,7 +268,9 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
             notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
                 dispatch_get_main_queue(), ^(int token) {
                     readAirPodsCache();
+                    apv_log(@"APV: media notify connected=%d currentRoute=%d", sAirPodsConnected, sAirPodsCurrentRoute);
                     if (sAirPodsConnected) {
+                        apv_log(@"APV: media notify setActive:YES");
                         [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
                     }
                 });
