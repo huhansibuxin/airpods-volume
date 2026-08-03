@@ -66,6 +66,7 @@ static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current
 
 typedef int (*AudioSessionSetProperty_t)(unsigned int, unsigned int, const void *);
 static int (*original_AudioSessionSetProperty)(unsigned int, unsigned int, const void *) = NULL;
+static __attribute__((used)) void forceRouteToAirPods(int reason);
 
 static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inDataSize, const void *inData) {
     readAirPodsCache();
