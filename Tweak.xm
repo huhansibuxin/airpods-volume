@@ -236,7 +236,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            NSLog(@"[AirPodsVolume] SpringBoard v1.0: volume control + state detection");
+            apv_log(@"APV: SpringBoard v1.0 initialized");
         }
 
         if (isMediaserverd) {
@@ -257,7 +257,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                     }
                 });
 
-            NSLog(@"[AirPodsVolume] mediaserverd v1.0: route hijack");
+            apv_log(@"APV: mediaserverd v1.0 initialized");
         }
     }
 }
