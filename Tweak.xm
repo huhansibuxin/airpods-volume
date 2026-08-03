@@ -69,7 +69,7 @@ static void readAirPodsCache(void) {
     }
 }
 
-static void writeAirPodsCache(BOOL connected, BOOL current) {
+static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current) {
     uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
     notify_set_state(_airpodsStateToken, state);
     sAirPodsConnected = connected;
