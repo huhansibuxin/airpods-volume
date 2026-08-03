@@ -216,8 +216,10 @@ static BOOL isMediaserverd = NO;
     // If we were on Bluetooth and now switched away, force route back
     BOOL wasBT = NO;
     for (AVAudioSessionPortDescription *p in prev.outputs) {
+        apv_log(@"APV: SB prev portType=%@ portName=%@", p.portType, p.portName);
         if (isBluetoothPort(p)) { wasBT = YES; break; }
     }
+    apv_log(@"APV: SB force decision: wasBT=%d isBT=%d cached=%d reason=%ld", wasBT, isBT, sAirPodsCached, (long)reason);
     if (wasBT && !isBT && sAirPodsCached) {
         apv_log(@"APV: SB force route: BT->nonBT (reason=%ld)", (long)reason);
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
