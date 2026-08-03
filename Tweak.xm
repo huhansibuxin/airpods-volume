@@ -138,14 +138,6 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
 - (BOOL)changeVolumeForRouteBy:(float)delta forCategory:(id)category mode:(id)mode route:(id)route deviceIdentifier:(id)identifier andRouteSubtype:(id)subtype { return %orig; }
 %end
 
-// SpringBoard: route change for state tracking only
-%hook AVAudioSession
-%new
-- (void)airpods_routeChangeForState:(NSNotification *)notification {
-    updateAirPodsCache();
-}
-%end
-
 // ============================================================
 // Constructor
 // ============================================================
