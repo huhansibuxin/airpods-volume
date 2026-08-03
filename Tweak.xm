@@ -1,4 +1,18 @@
 #import <substrate.h>
+
+typedef int (*AudioSessionSetProperty_t)(unsigned int, unsigned int, const void *);
+static int (*original_AudioSessionSetProperty)(unsigned int, unsigned int, const void *) = NULL;
+
+static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inDataSize, const void *inData) {
+    readAirPodsCache();
+    if (sAirPodsConnected && inID == 'ovrt' && inDataSize >= sizeof(unsigned int)) {
+        unsigned int route = *(unsigned int *)inData;
+        if (route == 'spkr') {
+            return original_AudioSessionSetProperty(inID, inDataSize, inData);
+        }
+    }
+    return original_AudioSessionSetProperty(inID, inDataSize, inData);
+}
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -197,6 +211,31 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                        object:nil];
 
             NSLog(@"[AirPodsVolume] SpringBoard v1.0: volume control + state detection");
+        }
+
+        if (isMediaserverd) {
+            void *handle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
+            if (handle) {
+                void *sym = dlsym(handle, "AudioSessionSetProperty");
+                if (sym) {
+                    MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
+                }
+                dlclose(handle);
+            }
+
+            notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
+                dispatch_get_main_queue(), ^(int token) {
+                    readAirPodsCache();
+                    if (sAirPodsConnected) {
+                        static dispatch_once_t onceToken;
+                        dispatch_once(&onceToken, ^{
+                            NSError *err = nil;
+                            [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&err];
+                        });
+                    }
+                });
+
+            NSLog(@"[AirPodsVolume] mediaserverd v1.0: route hijack");
         }
     }
 }
