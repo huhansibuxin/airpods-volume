@@ -301,6 +301,16 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
     }];
 }
 
+// ============================================================
+// Block AirPods popup when opening case
+// ============================================================
+%hook BTAirPodsBatteryViewController
+- (void)viewWillAppear:(BOOL)animated {
+    apv_log(@"APV: AirPods popup blocked");
+    [self dismissViewControllerAnimated:NO completion:nil];
+}
+%end
+
 %ctor {
     isSpringBoard = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"];
     isMediaserverd = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.mediaserverd"];
@@ -316,7 +326,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.1.6 initialized");
+            apv_log(@"APV: SpringBoard v1.2.0 initialized");
         }
 
         if (isMediaserverd) {
@@ -344,7 +354,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.1.6 initialized");
+            apv_log(@"APV: mediaserverd v1.2.0 initialized");
         }
     }
 }
