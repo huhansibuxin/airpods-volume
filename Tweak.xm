@@ -304,6 +304,8 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // ============================================================
 // Block AirPods popup when opening case
 // ============================================================
+@interface BTAirPodsBatteryViewController : UIViewController
+@end
 %hook BTAirPodsBatteryViewController
 - (void)viewWillAppear:(BOOL)animated {
     apv_log(@"APV: AirPods popup blocked");
