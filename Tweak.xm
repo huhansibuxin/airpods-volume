@@ -304,12 +304,27 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // ============================================================
 // Block AirPods popup when opening case
 // ============================================================
-@interface BTAirPodsBatteryViewController : UIViewController
-@end
-%hook BTAirPodsBatteryViewController
-- (void)viewWillAppear:(BOOL)animated {
-    apv_log(@"APV: AirPods popup blocked");
-    [self dismissViewControllerAnimated:NO completion:nil];
+
+// Swizzle UIViewController present to catch AirPods popups
+static void (*orig_presentViewController)(id, SEL, id, BOOL, id);
+static void hooked_presentViewController(id self, SEL _cmd, UIViewController *vc, BOOL animated, id completion) {
+    NSString *clsName = NSStringFromClass([vc class]);
+    if ([clsName containsString:@"AirPod"] || [clsName containsString:@"Battery"]) {
+        apv_log(@"APV: AirPods popup blocked (present: %@)", clsName);
+        return;
+    }
+    orig_presentViewController(self, _cmd, vc, animated, completion);
+}
+
+// Hook UIWindow to catch AirPods-related windows
+%hook UIWindow
+- (void)makeKeyAndVisible {
+    NSString *clsName = NSStringFromClass([self class]);
+    if ([clsName containsString:@"AirPod"] || [clsName containsString:@"Battery"]) {
+        apv_log(@"APV: AirPods window blocked (window: %@)", clsName);
+        return;
+    }
+    %orig;
 }
 %end
 
@@ -328,7 +343,14 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.0 initialized");
+            // Swizzle presentViewController to block AirPods popups
+            MSHookMessageEx([UIViewController class],
+                @selector(presentViewController:animated:completion:),
+                (IMP)hooked_presentViewController,
+                (IMP *)&orig_presentViewController);
+            apv_log(@"APV: presentViewController swizzled");
+
+            apv_log(@"APV: SpringBoard v1.2.1 initialized");
         }
 
         if (isMediaserverd) {
@@ -356,7 +378,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.0 initialized");
+            apv_log(@"APV: mediaserverd v1.2.1 initialized");
         }
     }
 }
