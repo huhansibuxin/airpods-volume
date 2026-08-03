@@ -305,26 +305,23 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // Block AirPods popup when opening case
 // ============================================================
 
-// Swizzle UIViewController present to catch AirPods popups
-static void (*orig_presentViewController)(id, SEL, id, BOOL, id);
-static void hooked_presentViewController(id self, SEL _cmd, UIViewController *vc, BOOL animated, id completion) {
-    NSString *clsName = NSStringFromClass([vc class]);
-    if ([clsName containsString:@"AirPod"] || [clsName containsString:@"Battery"]) {
-        apv_log(@"APV: AirPods popup blocked (present: %@)", clsName);
-        return;
-    }
-    orig_presentViewController(self, _cmd, vc, animated, completion);
+// Method 1: block the trigger — BluetoothManager._showAirPodsAlertForDevice:
+@interface BluetoothManager : NSObject
+@end
+%hook BluetoothManager
+- (void)_showAirPodsAlertForDevice:(id)device {
+    apv_log(@"APV: AirPods popup blocked (BluetoothManager trigger)");
+    // swallow: don't call %orig
 }
+%end
 
-// Hook UIWindow to catch AirPods-related windows
-%hook UIWindow
-- (void)makeKeyAndVisible {
-    NSString *clsName = NSStringFromClass([self class]);
-    if ([clsName containsString:@"AirPod"] || [clsName containsString:@"Battery"]) {
-        apv_log(@"APV: AirPods window blocked (window: %@)", clsName);
-        return;
-    }
-    %orig;
+// Method 2: backup — dismiss CCAirPodsAlertViewController if it somehow appears
+@interface CCAirPodsAlertViewController : UIViewController
+@end
+%hook CCAirPodsAlertViewController
+- (void)viewWillAppear:(BOOL)animated {
+    apv_log(@"APV: AirPods popup blocked (CCAirPodsAlertViewController)");
+    [self dismissViewControllerAnimated:NO completion:nil];
 }
 %end
 
@@ -343,14 +340,7 @@ static void hooked_presentViewController(id self, SEL _cmd, UIViewController *vc
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            // Swizzle presentViewController to block AirPods popups
-            MSHookMessageEx([UIViewController class],
-                @selector(presentViewController:animated:completion:),
-                (IMP)hooked_presentViewController,
-                (IMP *)&orig_presentViewController);
-            apv_log(@"APV: presentViewController swizzled");
-
-            apv_log(@"APV: SpringBoard v1.2.1 initialized");
+            apv_log(@"APV: SpringBoard v1.2.2 initialized");
         }
 
         if (isMediaserverd) {
@@ -378,7 +368,7 @@ static void hooked_presentViewController(id self, SEL _cmd, UIViewController *vc
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.1 initialized");
+            apv_log(@"APV: mediaserverd v1.2.2 initialized");
         }
     }
 }
