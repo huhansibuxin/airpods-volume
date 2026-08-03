@@ -239,17 +239,23 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
         }
 
         if (isMediaserverd) {
-            void *handle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
-            if (handle) {
-                void *sym = dlsym(handle, "AudioSessionSetProperty");
+            extern void *dlopen(const char *path, int mode);
+            extern void *dlsym(void *handle, const char *symbol);
+            extern int dlclose(void *handle);
+            extern const int RTLD_NOW;
+
+            void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
+            if (aHandle) {
+                void *sym = dlsym(aHandle, "AudioSessionSetProperty");
                 if (sym) {
                     MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
                 }
-                dlclose(handle);
+                dlclose(aHandle);
             }
 
-            notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
-                dispatch_get_main_queue(), ^(int token) {
+            int token = -1;
+            notify_register_dispatch(kDarwinNotifyName, &token,
+                dispatch_get_main_queue(), ^(int t) {
                     readAirPodsCache();
                     if (sAirPodsConnected) {
                         static dispatch_once_t onceToken;
