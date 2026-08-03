@@ -212,6 +212,18 @@ static BOOL isMediaserverd = NO;
     }
     writeAirPodsCache(sAirPodsCached, sAirPodsCached && isBT);
     apv_log(@"APV: SB cache=%d connected=%d currentRoute=%d", sAirPodsCached, sAirPodsConnected, sAirPodsCurrentRoute);
+
+    // If we were on Bluetooth and now switched away, force route back
+    BOOL wasBT = NO;
+    for (AVAudioSessionPortDescription *p in prev.outputs) {
+        if (isBluetoothPort(p)) { wasBT = YES; break; }
+    }
+    if (wasBT && !isBT && sAirPodsCached) {
+        apv_log(@"APV: SB force route: BT->nonBT (reason=%ld)", (long)reason);
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            forceRouteToAirPods((int)reason);
+        });
+    }
 }
 %end
 
@@ -295,7 +307,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.0 initialized");
+            apv_log(@"APV: SpringBoard v1.1.1 initialized");
         }
 
         if (isMediaserverd) {
@@ -323,7 +335,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.0 initialized");
+            apv_log(@"APV: mediaserverd v1.1.1 initialized");
         }
     }
 }
