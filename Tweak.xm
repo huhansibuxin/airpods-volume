@@ -259,6 +259,8 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
     if (isSpringBoard || isMediaserverd) {
         if (isSpringBoard) {
             updateAirPodsCache();
+            notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
+            apv_log(@"APV: SB notify_register_check token=%d", _airpodsStateToken);
 
             [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
                                                      selector:@selector(airpods_routeChangeForState:)
