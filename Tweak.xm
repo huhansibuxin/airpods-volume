@@ -227,7 +227,7 @@ static BOOL isMediaserverd = NO;
     BOOL btRecent = (now - lastBluetoothSeen) < kBTGraceWindow;
     apv_log(@"APV: SB force decision: wasBT=%d isBT=%d cached=%d btRecent=%d reason=%ld",
             wasBT, isBT, sAirPodsCached, btRecent, (long)reason);
-    if (wasBT && !isBT && (sAirPodsCached || btRecent)) {
+    if (wasBT && !isBT && reason != 2 && (sAirPodsCached || btRecent)) {
         apv_log(@"APV: SB force route: BT->nonBT (reason=%ld)", (long)reason);
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             forceRouteToAirPods((int)reason);
