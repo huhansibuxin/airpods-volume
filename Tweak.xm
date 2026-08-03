@@ -69,7 +69,9 @@ static void readAirPodsCache(void) {
 
 static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current) {
     uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
-    notify_set_state(_airpodsStateToken, state);
+    uint32_t ret = notify_set_state(_airpodsStateToken, state);
+    apv_log(@"APV: SB writeAirPodsCache connected=%d current=%d state=%llu notify_ret=%u token=%d",
+            connected, current, state, ret, _airpodsStateToken);
     sAirPodsConnected = connected;
     sAirPodsCurrentRoute = current;
 }
@@ -270,13 +272,17 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
             void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
             if (aHandle) {
                 void *sym = dlsym(aHandle, "AudioSessionSetProperty");
+                apv_log(@"APV: media dlsym AudioSessionSetProperty=%p original=%p", sym, original_AudioSessionSetProperty);
                 if (sym && original_AudioSessionSetProperty == NULL) {
                     MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
+                    apv_log(@"APV: media MSHookFunction done, original=%p", original_AudioSessionSetProperty);
                 }
                 dlclose(aHandle);
+            } else {
+                apv_log(@"APV: media dlopen AudioToolbox FAILED");
             }
 
-            notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
+            uint32_t status = notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
                 dispatch_get_main_queue(), ^(int token) {
                     readAirPodsCache();
                     apv_log(@"APV: media notify connected=%d currentRoute=%d", sAirPodsConnected, sAirPodsCurrentRoute);
@@ -285,6 +291,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                         [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
                     }
                 });
+            apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
             apv_log(@"APV: mediaserverd v1.0 initialized");
         }
