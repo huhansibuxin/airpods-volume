@@ -1,9 +1,71 @@
-#import <substrate.h>
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <AudioToolbox/AudioToolbox.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <notify.h>
+#import <dlfcn.h>
+#import <substrate.h>
 
+#define kDarwinNotifyName "com.apv.airpods.state"
+#define kVolumeCap 0.4f
+
+static BOOL isSpringBoard = NO;
+static BOOL isMediaserverd = NO;
+static int _airpodsStateToken = -1;
+
+static BOOL sAirPodsConnected = NO;
+static BOOL sAirPodsCurrentRoute = NO;
+
+static void readAirPodsCache(void) {
+    uint64_t state = 0;
+    if (notify_get_state(_airpodsStateToken, &state) == NOTIFY_STATUS_OK) {
+        sAirPodsConnected = (state & 1);
+        sAirPodsCurrentRoute = (state & 2);
+    }
+}
+
+static void writeAirPodsCache(BOOL connected, BOOL current) {
+    uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
+    notify_set_state(_airpodsStateToken, state);
+    sAirPodsConnected = connected;
+    sAirPodsCurrentRoute = current;
+}
+
+static void updateAirPodsCache(void) {
+    if (!isSpringBoard) return;
+    BOOL connected = NO;
+    BOOL current = NO;
+    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
+        if ([p.portName containsString:@"AirPods"]) { connected = YES; break; }
+    }
+    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].currentRoute.outputs) {
+        if ([p.portName containsString:@"AirPods"]) { current = YES; break; }
+    }
+    writeAirPodsCache(connected, current);
+    notify_post(kDarwinNotifyName);
+}
+
+static BOOL isNotificationCategory(id cat) {
+    NSString *s = [cat description];
+    return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
+}
+
+static BOOL isAirPodsConnected(void) {
+    readAirPodsCache();
+    return sAirPodsConnected;
+}
+
+static BOOL isAirPodsCurrentRoute(void) {
+    readAirPodsCache();
+    return sAirPodsCurrentRoute;
+}
+
+static float applyVolumeCap(float vol) {
+    if (isAirPodsConnected())
+        return MIN(vol, kVolumeCap);
+    return 1.0f;
+}
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
@@ -12,48 +74,24 @@
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
 - (void)overrideToPartnerRoute;
 - (void)setPickedRouteWithPassword:(id)route withPassword:(id)password;
+- (id)pickableRoutesForCategory:(NSString *)category andMode:(NSString *)mode;
+- (BOOL)changeActiveCategoryVolumeBy:(float)delta forRoute:(id)route andDeviceIdentifier:(id)identifier;
+- (BOOL)changeVolumeForRouteBy:(float)delta forCategory:(id)category mode:(id)mode route:(id)route deviceIdentifier:(id)identifier andRouteSubtype:(id)subtype;
 @end
 
-@interface MPAVRoutingController : NSObject
-- (void)fetchAvailableRoutesWithCompletionHandler:(void(^)(NSArray *))handler;
-- (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion;
-@end
+typedef int (*AudioSessionSetProperty_t)(unsigned int, unsigned int, const void *);
 
-static void apv_log(NSString *fmt, ...) __attribute__((format(NSString, 1, 2)));
+static int (*original_AudioSessionSetProperty)(unsigned int, unsigned int, const void *) = NULL;
 
-static BOOL isNotificationCategory(id cat) {
-    NSString *s = [cat description];
-    return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
-}
-
-static BOOL sAirPodsCached = NO;
-
-static void updateAirPodsCache(void) {
-    sAirPodsCached = NO;
-    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
-        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"]) {
-            sAirPodsCached = YES;
-            break;
+static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inDataSize, const void *inData) {
+    readAirPodsCache();
+    if (sAirPodsConnected && inID == 'ovrt' && inDataSize >= sizeof(unsigned int)) {
+        unsigned int route = *(unsigned int *)inData;
+        if (route == 'spkr') {
+            return original_AudioSessionSetProperty(inID, inDataSize, inData);
         }
     }
-}
-
-static BOOL isAirPodsConnected(void) {
-    return sAirPodsCached;
-}
-
-static BOOL isAirPodsCurrentRoute(void) {
-    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].currentRoute.outputs) {
-        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
-            return YES;
-    }
-    return NO;
-}
-
-static float applyVolumeCap(float vol) {
-    if (isAirPodsConnected())
-        return MIN(vol, 0.4f);
-    return 1.0f;
+    return original_AudioSessionSetProperty(inID, inDataSize, inData);
 }
 
 %hook AVSystemController
