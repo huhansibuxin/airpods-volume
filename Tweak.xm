@@ -220,6 +220,8 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
 
     notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
 
+    %init(SpringBoard);  // volume control & state detection (both processes)
+
     if (isSpringBoard) {
         updateAirPodsCache();
 
@@ -228,8 +230,7 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
                                                      name:AVAudioSessionRouteChangeNotification
                                                    object:nil];
 
-        %init(SpringBoard);
-        NSLog(@"[AirPodsVolume] SpringBoard v0.0.1-4: volume control + state detection");
+        NSLog(@"[AirPodsVolume] SpringBoard v1.0: volume control + state detection");
     }
 
     if (isMediaserverd) {
@@ -272,7 +273,6 @@ static OSStatus hooked_AudioSessionSetProperty(AudioSessionPropertyID inID,
         });
 
         %init(MediaServerd);
-        %init(SpringBoard);  // volume capping in mediaserverd (reads cached state)
-        NSLog(@"[AirPodsVolume] mediaserverd v0.0.1-4: route switching + volume control");
+        NSLog(@"[AirPodsVolume] mediaserverd v1.0: route switching + volume control");
     }
 }
