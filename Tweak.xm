@@ -42,14 +42,6 @@ static BOOL isAirPodsConnected(void) {
     return sAirPodsCached;
 }
 
-static BOOL isAirPodsCurrentRoute(void) {
-    for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].currentRoute.outputs) {
-        if ([p.portName containsString:@"AirPods"] && [p.portName containsString:@"Pro"])
-            return YES;
-    }
-    return NO;
-}
-
 static float applyVolumeCap(float vol) {
     if (isAirPodsConnected())
         return MIN(vol, 0.4f);
@@ -161,7 +153,7 @@ static void apv_log(NSString *fmt, ...) {
 
 static NSTimeInterval lastForceSuccess = 0;
 
-static void forceRouteToAirPods(int reason) {
+static __attribute__((used)) void forceRouteToAirPods(int reason) {
     static NSTimeInterval lastCall = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
 
