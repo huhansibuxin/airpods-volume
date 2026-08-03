@@ -30,19 +30,26 @@ static BOOL isNotificationCategory(id cat) {
 
 static BOOL sAirPodsCached = NO;
 
+static BOOL isBluetoothPort(AVAudioSessionPortDescription *p) {
+    NSString *type = p.portType;
+    return [type isEqualToString:AVAudioSessionPortBluetoothA2DP]
+        || [type isEqualToString:AVAudioSessionPortBluetoothHFP]
+        || [type isEqualToString:AVAudioSessionPortBluetoothLE];
+}
+
 static void updateAirPodsCache(void) {
     sAirPodsCached = NO;
     AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
     for (AVAudioSessionPortDescription *p in route.outputs) {
-        if ([p.portName containsString:@"AirPods"]) {
+        if (isBluetoothPort(p)) {
             sAirPodsCached = YES;
             break;
         }
     }
-    // fallback: check inputs (for earbuds with mic)
+    // fallback: check inputs (for Bluetooth headsets with mic)
     if (!sAirPodsCached) {
         for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
-            if ([p.portName containsString:@"AirPods"]) {
+            if (isBluetoothPort(p)) {
                 sAirPodsCached = YES;
                 break;
             }
@@ -199,7 +206,11 @@ static BOOL isMediaserverd = NO;
     NSString *prevPort = [[prev.outputs firstObject] portName] ?: @"?";
     apv_log(@"APV: SB routeChange reason=%ld prev=%@ -> cur=%@", (long)reason, prevPort, curPort);
     updateAirPodsCache();
-    writeAirPodsCache(sAirPodsCached, sAirPodsCached && [curPort containsString:@"AirPods"]);
+    BOOL isBT = NO;
+    for (AVAudioSessionPortDescription *p in cur.outputs) {
+        if (isBluetoothPort(p)) { isBT = YES; break; }
+    }
+    writeAirPodsCache(sAirPodsCached, sAirPodsCached && isBT);
     apv_log(@"APV: SB cache=%d connected=%d currentRoute=%d", sAirPodsCached, sAirPodsConnected, sAirPodsCurrentRoute);
 }
 %end
@@ -236,13 +247,30 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
     [rc fetchAvailableRoutesWithCompletionHandler:^(NSArray *routes) {
         id target = nil;
         for (id r in routes) {
-            if ([[r valueForKey:@"isAirpodsRoute"] boolValue]) {
-                target = r;
-                break;
+            id desc = [r valueForKey:@"routeDescription"];
+            if (!desc) {
+                // try direct port type
+                NSString *type = [r valueForKey:@"routeType"];
+                if ([type isEqualToString:@"BluetoothA2DP"] || [type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothLE"]) {
+                    target = r;
+                    break;
+                }
+                continue;
             }
+            NSArray *outs = [desc valueForKey:@"outputs"];
+            for (id out in outs) {
+                NSString *pt = [out valueForKey:@"portType"];
+                if ([pt isEqualToString:AVAudioSessionPortBluetoothA2DP]
+                 || [pt isEqualToString:AVAudioSessionPortBluetoothHFP]
+                 || [pt isEqualToString:AVAudioSessionPortBluetoothLE]) {
+                    target = r;
+                    break;
+                }
+            }
+            if (target) break;
         }
         if (!target) {
-            apv_log(@"APV: no AirPods in available routes");
+            apv_log(@"APV: no Bluetooth route in available routes");
             return;
         }
         apv_log(@"APV: setPickedRouteWithPassword %@", [target valueForKey:@"routeName"]);
