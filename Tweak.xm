@@ -58,7 +58,6 @@ static void updateAirPodsCache(void) {
 #define kDarwinNotifyName "com.apv.airpods.state"
 static int _airpodsStateToken = -1;
 static NSTimeInterval lastBluetoothSeen = 0;
-static const NSTimeInterval kBTGraceWindow = 30.0;
 
 static BOOL sAirPodsConnected = NO;
 static BOOL sAirPodsCurrentRoute = NO;
