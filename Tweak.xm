@@ -120,6 +120,7 @@ static float applyVolumeCap(float vol) {
 
 static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
+static BOOL isBluetoothUIService = NO;
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
@@ -305,31 +306,29 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // Block AirPods popup when opening case
 // ============================================================
 
-// Method 1: block the trigger — BluetoothManager._showAirPodsAlertForDevice:
-@interface BluetoothManager : NSObject
+// BluetoothUIService: block the banner from activating
+@interface BluetoothUIServiceBanner : NSObject
+- (void)activateBanner:(id)banner withXPCConnection:(id)conn;
+- (id)initWithAccessoryView:(id)view;
 @end
-%hook BluetoothManager
-- (void)_showAirPodsAlertForDevice:(id)device {
-    apv_log(@"APV: AirPods popup blocked (BluetoothManager trigger)");
-    // swallow: don't call %orig
+%hook BluetoothUIServiceBanner
+- (void)activateBanner:(id)banner withXPCConnection:(id)conn {
+    apv_log(@"APV: BUIS AirPods popup blocked (activateBanner)");
+    // swallow — don't call %orig
 }
-%end
-
-// Method 2: backup — dismiss CCAirPodsAlertViewController if it somehow appears
-@interface CCAirPodsAlertViewController : UIViewController
-@end
-%hook CCAirPodsAlertViewController
-- (void)viewWillAppear:(BOOL)animated {
-    apv_log(@"APV: AirPods popup blocked (CCAirPodsAlertViewController)");
-    [self dismissViewControllerAnimated:NO completion:nil];
+- (id)initWithAccessoryView:(id)view {
+    apv_log(@"APV: BUIS banner init blocked");
+    return nil;
 }
 %end
 
 %ctor {
-    isSpringBoard = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"];
-    isMediaserverd = [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.mediaserverd"];
+    NSString *bid = NSBundle.mainBundle.bundleIdentifier;
+    isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
+    isMediaserverd = [bid isEqualToString:@"com.apple.mediaserverd"];
+    isBluetoothUIService = [bid isEqualToString:@"com.apple.BluetoothUIService"];
 
-    if (isSpringBoard || isMediaserverd) {
+    if (isSpringBoard || isMediaserverd || isBluetoothUIService) {
         if (isSpringBoard) {
             updateAirPodsCache();
             notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
@@ -340,7 +339,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.2 initialized");
+            apv_log(@"APV: SpringBoard v1.2.3 initialized");
         }
 
         if (isMediaserverd) {
@@ -368,7 +367,11 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.2 initialized");
+            apv_log(@"APV: mediaserverd v1.2.3 initialized");
+        }
+
+        if (isBluetoothUIService) {
+            apv_log(@"APV: BluetoothUIService v1.2.3 initialized");
         }
     }
 }
