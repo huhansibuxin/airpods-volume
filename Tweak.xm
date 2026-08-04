@@ -306,19 +306,19 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // Block AirPods popup when opening case
 // ============================================================
 
-// BluetoothUIService: block the banner from activating
-@interface BluetoothUIServiceBanner : NSObject
-- (void)activateBanner:(id)banner withXPCConnection:(id)conn;
-- (id)initWithAccessoryView:(id)view;
-@end
-%hook BluetoothUIServiceBanner
-- (void)activateBanner:(id)banner withXPCConnection:(id)conn {
-    apv_log(@"APV: BUIS AirPods popup blocked (activateBanner)");
-    // swallow — don't call %orig
+// Phase 1: log ALL new windows / keyWindow in SpringBoard to find the AirPods popup class
+%hook UIWindow
+- (void)makeKeyAndVisible {
+    NSString *clsName = NSStringFromClass([self class]);
+    apv_log(@"APV: DIAG window: %@", clsName);
+    %orig;
 }
-- (id)initWithAccessoryView:(id)view {
-    apv_log(@"APV: BUIS banner init blocked");
-    return nil;
+- (void)setHidden:(BOOL)hidden {
+    if (!hidden) {
+        NSString *clsName = NSStringFromClass([self class]);
+        apv_log(@"APV: DIAG window unhide: %@", clsName);
+    }
+    %orig;
 }
 %end
 
@@ -339,7 +339,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.3 initialized");
+            apv_log(@"APV: SpringBoard v1.2.4 initialized");
         }
 
         if (isMediaserverd) {
@@ -367,11 +367,11 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.3 initialized");
+            apv_log(@"APV: mediaserverd v1.2.4 initialized");
         }
 
         if (isBluetoothUIService) {
-            apv_log(@"APV: BluetoothUIService v1.2.3 initialized");
+            apv_log(@"APV: BluetoothUIService v1.2.4 initialized");
         }
     }
 }
