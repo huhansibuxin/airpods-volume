@@ -73,8 +73,7 @@ static void readAirPodsCache(void) {
 
 static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current) {
     uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
-    uint32_t ret = notify_set_state(_airpodsStateToken, state);
-            connected, current, state, ret, _airpodsStateToken);
+    notify_set_state(_airpodsStateToken, state);
     sAirPodsConnected = connected;
     sAirPodsCurrentRoute = current;
 }
@@ -247,7 +246,6 @@ static void *pollingThread(void *arg) {
         // AirPods connected but not the current route — force back
         force = YES;
     }
-            isBT, btAvailable, (long)reason, force);
     if (force) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             forceRouteToAirPods((int)reason);
