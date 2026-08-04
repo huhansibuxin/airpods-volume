@@ -1,1 +1,1 @@
-{ Filter = { Bundles = (com.apple.springboard, com.apple.mediaserverd, com.apple.SharingViewService); Executables = (/Applications/SharingViewService.app/SharingViewService); }; }
+{ Filter = { Bundles = (com.apple.springboard, com.apple.mediaserverd); }; }

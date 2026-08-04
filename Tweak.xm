@@ -6,7 +6,6 @@
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 
-
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
@@ -19,17 +18,6 @@
 @interface MPAVRoutingController : NSObject
 - (void)fetchAvailableRoutesWithCompletionHandler:(void(^)(NSArray *))handler;
 - (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion;
-@end
-
-@interface BNBannerSourceListenerPresentableViewController : UIViewController
-@end
-
-@interface BNPresentableQueue : NSObject
-- (void)enqueuePresentable:(id)presentable withOptions:(id)options userInfo:(id)userInfo;
-@end
-
-@interface SBSystemAperturePresentableManager : NSObject
-- (BOOL)willInterceptPresentable:(id)presentable userInfo:(id)userInfo;
 @end
 
 static void apv_log(NSString *fmt, ...) __attribute__((format(NSString, 1, 2)));
@@ -57,7 +45,6 @@ static void updateAirPodsCache(void) {
             break;
         }
     }
-    // fallback: check inputs (for Bluetooth headsets with mic)
     if (!sAirPodsCached) {
         for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
             if (isBluetoothPort(p)) {
@@ -68,13 +55,10 @@ static void updateAirPodsCache(void) {
     }
 }
 
-
 #define kDarwinNotifyName "com.apv.airpods.state"
 static int _airpodsStateToken = -1;
 static NSTimeInterval lastBluetoothSeen = 0;
 static const NSTimeInterval kBTGraceWindow = 5.0;
-
-static void readAirPodsCache(void);
 
 static BOOL sAirPodsConnected = NO;
 static BOOL sAirPodsCurrentRoute = NO;
@@ -112,7 +96,7 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
             dispatch_async(dispatch_get_main_queue(), ^{
                 forceRouteToAirPods(99);
             });
-            return 0; // block speaker route
+            return 0;
         }
     }
     return original_AudioSessionSetProperty(inID, inDataSize, inData);
@@ -128,10 +112,12 @@ static float applyVolumeCap(float vol) {
     return 1.0f;
 }
 
-
 static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
-static BOOL isSharingViewService = NO;
+
+// ============================================================
+// Volume cap: AVSystemController
+// ============================================================
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
@@ -147,14 +133,12 @@ static BOOL isSharingViewService = NO;
     }
     return %orig;
 }
-// Cap getters so HUD always reads capped value (no flicker)
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
     BOOL r = %orig;
     if (r && isNotificationCategory(cat))
         *vol = applyVolumeCap(*vol);
     return r;
 }
-// Spy on hijack attempts
 - (BOOL)shouldClientWithAudioScore:(unsigned int)score hijackRoute:(id)route hijackDeniedReason:(id *)reason {
     BOOL r = %orig;
     apv_log(@"APV: HIJACK score=%u route=%@ deniedReason=%@ result=%@", score, route, reason ? *reason : nil, r ? @"ALLOW" : @"DENY");
@@ -162,16 +146,17 @@ static BOOL isSharingViewService = NO;
 }
 %end
 
-// Disable touch on HUD slider — volume only via physical buttons.
+// ============================================================
+// Disable touch on volume HUD slider
+// ============================================================
+
 %hook SBHUDWindow
 - (void)addSubview:(UIView *)view {
-    // Disable touch on all HUD subviews — buttons only
     view.userInteractionEnabled = NO;
     %orig;
 }
 %end
 
-// Also disable touch on the elastic slider
 @interface SBElasticVolumeSliderView : UIView
 @end
 %hook SBElasticVolumeSliderView
@@ -182,8 +167,10 @@ static BOOL isSharingViewService = NO;
 }
 %end
 
-// Hide replaykit CC modules (mic mode / video effects) during calls
-// Block the bundle's principal class so the module never instantiates
+// ============================================================
+// Hide replaykit CC modules during calls
+// ============================================================
+
 %hook NSBundle
 - (Class)principalClass {
     NSString *bid = [self bundleIdentifier];
@@ -198,17 +185,9 @@ static BOOL isSharingViewService = NO;
 %end
 
 // ============================================================
-// mediaserverd: Route switching hook
+// SpringBoard: route change monitoring & auto-switch
 // ============================================================
 
-%hook AVAudioSessionRouteDescription
-- (id)initWithRouteDictionary:(NSDictionary *)dict {
-    if (!isMediaserverd) return %orig;
-    return %orig;
-}
-%end
-
-// SpringBoard: route change for state tracking only
 %hook AVAudioSession
 %new
 - (void)airpods_routeChangeForState:(NSNotification *)notification {
@@ -219,6 +198,7 @@ static BOOL isSharingViewService = NO;
     NSString *curPort = [[cur.outputs firstObject] portName] ?: @"?";
     NSString *prevPort = [[prev.outputs firstObject] portName] ?: @"?";
     apv_log(@"APV: SB routeChange reason=%ld prev=%@ -> cur=%@", (long)reason, prevPort, curPort);
+
     BOOL isBT = NO;
     for (AVAudioSessionPortDescription *p in cur.outputs) {
         if (isBluetoothPort(p)) { isBT = YES; break; }
@@ -230,7 +210,6 @@ static BOOL isSharingViewService = NO;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (isBT) lastBluetoothSeen = now;
 
-    // If we were on Bluetooth and now switched away, force route back
     BOOL wasBT = NO;
     for (AVAudioSessionPortDescription *p in prev.outputs) {
         apv_log(@"APV: SB prev portType=%@ portName=%@", p.portType, p.portName);
@@ -248,6 +227,10 @@ static BOOL isSharingViewService = NO;
 }
 %end
 
+// ============================================================
+// apv_log
+// ============================================================
+
 #define LOG_FILE "/tmp/apv.log"
 static void apv_log(NSString *fmt, ...) {
     va_list args;
@@ -263,6 +246,9 @@ static void apv_log(NSString *fmt, ...) {
     }
 }
 
+// ============================================================
+// forceRouteToAirPods
+// ============================================================
 
 static NSTimeInterval lastForceSuccess = 0;
 
@@ -282,7 +268,6 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
         for (id r in routes) {
             id desc = [r valueForKey:@"routeDescription"];
             if (!desc) {
-                // try direct port type
                 NSString *type = [r valueForKey:@"routeType"];
                 if ([type isEqualToString:@"BluetoothA2DP"] || [type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothLE"]) {
                     target = r;
@@ -314,161 +299,52 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 }
 
 // ============================================================
-// Block AirPods popup when opening case
+// %ctor
 // ============================================================
-
-// ============================================================
-// SharingViewService: Block AirPods popup at source
-// ============================================================
-
-@interface SVSBaseMainController : NSObject
-- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds;
-- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc;
-- (void)presentWithContext:(id)context;
-- (void)presentInitialStatusViewController;
-- (void)showStatus:(id)status;
-- (void)uiActivatedWithCompletion:(void(^)(void))completion;
-@end
-
-@interface ProximityPairingViewControllerProxy : NSObject
-- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds;
-- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc;
-@end
-
-%hook SVSBaseMainController
-- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds {
-    apv_log(@"APV: SVS showWithFlags:%u throttleSec:%.1f BLOCKED", flags, seconds);
-    // don't call %orig — block all SharingViewService popups
-}
-- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc {
-    apv_log(@"APV: SVS presentProxCardFlow delegate=%@ vc=%@ BLOCKED", delegate, vc);
-}
-- (void)presentWithContext:(id)context {
-    apv_log(@"APV: SVS presentWithContext context=%@ BLOCKED", context);
-}
-- (void)presentInitialStatusViewController {
-    apv_log(@"APV: SVS presentInitialStatusViewController BLOCKED");
-}
-- (void)showStatus:(id)status {
-    apv_log(@"APV: SVS showStatus status=%@ BLOCKED", status);
-}
-- (void)uiActivatedWithCompletion:(void(^)(void))completion {
-    apv_log(@"APV: SVS uiActivatedWithCompletion BLOCKED");
-}
-%end
-
-%hook ProximityPairingViewControllerProxy
-- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds {
-    apv_log(@"APV: SVS ProximityPairingProxy showWithFlags:%u throttleSec:%.1f BLOCKED", flags, seconds);
-}
-- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc {
-    apv_log(@"APV: SVS ProximityPairingProxy presentProxCardFlow BLOCKED");
-}
-%end
 
 %ctor {
-    // diagnostic: per-process file to avoid overwrite
-    {   NSString *bid = NSBundle.mainBundle.bundleIdentifier;
-        NSString *exe = NSProcessInfo.processInfo.processName;
-        char fname[128];
-        snprintf(fname, sizeof(fname), "/tmp/apv_ctor_%d.txt", getpid());
-        FILE *f = fopen(fname, "w");
-        if (f) { fprintf(f, "ctor_ran bid=%s exe=%s\n", bid ? bid.UTF8String : "(nil)", exe ? exe.UTF8String : "(nil)"); fclose(f); }
-    }
-
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
-    NSString *exe = NSProcessInfo.processInfo.processName;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
     isMediaserverd = [bid isEqualToString:@"com.apple.mediaserverd"];
-    isSharingViewService = [exe isEqualToString:@"SharingViewService"];
 
-    if (isSpringBoard || isMediaserverd || isSharingViewService) {
-        if (isSpringBoard) {
-            updateAirPodsCache();
-            notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
-            apv_log(@"APV: SB notify_register_check token=%d", _airpodsStateToken);
+    if (isSpringBoard) {
+        updateAirPodsCache();
+        notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
+        apv_log(@"APV: SB notify_register_check token=%d", _airpodsStateToken);
 
-            [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
-                                                     selector:@selector(airpods_routeChangeForState:)
-                                                         name:AVAudioSessionRouteChangeNotification
-                                                       object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
+                                                 selector:@selector(airpods_routeChangeForState:)
+                                                     name:AVAudioSessionRouteChangeNotification
+                                                   object:nil];
 
-            apv_log(@"APV: SpringBoard v1.5.0 initialized");
-        }
+        apv_log(@"APV: SpringBoard v1.6.0 initialized");
+    }
 
-        if (isMediaserverd) {
-            void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
-            if (aHandle) {
-                void *sym = dlsym(aHandle, "AudioSessionSetProperty");
-                apv_log(@"APV: media dlsym AudioSessionSetProperty=%p original=%p", sym, original_AudioSessionSetProperty);
-                if (sym && original_AudioSessionSetProperty == NULL) {
-                    MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
-                    apv_log(@"APV: media MSHookFunction done, original=%p", original_AudioSessionSetProperty);
-                }
-                dlclose(aHandle);
-            } else {
-                apv_log(@"APV: media dlopen AudioToolbox FAILED");
+    if (isMediaserverd) {
+        void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
+        if (aHandle) {
+            void *sym = dlsym(aHandle, "AudioSessionSetProperty");
+            apv_log(@"APV: media dlsym AudioSessionSetProperty=%p original=%p", sym, original_AudioSessionSetProperty);
+            if (sym && original_AudioSessionSetProperty == NULL) {
+                MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
+                apv_log(@"APV: media MSHookFunction done, original=%p", original_AudioSessionSetProperty);
             }
-
-            uint32_t status = notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
-                dispatch_get_main_queue(), ^(int token) {
-                    readAirPodsCache();
-                    apv_log(@"APV: media notify connected=%d currentRoute=%d", sAirPodsConnected, sAirPodsCurrentRoute);
-                    if (sAirPodsConnected) {
-                        apv_log(@"APV: media notify setActive:YES");
-                        [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
-                    }
-                });
-            apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
-
-            apv_log(@"APV: mediaserverd v1.5.0 initialized");
+            dlclose(aHandle);
+        } else {
+            apv_log(@"APV: media dlopen AudioToolbox FAILED");
         }
 
-        if (isSharingViewService) {
-            // quick file-write test to confirm %ctor ran
-            FILE *f = fopen("/tmp/apv_svs_test.txt", "w");
-            if (f) { fprintf(f, "ctor_ran\n"); fclose(f); }
-            static dispatch_once_t onceDumpSVS;
-            dispatch_once(&onceDumpSVS, ^{
-                apv_log(@"APV: === SHARINGVIEWSERVICE CLASS DUMP ===");
-                int allCount = objc_getClassList(NULL, 0);
-                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
-                allCount = objc_getClassList(classes, allCount);
-                const char *patterns[] = {"Proximity", "PNP", "SVS", "AirPod", "Headphone", "Pair", "Banner", "Pop", "AppleTV", "iOSSetup", "WatchSetup"};
-                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
-                for (int i = 0; i < allCount; i++) {
-                    const char *name = class_getName(classes[i]);
-                    for (int p = 0; p < nPatterns; p++) {
-                        if (strstr(name, patterns[p])) {
-                            apv_log(@"APV: SVSCLASS %s", name);
-                            break;
-                        }
-                    }
-                }
-                free(classes);
-                apv_log(@"APV: === END SHARINGVIEWSERVICE CLASS DUMP ===");
-
-                // Dump methods of key classes
-                const char *svsClasses[] = {"SVSBaseMainController", "ProximityPairingViewControllerProxy", "PNPPairingViewControllerDelegate"};
-                for (int k = 0; k < 3; k++) {
-                    Class c = objc_getClass(svsClasses[k]);
-                    if (!c) { apv_log(@"APV: SVSMETHOD %s not found", svsClasses[k]); continue; }
-                    unsigned int mc;
-                    Method *methods = class_copyMethodList(c, &mc);
-                    apv_log(@"APV: === %s instance methods (%u) ===", svsClasses[k], mc);
-                    for (unsigned int i = 0; i < mc; i++) {
-                        apv_log(@"APV:   - %s", sel_getName(method_getName(methods[i])));
-                    }
-                    free(methods);
-                    Method *cm = class_copyMethodList(object_getClass(c), &mc);
-                    apv_log(@"APV: === %s class methods (%u) ===", svsClasses[k], mc);
-                    for (unsigned int i = 0; i < mc; i++) {
-                        apv_log(@"APV:   + %s", sel_getName(method_getName(cm[i])));
-                    }
-                    free(cm);
+        uint32_t status = notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
+            dispatch_get_main_queue(), ^(int token) {
+                readAirPodsCache();
+                apv_log(@"APV: media notify connected=%d currentRoute=%d", sAirPodsConnected, sAirPodsCurrentRoute);
+                if (sAirPodsConnected) {
+                    apv_log(@"APV: media notify setActive:YES");
+                    [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
                 }
             });
-            apv_log(@"APV: SharingViewService v1.5.0 initialized");
-        }
+        apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
+
+        apv_log(@"APV: mediaserverd v1.6.0 initialized");
     }
 }
