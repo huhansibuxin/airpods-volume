@@ -24,6 +24,14 @@
 @interface BNBannerSourceListenerPresentableViewController : UIViewController
 @end
 
+@interface BNPresentableQueue : NSObject
+- (void)enqueuePresentable:(id)presentable withOptions:(id)options userInfo:(id)userInfo;
+@end
+
+@interface SBSystemAperturePresentableManager : NSObject
+- (BOOL)willInterceptPresentable:(id)presentable userInfo:(id)userInfo;
+@end
+
 static void apv_log(NSString *fmt, ...) __attribute__((format(NSString, 1, 2)));
 
 static BOOL isNotificationCategory(id cat) {
@@ -331,17 +339,25 @@ static BOOL isApertureWindow(id self) {
 }
 %end
 
-%hook BNBannerSourceListenerPresentableViewController
-- (void)viewDidLoad {
-    apv_log(@"APV: BANNER viewDidLoad self=%@ reqId=%@ desc=%@",
-        NSStringFromClass([self class]),
-        [self valueForKey:@"requesterIdentifier"],
-        [self valueForKey:@"presentableDescription"]);
+%hook BNPresentableQueue
+- (void)enqueuePresentable:(id)presentable withOptions:(id)options userInfo:(id)userInfo {
+    apv_log(@"APV: ENQUEUE presentable=%@(%@) reqId=%@ desc=%@",
+        presentable,
+        NSStringFromClass([presentable class]),
+        [presentable valueForKey:@"requesterIdentifier"],
+        [presentable valueForKey:@"presentableDescription"]);
     %orig;
 }
-- (void)viewWillAppear:(BOOL)animated {
-    apv_log(@"APV: BANNER viewWillAppear");
-    %orig;
+%end
+
+%hook SBSystemAperturePresentableManager
+- (BOOL)willInterceptPresentable:(id)presentable userInfo:(id)userInfo {
+    apv_log(@"APV: INTERCEPT presentable=%@(%@) reqId=%@ desc=%@",
+        presentable,
+        NSStringFromClass([presentable class]),
+        [presentable valueForKey:@"requesterIdentifier"],
+        [presentable valueForKey:@"presentableDescription"]);
+    return %orig;
 }
 %end
 
