@@ -473,7 +473,7 @@ static BOOL isBannerWindow(id self) {
                 int allCount = objc_getClassList(NULL, 0);
                 Class *classes = (Class *)malloc(sizeof(Class) * allCount);
                 allCount = objc_getClassList(classes, allCount);
-                const char *patterns[] = {"Banner", "Pop", "Alert", "Battery", "AirPod", "Headphone", "Present", "Case", "Connect", "Notify", "UI", "Banner", "Proximity"};
+                const char *patterns[] = {"Banner", "Pop", "Alert", "Battery", "AirPod", "Headphone", "Present", "Case", "Connect", "Notify", "UI", "Proximity", "BT", "CB"};
                 int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
                 for (int i = 0; i < allCount; i++) {
                     const char *name = class_getName(classes[i]);
@@ -486,6 +486,26 @@ static BOOL isBannerWindow(id self) {
                 }
                 free(classes);
                 apv_log(@"APV: === END BLUETOOTHD CLASS DUMP ===");
+
+                // Dump methods of key Bluetooth banner classes
+                const char *btClasses[] = {"BTBannerUISession", "BTAirPodsControlServiceClient"};
+                for (int k = 0; k < 2; k++) {
+                    Class c = objc_getClass(btClasses[k]);
+                    if (!c) { apv_log(@"APV: BTMETHOD %s not found", btClasses[k]); continue; }
+                    unsigned int mc;
+                    Method *methods = class_copyMethodList(c, &mc);
+                    apv_log(@"APV: === %s instance methods (%u) ===", btClasses[k], mc);
+                    for (unsigned int i = 0; i < mc; i++) {
+                        apv_log(@"APV:   - %s", sel_getName(method_getName(methods[i])));
+                    }
+                    free(methods);
+                    Method *cm = class_copyMethodList(object_getClass(c), &mc);
+                    apv_log(@"APV: === %s class methods (%u) ===", btClasses[k], mc);
+                    for (unsigned int i = 0; i < mc; i++) {
+                        apv_log(@"APV:   + %s", sel_getName(method_getName(cm[i])));
+                    }
+                    free(cm);
+                }
             });
             apv_log(@"APV: bluetoothd v1.2.9 initialized");
         }
