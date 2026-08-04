@@ -217,7 +217,7 @@ static BOOL isMediaserverd = NO;
     BOOL btRecent = (now - lastBluetoothSeen) < kBTGraceWindow;
     apv_log(@"APV: SB force decision: wasBT=%d isBT=%d cached=%d btRecent=%d reason=%ld",
             wasBT, isBT, sAirPodsCached, btRecent, (long)reason);
-    if (wasBT && !isBT && reason != 2 && (sAirPodsCached || btRecent)) {
+    if (wasBT && !isBT && (sAirPodsCached || btRecent)) {
         apv_log(@"APV: SB force route: BT->nonBT (reason=%ld)", (long)reason);
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             forceRouteToAirPods((int)reason);
@@ -249,52 +249,48 @@ static void apv_log(NSString *fmt, ...) {
 // forceRouteToAirPods
 // ============================================================
 
-static NSTimeInterval lastForceSuccess = 0;
-
 static __attribute__((used)) void forceRouteToAirPods(int reason) {
     static NSTimeInterval lastCall = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-
-    BOOL retaliation = (reason == 3 || reason == 4) && (now - lastForceSuccess < 2.0);
-    if (!retaliation && now - lastCall < 3.0) return;
+    if (now - lastCall < 5.0) return;
     lastCall = now;
-    apv_log(@"APV: setPickedRoute trigger reason=%d retaliation=%d", reason, retaliation);
+    apv_log(@"APV: overrideToPartnerRoute trigger reason=%d", reason);
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    id rc = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
-    [rc fetchAvailableRoutesWithCompletionHandler:^(NSArray *routes) {
-        id target = nil;
-        for (id r in routes) {
-            id desc = [r valueForKey:@"routeDescription"];
-            if (!desc) {
-                NSString *type = [r valueForKey:@"routeType"];
-                if ([type isEqualToString:@"BluetoothA2DP"] || [type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothLE"]) {
-                    target = r;
-                    break;
+    if ([avc respondsToSelector:@selector(overrideToPartnerRoute)]) {
+        [avc overrideToPartnerRoute];
+        apv_log(@"APV: overrideToPartnerRoute done");
+    } else {
+        apv_log(@"APV: overrideToPartnerRoute not available, trying setPickedRoute");
+        id rc = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
+        [rc fetchAvailableRoutesWithCompletionHandler:^(NSArray *routes) {
+            id target = nil;
+            for (id r in routes) {
+                id desc = [r valueForKey:@"routeDescription"];
+                if (!desc) {
+                    NSString *type = [r valueForKey:@"routeType"];
+                    if ([type isEqualToString:@"BluetoothA2DP"] || [type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothLE"]) {
+                        target = r; break;
+                    }
+                    continue;
                 }
-                continue;
-            }
-            NSArray *outs = [desc valueForKey:@"outputs"];
-            for (id out in outs) {
-                NSString *pt = [out valueForKey:@"portType"];
-                if ([pt isEqualToString:AVAudioSessionPortBluetoothA2DP]
-                 || [pt isEqualToString:AVAudioSessionPortBluetoothHFP]
-                 || [pt isEqualToString:AVAudioSessionPortBluetoothLE]) {
-                    target = r;
-                    break;
+                NSArray *outs = [desc valueForKey:@"outputs"];
+                for (id out in outs) {
+                    NSString *pt = [out valueForKey:@"portType"];
+                    if ([pt isEqualToString:AVAudioSessionPortBluetoothA2DP]
+                     || [pt isEqualToString:AVAudioSessionPortBluetoothHFP]
+                     || [pt isEqualToString:AVAudioSessionPortBluetoothLE]) {
+                        target = r; break;
+                    }
                 }
+                if (target) break;
             }
-            if (target) break;
-        }
-        if (!target) {
-            apv_log(@"APV: no Bluetooth route in available routes");
-            return;
-        }
-        apv_log(@"APV: setPickedRouteWithPassword %@", [target valueForKey:@"routeName"]);
-        [avc setPickedRouteWithPassword:target withPassword:nil];
-        lastForceSuccess = [[NSDate date] timeIntervalSince1970];
-        apv_log(@"APV: setPickedRouteWithPassword done");
-    }];
+            if (!target) { apv_log(@"APV: no BT route in available routes"); return; }
+            apv_log(@"APV: setPickedRouteWithPassword %@", [target valueForKey:@"routeName"]);
+            [avc setPickedRouteWithPassword:target withPassword:nil];
+            apv_log(@"APV: setPickedRouteWithPassword done");
+        }];
+    }
 }
 
 // ============================================================
