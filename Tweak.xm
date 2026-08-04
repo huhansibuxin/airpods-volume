@@ -373,20 +373,43 @@ static BOOL isBannerWindow(id self) {
 
 // Hook BTBannerUISession in bluetoothd to block AirPods popup
 @interface BTBannerUISession : NSObject
+- (void)_xpcStart;
+- (void)_xpcSendMessage;
+- (void)_xpcEvent:(id)event;
+- (void)_xpcConnectionMessage:(id)msg;
 - (void)activate;
 - (void)_activate;
-- (void)invalidate;
 @end
 
 %hook BTBannerUISession
-- (void)activate {
-    apv_log(@"APV: BTBANNER activate text=%@ battery=%@ lowBatt=%d leadingImg=%@",
+- (void)_xpcStart {
+    apv_log(@"APV: BTBANNER _xpcStart text=%@ battery=%@ leadingImg=%@ trailingText=%@",
         [self valueForKey:@"centerContentText"],
         [self valueForKey:@"batteryLevelInfo"],
-        [[self valueForKey:@"lowBatteryLevel"] boolValue],
+        [self valueForKey:@"leadingAccessoryImageName"],
+        [self valueForKey:@"trailingAccessoryText"]);
+    // BLOCK: don't call %orig
+    apv_log(@"APV: BTBANNER _xpcStart BLOCKED");
+}
+- (void)_xpcSendMessage {
+    apv_log(@"APV: BTBANNER _xpcSendMessage text=%@ battery=%@ BLOCKED",
+        [self valueForKey:@"centerContentText"],
+        [self valueForKey:@"batteryLevelInfo"]);
+}
+- (void)_xpcEvent:(id)event {
+    apv_log(@"APV: BTBANNER _xpcEvent event=%@", event);
+    %orig;
+}
+- (void)_xpcConnectionMessage:(id)msg {
+    apv_log(@"APV: BTBANNER _xpcConnectionMessage msg=%@", msg);
+    %orig;
+}
+- (void)activate {
+    apv_log(@"APV: BTBANNER activate text=%@ battery=%@ leadingImg=%@",
+        [self valueForKey:@"centerContentText"],
+        [self valueForKey:@"batteryLevelInfo"],
         [self valueForKey:@"leadingAccessoryImageName"]);
-    // Block: don't call %orig
-    apv_log(@"APV: BTBANNER BLOCKED");
+    %orig;
 }
 - (void)_activate {
     apv_log(@"APV: BTBANNER _activate BLOCKED");
@@ -529,7 +552,7 @@ static BOOL isBannerWindow(id self) {
                     free(cm);
                 }
             });
-            apv_log(@"APV: bluetoothd v1.3.0 initialized");
+            apv_log(@"APV: bluetoothd v1.3.1 initialized");
         }
 
         if (isBluetoothuserd) {
