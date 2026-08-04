@@ -340,12 +340,34 @@ static BOOL isApertureWindow(id self) {
             notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
             apv_log(@"APV: SB notify_register_check token=%d", _airpodsStateToken);
 
+            // Dump all classes matching Banner / BN / Aperture / Element patterns
+            static dispatch_once_t onceDump;
+            dispatch_once(&onceDump, ^{
+                apv_log(@"APV: === CLASS DUMP ===");
+                int allCount = objc_getClassList(NULL, 0);
+                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
+                allCount = objc_getClassList(classes, allCount);
+                const char *patterns[] = {"Banner", "BN", "Aperture", "Element", "Presentable", "Alert", "AirPod", "Headphone", "Battery", "BluetoothUI"};
+                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
+                for (int i = 0; i < allCount; i++) {
+                    const char *name = class_getName(classes[i]);
+                    for (int p = 0; p < nPatterns; p++) {
+                        if (strstr(name, patterns[p])) {
+                            apv_log(@"APV: CLASS %s", name);
+                            break;
+                        }
+                    }
+                }
+                free(classes);
+                apv_log(@"APV: === END CLASS DUMP ===");
+            });
+
             [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
                                                      selector:@selector(airpods_routeChangeForState:)
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.5 initialized");
+            apv_log(@"APV: SpringBoard v1.2.6 initialized");
         }
 
         if (isMediaserverd) {
@@ -373,11 +395,11 @@ static BOOL isApertureWindow(id self) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.5 initialized");
+            apv_log(@"APV: mediaserverd v1.2.6 initialized");
         }
 
         if (isBluetoothUIService) {
-            apv_log(@"APV: BluetoothUIService v1.2.5 initialized");
+            apv_log(@"APV: BluetoothUIService v1.2.6 initialized");
         }
     }
 }
