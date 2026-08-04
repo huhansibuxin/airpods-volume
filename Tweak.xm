@@ -133,6 +133,7 @@ static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
 static BOOL isBluetoothd = NO;
 static BOOL isBluetoothuserd = NO;
+static BOOL isSharingViewService = NO;
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
@@ -416,14 +417,64 @@ static BOOL isBannerWindow(id self) {
 }
 %end
 
+// ============================================================
+// SharingViewService: Block AirPods popup at source
+// ============================================================
+
+@interface SVSBaseMainController : NSObject
+- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds;
+- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc;
+- (void)presentWithContext:(id)context;
+- (void)presentInitialStatusViewController;
+- (void)showStatus:(id)status;
+- (void)uiActivatedWithCompletion:(void(^)(void))completion;
+@end
+
+@interface ProximityPairingViewControllerProxy : NSObject
+- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds;
+- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc;
+@end
+
+%hook SVSBaseMainController
+- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds {
+    apv_log(@"APV: SVS showWithFlags:%u throttleSec:%.1f BLOCKED", flags, seconds);
+    // don't call %orig — block all SharingViewService popups
+}
+- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc {
+    apv_log(@"APV: SVS presentProxCardFlow delegate=%@ vc=%@ BLOCKED", delegate, vc);
+}
+- (void)presentWithContext:(id)context {
+    apv_log(@"APV: SVS presentWithContext context=%@ BLOCKED", context);
+}
+- (void)presentInitialStatusViewController {
+    apv_log(@"APV: SVS presentInitialStatusViewController BLOCKED");
+}
+- (void)showStatus:(id)status {
+    apv_log(@"APV: SVS showStatus status=%@ BLOCKED", status);
+}
+- (void)uiActivatedWithCompletion:(void(^)(void))completion {
+    apv_log(@"APV: SVS uiActivatedWithCompletion BLOCKED");
+}
+%end
+
+%hook ProximityPairingViewControllerProxy
+- (void)showWithFlags:(unsigned int)flags throttleSeconds:(double)seconds {
+    apv_log(@"APV: SVS ProximityPairingProxy showWithFlags:%u throttleSec:%.1f BLOCKED", flags, seconds);
+}
+- (void)presentProxCardFlowWithDelegate:(id)delegate initialViewController:(id)vc {
+    apv_log(@"APV: SVS ProximityPairingProxy presentProxCardFlow BLOCKED");
+}
+%end
+
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
     isMediaserverd = [bid isEqualToString:@"com.apple.mediaserverd"];
     isBluetoothd = [bid isEqualToString:@"com.apple.bluetoothd"];
     isBluetoothuserd = [bid isEqualToString:@"com.apple.bluetoothuserd"];
+    isSharingViewService = [bid isEqualToString:@"com.apple.SharingViewService"];
 
-    if (isSpringBoard || isMediaserverd || isBluetoothd || isBluetoothuserd) {
+    if (isSpringBoard || isMediaserverd || isBluetoothd || isBluetoothuserd || isSharingViewService) {
         if (isSpringBoard) {
             updateAirPodsCache();
             notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
@@ -577,6 +628,50 @@ static BOOL isBannerWindow(id self) {
                 apv_log(@"APV: === END BLUETOOTHUSERD CLASS DUMP ===");
             });
             apv_log(@"APV: bluetoothuserd v1.2.9 initialized");
+        }
+
+        if (isSharingViewService) {
+            static dispatch_once_t onceDumpSVS;
+            dispatch_once(&onceDumpSVS, ^{
+                apv_log(@"APV: === SHARINGVIEWSERVICE CLASS DUMP ===");
+                int allCount = objc_getClassList(NULL, 0);
+                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
+                allCount = objc_getClassList(classes, allCount);
+                const char *patterns[] = {"Proximity", "PNP", "SVS", "AirPod", "Headphone", "Pair", "Banner", "Pop", "AppleTV", "iOSSetup", "WatchSetup"};
+                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
+                for (int i = 0; i < allCount; i++) {
+                    const char *name = class_getName(classes[i]);
+                    for (int p = 0; p < nPatterns; p++) {
+                        if (strstr(name, patterns[p])) {
+                            apv_log(@"APV: SVSCLASS %s", name);
+                            break;
+                        }
+                    }
+                }
+                free(classes);
+                apv_log(@"APV: === END SHARINGVIEWSERVICE CLASS DUMP ===");
+
+                // Dump methods of key classes
+                const char *svsClasses[] = {"SVSBaseMainController", "ProximityPairingViewControllerProxy", "PNPPairingViewControllerDelegate"};
+                for (int k = 0; k < 3; k++) {
+                    Class c = objc_getClass(svsClasses[k]);
+                    if (!c) { apv_log(@"APV: SVSMETHOD %s not found", svsClasses[k]); continue; }
+                    unsigned int mc;
+                    Method *methods = class_copyMethodList(c, &mc);
+                    apv_log(@"APV: === %s instance methods (%u) ===", svsClasses[k], mc);
+                    for (unsigned int i = 0; i < mc; i++) {
+                        apv_log(@"APV:   - %s", sel_getName(method_getName(methods[i])));
+                    }
+                    free(methods);
+                    Method *cm = class_copyMethodList(object_getClass(c), &mc);
+                    apv_log(@"APV: === %s class methods (%u) ===", svsClasses[k], mc);
+                    for (unsigned int i = 0; i < mc; i++) {
+                        apv_log(@"APV:   + %s", sel_getName(method_getName(cm[i])));
+                    }
+                    free(cm);
+                }
+            });
+            apv_log(@"APV: SharingViewService v1.4.0 initialized");
         }
     }
 }
