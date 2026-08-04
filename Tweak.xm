@@ -367,10 +367,12 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 %end
 
 %ctor {
-    // diagnostic: write bundle ID to file regardless of process
+    // diagnostic: per-process file to avoid overwrite
     {   NSString *bid = NSBundle.mainBundle.bundleIdentifier;
         NSString *exe = NSProcessInfo.processInfo.processName;
-        FILE *f = fopen("/tmp/apv_svs_test.txt", "w");
+        char fname[128];
+        snprintf(fname, sizeof(fname), "/tmp/apv_ctor_%d.txt", getpid());
+        FILE *f = fopen(fname, "w");
         if (f) { fprintf(f, "ctor_ran bid=%s exe=%s\n", bid ? bid.UTF8String : "(nil)", exe ? exe.UTF8String : "(nil)"); fclose(f); }
     }
 
