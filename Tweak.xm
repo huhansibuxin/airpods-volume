@@ -354,7 +354,10 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
         // Every 10 seconds, verify: if AirPods available but not current route → force
         dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
         dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), 10 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
+        __block int tickCount = 0;
         dispatch_source_set_event_handler(timer, ^{
+            tickCount++;
+            if (tickCount % 6 == 0) apv_log(@"APV: media timer heartbeat #%d, cached=%d", tickCount, sAirPodsCached);
             updateAirPodsCache();
             if (!sAirPodsCached) return;
             // AirPods are somewhere in the system — are they the current route?
