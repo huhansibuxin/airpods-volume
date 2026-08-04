@@ -415,6 +415,9 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
         }
 
         if (isSharingViewService) {
+            // quick file-write test to confirm %ctor ran
+            FILE *f = fopen("/tmp/apv_svs_test.txt", "w");
+            if (f) { fprintf(f, "ctor_ran\n"); fclose(f); }
             static dispatch_once_t onceDumpSVS;
             dispatch_once(&onceDumpSVS, ^{
                 apv_log(@"APV: === SHARINGVIEWSERVICE CLASS DUMP ===");
