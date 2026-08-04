@@ -328,6 +328,20 @@ static BOOL isApertureWindow(id self) {
 }
 %end
 
+%hook BNBannerSourceListenerPresentableViewController
+- (void)viewDidLoad {
+    apv_log(@"APV: BANNER viewDidLoad self=%@ reqId=%@ desc=%@",
+        NSStringFromClass([self class]),
+        [self valueForKey:@"requesterIdentifier"],
+        [self valueForKey:@"presentableDescription"]);
+    %orig;
+}
+- (void)viewWillAppear:(BOOL)animated {
+    apv_log(@"APV: BANNER viewWillAppear");
+    %orig;
+}
+%end
+
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
