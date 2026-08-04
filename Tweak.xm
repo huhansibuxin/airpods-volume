@@ -371,6 +371,28 @@ static BOOL isBannerWindow(id self) {
 }
 %end
 
+// Hook BTBannerUISession in bluetoothd to block AirPods popup
+@interface BTBannerUISession : NSObject
+- (void)activate;
+- (void)_activate;
+- (void)invalidate;
+@end
+
+%hook BTBannerUISession
+- (void)activate {
+    apv_log(@"APV: BTBANNER activate text=%@ battery=%@ lowBatt=%d leadingImg=%@",
+        [self valueForKey:@"centerContentText"],
+        [self valueForKey:@"batteryLevelInfo"],
+        [[self valueForKey:@"lowBatteryLevel"] boolValue],
+        [self valueForKey:@"leadingAccessoryImageName"]);
+    // Block: don't call %orig
+    apv_log(@"APV: BTBANNER BLOCKED");
+}
+- (void)_activate {
+    apv_log(@"APV: BTBANNER _activate BLOCKED");
+}
+%end
+
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
@@ -507,7 +529,7 @@ static BOOL isBannerWindow(id self) {
                     free(cm);
                 }
             });
-            apv_log(@"APV: bluetoothd v1.2.9 initialized");
+            apv_log(@"APV: bluetoothd v1.3.0 initialized");
         }
 
         if (isBluetoothuserd) {
