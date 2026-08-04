@@ -184,44 +184,6 @@ static BOOL isMediaserverd = NO;
 %end
 
 // ============================================================
-// mediaserverd: block non-BT route selection via MPAVRoutingController
-// ============================================================
-
-static BOOL routeIsBluetooth(id route) {
-    NSString *type = [route valueForKey:@"routeType"];
-    if ([type isEqualToString:@"BluetoothA2DP"] || [type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothLE"])
-        return YES;
-    id desc = [route valueForKey:@"routeDescription"];
-    if (desc) {
-        for (id out in [desc valueForKey:@"outputs"]) {
-            if (isBluetoothPort(out)) return YES;
-        }
-    }
-    return NO;
-}
-
-%hook MPAVRoutingController
-- (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion {
-    if (isMediaserverd) {
-        readAirPodsCache();
-        if (sAirPodsConnected) {
-            BOOL hasBT = NO;
-            for (id r in routes) {
-                if (routeIsBluetooth(r)) { hasBT = YES; break; }
-            }
-            if (!hasBT) {
-                apv_log(@"APV: MPAV selectRoutes blocked (%lu non-BT routes), forcing AirPods", (unsigned long)routes.count);
-                forceRouteToAirPods(88);
-                if (completion) completion();
-                return;
-            }
-        }
-    }
-    %orig;
-}
-%end
-
-// ============================================================
 // SpringBoard: route change monitoring & auto-switch
 // ============================================================
 
