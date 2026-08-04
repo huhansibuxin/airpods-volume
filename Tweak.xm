@@ -360,14 +360,37 @@ static BOOL isApertureWindow(id self) {
                 }
                 free(classes);
                 apv_log(@"APV: === END CLASS DUMP ===");
-            });
+        });
+
+        // Dump methods of key BannerKit classes
+        static dispatch_once_t onceMethodDump;
+        dispatch_once(&onceMethodDump, ^{
+            const char *klasses[] = {"BNPresentableQueue", "BNBannerSourceListenerPresentableViewController", "SBSystemAperturePresentableManager"};
+            for (int k = 0; k < 3; k++) {
+                Class c = objc_getClass(klasses[k]);
+                if (!c) { apv_log(@"APV: METHOD %s not found", klasses[k]); continue; }
+                unsigned int mc;
+                Method *methods = class_copyMethodList(c, &mc);
+                apv_log(@"APV: === %s instance methods (%u) ===", klasses[k], mc);
+                for (unsigned int i = 0; i < mc; i++) {
+                    apv_log(@"APV:   - %s", sel_getName(method_getName(methods[i])));
+                }
+                free(methods);
+                Method *cm = class_copyMethodList(object_getClass(c), &mc);
+                apv_log(@"APV: === %s class methods (%u) ===", klasses[k], mc);
+                for (unsigned int i = 0; i < mc; i++) {
+                    apv_log(@"APV:   + %s", sel_getName(method_getName(cm[i])));
+                }
+                free(cm);
+            }
+        });
 
             [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
                                                      selector:@selector(airpods_routeChangeForState:)
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.6 initialized");
+            apv_log(@"APV: SpringBoard v1.2.7 initialized");
         }
 
         if (isMediaserverd) {
