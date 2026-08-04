@@ -58,7 +58,6 @@ static void updateAirPodsCache(void) {
 
 #define kDarwinNotifyName "com.apv.airpods.state"
 static int _airpodsStateToken = -1;
-static NSTimeInterval lastBluetoothSeen = 0;
 
 static BOOL sAirPodsConnected = NO;
 static BOOL sAirPodsCurrentRoute = NO;
@@ -85,8 +84,6 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
     readAirPodsCache();
     if (sAirPodsConnected && inID == 'ovrt' && inDataSize >= sizeof(unsigned int)) {
         unsigned int route = *(unsigned int *)inData;
-        char routeStr[5] = {0};
-        memcpy(routeStr, &route, 4);
         if (route == 'spkr') {
             dispatch_async(dispatch_get_main_queue(), ^{
                 forceRouteToAirPods(99);
@@ -135,6 +132,7 @@ static BOOL isMediaserverd = NO;
     return r;
 }
 - (BOOL)shouldClientWithAudioScore:(unsigned int)score hijackRoute:(id)route hijackDeniedReason:(id *)reason {
+    (void)score; (void)route; (void)reason;
     BOOL r = %orig;
     return r;
 }
@@ -183,10 +181,8 @@ static BOOL isMediaserverd = NO;
 // ============================================================
 
 static void *pollingThread(void *arg) {
-    int tick = 0;
     while (1) {
         sleep(5);
-        tick++;
         updateAirPodsCache();
         if (sAirPodsCached) {
             sLastAirPodsSeen = time(NULL);
@@ -217,10 +213,7 @@ static void *pollingThread(void *arg) {
 - (void)airpods_routeChangeForState:(NSNotification *)notification {
     NSDictionary *info = notification.userInfo;
     NSInteger reason = [info[AVAudioSessionRouteChangeReasonKey] integerValue];
-    AVAudioSessionRouteDescription *prev = info[AVAudioSessionRouteChangePreviousRouteKey];
     AVAudioSessionRouteDescription *cur = [AVAudioSession sharedInstance].currentRoute;
-    NSString *curPort = [[cur.outputs firstObject] portName] ?: @"?";
-    NSString *prevPort = [[prev.outputs firstObject] portName] ?: @"?";
 
     BOOL isBT = NO;
     for (AVAudioSessionPortDescription *p in cur.outputs) {
@@ -229,9 +222,6 @@ static void *pollingThread(void *arg) {
     sAirPodsCached = isBT;
     writeAirPodsCache(sAirPodsCached, sAirPodsCached && isBT);
 
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (isBT) lastBluetoothSeen = now;
-
     // AirPods available? Check availableInputs too (handles car HFP stealing, system not switching, etc.)
     BOOL btAvailable = sAirPodsCached;
     if (!btAvailable) {
@@ -239,7 +229,6 @@ static void *pollingThread(void *arg) {
             if (isBluetoothPort(p)) { btAvailable = YES; break; }
         }
     }
-    if (btAvailable) lastBluetoothSeen = now;
 
     BOOL force = NO;
     if (!isBT && btAvailable) {
@@ -326,7 +315,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
             dlclose(aHandle);
         }
 
-        uint32_t status = notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
+        (void)notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
             dispatch_get_main_queue(), ^(int token) {
                 readAirPodsCache();
                 if (sAirPodsConnected) sLastAirPodsSeen = time(NULL);
