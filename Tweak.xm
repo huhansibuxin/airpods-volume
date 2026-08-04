@@ -306,18 +306,24 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // Block AirPods popup when opening case
 // ============================================================
 
-// Phase 1: log ALL new windows / keyWindow in SpringBoard to find the AirPods popup class
+// Phase 2: log subviews added to SBSystemApertureWindow
+static BOOL isApertureWindow(id self) {
+    return [NSStringFromClass([self class]) isEqualToString:@"SBSystemApertureWindow"];
+}
 %hook UIWindow
-- (void)makeKeyAndVisible {
-    NSString *clsName = NSStringFromClass([self class]);
-    apv_log(@"APV: DIAG window: %@", clsName);
+- (void)addSubview:(UIView *)view {
+    if (isApertureWindow(self))
+        apv_log(@"APV: DIAG addSubview: %@", NSStringFromClass([view class]));
     %orig;
 }
-- (void)setHidden:(BOOL)hidden {
-    if (!hidden) {
-        NSString *clsName = NSStringFromClass([self class]);
-        apv_log(@"APV: DIAG window unhide: %@", clsName);
-    }
+- (void)insertSubview:(UIView *)view atIndex:(NSInteger)idx {
+    if (isApertureWindow(self))
+        apv_log(@"APV: DIAG insertSubview[%ld]: %@", (long)idx, NSStringFromClass([view class]));
+    %orig;
+}
+- (void)setRootViewController:(UIViewController *)vc {
+    if (isApertureWindow(self))
+        apv_log(@"APV: DIAG setRootVC: %@", NSStringFromClass([vc class]));
     %orig;
 }
 %end
@@ -339,7 +345,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.4 initialized");
+            apv_log(@"APV: SpringBoard v1.2.5 initialized");
         }
 
         if (isMediaserverd) {
@@ -367,11 +373,11 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.4 initialized");
+            apv_log(@"APV: mediaserverd v1.2.5 initialized");
         }
 
         if (isBluetoothUIService) {
-            apv_log(@"APV: BluetoothUIService v1.2.4 initialized");
+            apv_log(@"APV: BluetoothUIService v1.2.5 initialized");
         }
     }
 }
