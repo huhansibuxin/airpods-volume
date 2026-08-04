@@ -21,7 +21,6 @@
 - (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion;
 @end
 
-static void apv_log(NSString *fmt, ...) __attribute__((format(NSString, 1, 2)));
 
 static BOOL isNotificationCategory(id cat) {
     NSString *s = [cat description];
@@ -75,7 +74,6 @@ static void readAirPodsCache(void) {
 static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current) {
     uint64_t state = (connected ? 1 : 0) | (current ? 2 : 0);
     uint32_t ret = notify_set_state(_airpodsStateToken, state);
-    apv_log(@"APV: SB writeAirPodsCache connected=%d current=%d state=%llu notify_ret=%u token=%d",
             connected, current, state, ret, _airpodsStateToken);
     sAirPodsConnected = connected;
     sAirPodsCurrentRoute = current;
@@ -90,9 +88,7 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
         unsigned int route = *(unsigned int *)inData;
         char routeStr[5] = {0};
         memcpy(routeStr, &route, 4);
-        apv_log(@"APV: AudioSessionSetProperty ovrt=%.4s connected=%d currentRoute=%d", routeStr, sAirPodsConnected, sAirPodsCurrentRoute);
         if (route == 'spkr') {
-            apv_log(@"APV: blocked speaker route, forcing AirPods");
             dispatch_async(dispatch_get_main_queue(), ^{
                 forceRouteToAirPods(99);
             });
@@ -141,7 +137,6 @@ static BOOL isMediaserverd = NO;
 }
 - (BOOL)shouldClientWithAudioScore:(unsigned int)score hijackRoute:(id)route hijackDeniedReason:(id *)reason {
     BOOL r = %orig;
-    apv_log(@"APV: HIJACK score=%u route=%@ deniedReason=%@ result=%@", score, route, reason ? *reason : nil, r ? @"ALLOW" : @"DENY");
     return r;
 }
 %end
@@ -193,7 +188,6 @@ static void *pollingThread(void *arg) {
     while (1) {
         sleep(5);
         tick++;
-        if (tick % 12 == 0) apv_log(@"APV: media heartbeat #%d, cached=%d", tick, sAirPodsCached);
         updateAirPodsCache();
         if (sAirPodsCached) {
             sLastAirPodsSeen = time(NULL);
@@ -205,12 +199,10 @@ static void *pollingThread(void *arg) {
             if (curIsBT) {
                 writeAirPodsCache(YES, YES);
             } else {
-                apv_log(@"APV: media poll: AirPods available but not current route, forcing");
                 writeAirPodsCache(YES, NO);
                 forceRouteToAirPods(201);
             }
         } else if (sLastAirPodsSeen > 0 && time(NULL) - sLastAirPodsSeen < 300) {
-            apv_log(@"APV: media poll: blind force (last seen %llds ago)", (long long)(time(NULL) - sLastAirPodsSeen));
             forceRouteToAirPods(202);
         }
     }
@@ -230,7 +222,6 @@ static void *pollingThread(void *arg) {
     AVAudioSessionRouteDescription *cur = [AVAudioSession sharedInstance].currentRoute;
     NSString *curPort = [[cur.outputs firstObject] portName] ?: @"?";
     NSString *prevPort = [[prev.outputs firstObject] portName] ?: @"?";
-    apv_log(@"APV: SB routeChange reason=%ld prev=%@ -> cur=%@", (long)reason, prevPort, curPort);
 
     BOOL isBT = NO;
     for (AVAudioSessionPortDescription *p in cur.outputs) {
@@ -238,7 +229,6 @@ static void *pollingThread(void *arg) {
     }
     sAirPodsCached = isBT;
     writeAirPodsCache(sAirPodsCached, sAirPodsCached && isBT);
-    apv_log(@"APV: SB cache=%d connected=%d currentRoute=%d", sAirPodsCached, sAirPodsConnected, sAirPodsCurrentRoute);
 
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (isBT) lastBluetoothSeen = now;
@@ -257,35 +247,14 @@ static void *pollingThread(void *arg) {
         // AirPods connected but not the current route — force back
         force = YES;
     }
-    apv_log(@"APV: SB force decision: isBT=%d btAvailable=%d reason=%ld force=%d",
             isBT, btAvailable, (long)reason, force);
     if (force) {
-        apv_log(@"APV: SB force route: AirPods available but not current route (reason=%ld)", (long)reason);
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             forceRouteToAirPods((int)reason);
         });
     }
 }
 %end
-
-// ============================================================
-// apv_log
-// ============================================================
-
-#define LOG_FILE "/tmp/apv.log"
-static void apv_log(NSString *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
-    va_end(args);
-    NSString *line = [[NSString alloc] initWithFormat:@"%@\n", msg];
-    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
-    int fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd >= 0) {
-        write(fd, data.bytes, data.length);
-        close(fd);
-    }
-}
 
 // ============================================================
 // forceRouteToAirPods
@@ -296,14 +265,11 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - lastCall < 5.0) return;
     lastCall = now;
-    apv_log(@"APV: overrideToPartnerRoute trigger reason=%d", reason);
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
     if ([avc respondsToSelector:@selector(overrideToPartnerRoute)]) {
         [avc overrideToPartnerRoute];
-        apv_log(@"APV: overrideToPartnerRoute done");
     } else {
-        apv_log(@"APV: overrideToPartnerRoute not available, trying setPickedRoute");
         id rc = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
         [rc fetchAvailableRoutesWithCompletionHandler:^(NSArray *routes) {
             id target = nil;
@@ -327,10 +293,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                 }
                 if (target) break;
             }
-            if (!target) { apv_log(@"APV: no BT route in available routes"); return; }
-            apv_log(@"APV: setPickedRouteWithPassword %@", [target valueForKey:@"routeName"]);
             [avc setPickedRouteWithPassword:target withPassword:nil];
-            apv_log(@"APV: setPickedRouteWithPassword done");
         }];
     }
 }
@@ -347,50 +310,38 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
     if (isSpringBoard) {
         updateAirPodsCache();
         notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
-        apv_log(@"APV: SB notify_register_check token=%d", _airpodsStateToken);
 
         [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
                                                  selector:@selector(airpods_routeChangeForState:)
                                                      name:AVAudioSessionRouteChangeNotification
                                                    object:nil];
 
-        apv_log(@"APV: SpringBoard v1.7.4 initialized");
     }
 
     if (isMediaserverd) {
         void *aHandle = dlopen("/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox", RTLD_NOW);
         if (aHandle) {
             void *sym = dlsym(aHandle, "AudioSessionSetProperty");
-            apv_log(@"APV: media dlsym AudioSessionSetProperty=%p original=%p", sym, original_AudioSessionSetProperty);
             if (sym && original_AudioSessionSetProperty == NULL) {
                 MSHookFunction(sym, (void *)hooked_AudioSessionSetProperty, (void **)&original_AudioSessionSetProperty);
-                apv_log(@"APV: media MSHookFunction done, original=%p", original_AudioSessionSetProperty);
             }
             dlclose(aHandle);
-        } else {
-            apv_log(@"APV: media dlopen AudioToolbox FAILED");
         }
 
         uint32_t status = notify_register_dispatch(kDarwinNotifyName, &_airpodsStateToken,
             dispatch_get_main_queue(), ^(int token) {
                 readAirPodsCache();
                 if (sAirPodsConnected) sLastAirPodsSeen = time(NULL);
-                apv_log(@"APV: media notify connected=%d currentRoute=%d", sAirPodsConnected, sAirPodsCurrentRoute);
                 if (sAirPodsConnected && !sAirPodsCurrentRoute) {
-                    apv_log(@"APV: media notify force: AirPods connected but not current route");
                     forceRouteToAirPods(200);
                 } else if (sAirPodsConnected) {
-                    apv_log(@"APV: media notify setActive:YES");
                     [[AVAudioSession sharedInstance] setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
                 }
             });
-        apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
         pthread_t pt;
         pthread_create(&pt, NULL, pollingThread, NULL);
         pthread_detach(pt);
-        apv_log(@"APV: media polling thread started (5s)");
 
-        apv_log(@"APV: mediaserverd v1.7.4 initialized");
     }
 }
