@@ -1,1 +1,1 @@
-{ Filter = { Bundles = (com.apple.springboard, com.apple.mediaserverd, com.apple.bluetoothd, com.apple.bluetoothuserd, com.apple.SharingViewService); }; }
+{ Filter = { Bundles = (com.apple.springboard, com.apple.mediaserverd, com.apple.SharingViewService); }; }

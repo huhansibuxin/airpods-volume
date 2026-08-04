@@ -131,8 +131,6 @@ static float applyVolumeCap(float vol) {
 
 static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
-static BOOL isBluetoothd = NO;
-static BOOL isBluetoothuserd = NO;
 static BOOL isSharingViewService = NO;
 
 %hook AVSystemController
@@ -319,104 +317,6 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // Block AirPods popup when opening case
 // ============================================================
 
-// v1.2.8: log subviews added to ALL Banner/BN/Aperture windows
-static BOOL isBannerWindow(id self) {
-    NSString *name = NSStringFromClass([self class]);
-    return [name containsString:@"Banner"]
-        || [name containsString:@"BN"]
-        || [name containsString:@"Aperture"]
-        || [name containsString:@"Alert"];
-}
-%hook UIWindow
-- (void)addSubview:(UIView *)view {
-    if (isBannerWindow(self))
-        apv_log(@"APV: DIAG %@ addSubview: %@", NSStringFromClass([self class]), NSStringFromClass([view class]));
-    %orig;
-}
-- (void)insertSubview:(UIView *)view atIndex:(NSInteger)idx {
-    if (isBannerWindow(self))
-        apv_log(@"APV: DIAG %@ insertSubview[%ld]: %@", NSStringFromClass([self class]), (long)idx, NSStringFromClass([view class]));
-    %orig;
-}
-- (void)setRootViewController:(UIViewController *)vc {
-    if (isBannerWindow(self))
-        apv_log(@"APV: DIAG %@ setRootVC: %@", NSStringFromClass([self class]), NSStringFromClass([vc class]));
-    %orig;
-}
-- (void)makeKeyAndVisible {
-    if (isBannerWindow(self))
-        apv_log(@"APV: DIAG %@ makeKeyAndVisible", NSStringFromClass([self class]));
-    %orig;
-}
-%end
-
-%hook BNPresentableQueue
-- (void)enqueuePresentable:(id)presentable withOptions:(id)options userInfo:(id)userInfo {
-    apv_log(@"APV: ENQUEUE presentable=%@(%@) reqId=%@ desc=%@",
-        presentable,
-        NSStringFromClass([presentable class]),
-        [presentable valueForKey:@"requesterIdentifier"],
-        [presentable valueForKey:@"presentableDescription"]);
-    %orig;
-}
-%end
-
-%hook SBSystemAperturePresentableManager
-- (BOOL)willInterceptPresentable:(id)presentable userInfo:(id)userInfo {
-    apv_log(@"APV: INTERCEPT presentable=%@(%@) reqId=%@ desc=%@",
-        presentable,
-        NSStringFromClass([presentable class]),
-        [presentable valueForKey:@"requesterIdentifier"],
-        [presentable valueForKey:@"presentableDescription"]);
-    return %orig;
-}
-%end
-
-// Hook BTBannerUISession in bluetoothd to block AirPods popup
-@interface BTBannerUISession : NSObject
-- (void)_xpcStart;
-- (void)_xpcSendMessage;
-- (void)_xpcEvent:(id)event;
-- (void)_xpcConnectionMessage:(id)msg;
-- (void)activate;
-- (void)_activate;
-@end
-
-%hook BTBannerUISession
-- (void)_xpcStart {
-    apv_log(@"APV: BTBANNER _xpcStart text=%@ battery=%@ leadingImg=%@ trailingText=%@",
-        [self valueForKey:@"centerContentText"],
-        [self valueForKey:@"batteryLevelInfo"],
-        [self valueForKey:@"leadingAccessoryImageName"],
-        [self valueForKey:@"trailingAccessoryText"]);
-    // BLOCK: don't call %orig
-    apv_log(@"APV: BTBANNER _xpcStart BLOCKED");
-}
-- (void)_xpcSendMessage {
-    apv_log(@"APV: BTBANNER _xpcSendMessage text=%@ battery=%@ BLOCKED",
-        [self valueForKey:@"centerContentText"],
-        [self valueForKey:@"batteryLevelInfo"]);
-}
-- (void)_xpcEvent:(id)event {
-    apv_log(@"APV: BTBANNER _xpcEvent event=%@", event);
-    %orig;
-}
-- (void)_xpcConnectionMessage:(id)msg {
-    apv_log(@"APV: BTBANNER _xpcConnectionMessage msg=%@", msg);
-    %orig;
-}
-- (void)activate {
-    apv_log(@"APV: BTBANNER activate text=%@ battery=%@ leadingImg=%@",
-        [self valueForKey:@"centerContentText"],
-        [self valueForKey:@"batteryLevelInfo"],
-        [self valueForKey:@"leadingAccessoryImageName"]);
-    %orig;
-}
-- (void)_activate {
-    apv_log(@"APV: BTBANNER _activate BLOCKED");
-}
-%end
-
 // ============================================================
 // SharingViewService: Block AirPods popup at source
 // ============================================================
@@ -470,67 +370,20 @@ static BOOL isBannerWindow(id self) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
     isMediaserverd = [bid isEqualToString:@"com.apple.mediaserverd"];
-    isBluetoothd = [bid isEqualToString:@"com.apple.bluetoothd"];
-    isBluetoothuserd = [bid isEqualToString:@"com.apple.bluetoothuserd"];
     isSharingViewService = [bid isEqualToString:@"com.apple.SharingViewService"];
 
-    if (isSpringBoard || isMediaserverd || isBluetoothd || isBluetoothuserd || isSharingViewService) {
+    if (isSpringBoard || isMediaserverd || isSharingViewService) {
         if (isSpringBoard) {
             updateAirPodsCache();
             notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
             apv_log(@"APV: SB notify_register_check token=%d", _airpodsStateToken);
-
-            // Dump all classes matching Banner / BN / Aperture / Element patterns
-            static dispatch_once_t onceDump;
-            dispatch_once(&onceDump, ^{
-                apv_log(@"APV: === CLASS DUMP ===");
-                int allCount = objc_getClassList(NULL, 0);
-                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
-                allCount = objc_getClassList(classes, allCount);
-                const char *patterns[] = {"Banner", "BN", "Aperture", "Element", "Presentable", "Alert", "AirPod", "Headphone", "Battery", "BluetoothUI"};
-                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
-                for (int i = 0; i < allCount; i++) {
-                    const char *name = class_getName(classes[i]);
-                    for (int p = 0; p < nPatterns; p++) {
-                        if (strstr(name, patterns[p])) {
-                            apv_log(@"APV: CLASS %s", name);
-                            break;
-                        }
-                    }
-                }
-                free(classes);
-                apv_log(@"APV: === END CLASS DUMP ===");
-        });
-
-        // Dump methods of key BannerKit classes
-        static dispatch_once_t onceMethodDump;
-        dispatch_once(&onceMethodDump, ^{
-            const char *klasses[] = {"BNPresentableQueue", "BNBannerSourceListenerPresentableViewController", "SBSystemAperturePresentableManager"};
-            for (int k = 0; k < 3; k++) {
-                Class c = objc_getClass(klasses[k]);
-                if (!c) { apv_log(@"APV: METHOD %s not found", klasses[k]); continue; }
-                unsigned int mc;
-                Method *methods = class_copyMethodList(c, &mc);
-                apv_log(@"APV: === %s instance methods (%u) ===", klasses[k], mc);
-                for (unsigned int i = 0; i < mc; i++) {
-                    apv_log(@"APV:   - %s", sel_getName(method_getName(methods[i])));
-                }
-                free(methods);
-                Method *cm = class_copyMethodList(object_getClass(c), &mc);
-                apv_log(@"APV: === %s class methods (%u) ===", klasses[k], mc);
-                for (unsigned int i = 0; i < mc; i++) {
-                    apv_log(@"APV:   + %s", sel_getName(method_getName(cm[i])));
-                }
-                free(cm);
-            }
-        });
 
             [[NSNotificationCenter defaultCenter] addObserver:[objc_getClass("AVAudioSession") sharedInstance]
                                                      selector:@selector(airpods_routeChangeForState:)
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.9 initialized");
+            apv_log(@"APV: SpringBoard v1.5.0 initialized");
         }
 
         if (isMediaserverd) {
@@ -558,76 +411,7 @@ static BOOL isBannerWindow(id self) {
                 });
             apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-            apv_log(@"APV: mediaserverd v1.2.6 initialized");
-        }
-
-        if (isBluetoothd) {
-            // Dump bluetooth-related classes in bluetoothd
-            static dispatch_once_t onceDumpBT;
-            dispatch_once(&onceDumpBT, ^{
-                apv_log(@"APV: === BLUETOOTHD CLASS DUMP ===");
-                int allCount = objc_getClassList(NULL, 0);
-                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
-                allCount = objc_getClassList(classes, allCount);
-                const char *patterns[] = {"Banner", "Pop", "Alert", "Battery", "AirPod", "Headphone", "Present", "Case", "Connect", "Notify", "UI", "Proximity", "BT", "CB"};
-                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
-                for (int i = 0; i < allCount; i++) {
-                    const char *name = class_getName(classes[i]);
-                    for (int p = 0; p < nPatterns; p++) {
-                        if (strstr(name, patterns[p])) {
-                            apv_log(@"APV: BTCLASS %s", name);
-                            break;
-                        }
-                    }
-                }
-                free(classes);
-                apv_log(@"APV: === END BLUETOOTHD CLASS DUMP ===");
-
-                // Dump methods of key Bluetooth banner classes
-                const char *btClasses[] = {"BTBannerUISession", "BTAirPodsControlServiceClient"};
-                for (int k = 0; k < 2; k++) {
-                    Class c = objc_getClass(btClasses[k]);
-                    if (!c) { apv_log(@"APV: BTMETHOD %s not found", btClasses[k]); continue; }
-                    unsigned int mc;
-                    Method *methods = class_copyMethodList(c, &mc);
-                    apv_log(@"APV: === %s instance methods (%u) ===", btClasses[k], mc);
-                    for (unsigned int i = 0; i < mc; i++) {
-                        apv_log(@"APV:   - %s", sel_getName(method_getName(methods[i])));
-                    }
-                    free(methods);
-                    Method *cm = class_copyMethodList(object_getClass(c), &mc);
-                    apv_log(@"APV: === %s class methods (%u) ===", btClasses[k], mc);
-                    for (unsigned int i = 0; i < mc; i++) {
-                        apv_log(@"APV:   + %s", sel_getName(method_getName(cm[i])));
-                    }
-                    free(cm);
-                }
-            });
-            apv_log(@"APV: bluetoothd v1.3.1 initialized");
-        }
-
-        if (isBluetoothuserd) {
-            static dispatch_once_t onceDumpBTU;
-            dispatch_once(&onceDumpBTU, ^{
-                apv_log(@"APV: === BLUETOOTHUSERD CLASS DUMP ===");
-                int allCount = objc_getClassList(NULL, 0);
-                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
-                allCount = objc_getClassList(classes, allCount);
-                const char *patterns[] = {"Banner", "Pop", "Alert", "Battery", "AirPod", "Headphone", "Present", "Case", "Connect", "Notify", "UI", "Proximity"};
-                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
-                for (int i = 0; i < allCount; i++) {
-                    const char *name = class_getName(classes[i]);
-                    for (int p = 0; p < nPatterns; p++) {
-                        if (strstr(name, patterns[p])) {
-                            apv_log(@"APV: BTUCLASS %s", name);
-                            break;
-                        }
-                    }
-                }
-                free(classes);
-                apv_log(@"APV: === END BLUETOOTHUSERD CLASS DUMP ===");
-            });
-            apv_log(@"APV: bluetoothuserd v1.2.9 initialized");
+            apv_log(@"APV: mediaserverd v1.5.0 initialized");
         }
 
         if (isSharingViewService) {
@@ -671,7 +455,7 @@ static BOOL isBannerWindow(id self) {
                     free(cm);
                 }
             });
-            apv_log(@"APV: SharingViewService v1.4.0 initialized");
+            apv_log(@"APV: SharingViewService v1.5.0 initialized");
         }
     }
 }
