@@ -319,7 +319,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                      name:AVAudioSessionRouteChangeNotification
                                                    object:nil];
 
-        apv_log(@"APV: SpringBoard v1.7.0 initialized");
+        apv_log(@"APV: SpringBoard v1.7.2 initialized");
     }
 
     if (isMediaserverd) {
@@ -352,7 +352,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 
         // Periodic check: AirPods might connect without triggering any notification
         // Every 10 seconds, verify: if AirPods available but not current route → force
-        dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+        dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
         dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), 10 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
         __block int tickCount = 0;
         dispatch_source_set_event_handler(timer, ^{
@@ -379,6 +379,6 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
         dispatch_resume(timer);
         apv_log(@"APV: media periodic timer started (10s)");
 
-        apv_log(@"APV: mediaserverd v1.7.0 initialized");
+        apv_log(@"APV: mediaserverd v1.7.2 initialized");
     }
 }
