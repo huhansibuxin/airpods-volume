@@ -367,6 +367,12 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 %end
 
 %ctor {
+    // diagnostic: write bundle ID to file regardless of process
+    {   NSString *bid = NSBundle.mainBundle.bundleIdentifier;
+        FILE *f = fopen("/tmp/apv_svs_test.txt", "w");
+        if (f) { fprintf(f, "ctor_ran bid=%s\n", bid ? bid.UTF8String : "(nil)"); fclose(f); }
+    }
+
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
     isMediaserverd = [bid isEqualToString:@"com.apple.mediaserverd"];
