@@ -80,7 +80,6 @@ static __attribute__((used)) void writeAirPodsCache(BOOL connected, BOOL current
     sAirPodsCurrentRoute = current;
 }
 
-typedef int (*AudioSessionSetProperty_t)(unsigned int, unsigned int, const void *);
 static int (*original_AudioSessionSetProperty)(unsigned int, unsigned int, const void *) = NULL;
 static __attribute__((used)) void forceRouteToAirPods(int reason);
 
@@ -103,7 +102,7 @@ static int hooked_AudioSessionSetProperty(unsigned int inID, unsigned int inData
 }
 
 static BOOL isAirPodsConnected(void) {
-    return sAirPodsCached;
+    return sAirPodsConnected;
 }
 
 static float applyVolumeCap(float vol) {
@@ -181,6 +180,44 @@ static BOOL isMediaserverd = NO;
         }
     }
     return %orig;
+}
+%end
+
+// ============================================================
+// mediaserverd: block non-BT route selection via MPAVRoutingController
+// ============================================================
+
+static BOOL routeIsBluetooth(id route) {
+    NSString *type = [route valueForKey:@"routeType"];
+    if ([type isEqualToString:@"BluetoothA2DP"] || [type isEqualToString:@"BluetoothHFP"] || [type isEqualToString:@"BluetoothLE"])
+        return YES;
+    id desc = [route valueForKey:@"routeDescription"];
+    if (desc) {
+        for (id out in [desc valueForKey:@"outputs"]) {
+            if (isBluetoothPort(out)) return YES;
+        }
+    }
+    return NO;
+}
+
+%hook MPAVRoutingController
+- (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion {
+    if (isMediaserverd) {
+        readAirPodsCache();
+        if (sAirPodsConnected) {
+            BOOL hasBT = NO;
+            for (id r in routes) {
+                if (routeIsBluetooth(r)) { hasBT = YES; break; }
+            }
+            if (!hasBT) {
+                apv_log(@"APV: MPAV selectRoutes blocked (%lu non-BT routes), forcing AirPods", (unsigned long)routes.count);
+                forceRouteToAirPods(88);
+                if (completion) completion();
+                return;
+            }
+        }
+    }
+    %orig;
 }
 %end
 
