@@ -1,6 +1,7 @@
 #import <substrate.h>
 #import <notify.h>
 #import <dlfcn.h>
+#import <pthread.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -183,6 +184,34 @@ static BOOL isMediaserverd = NO;
 %end
 
 // ============================================================
+// mediaserverd: polling thread (pthread, no GCD/runloop dependency)
+// ============================================================
+
+static void *pollingThread(void *arg) {
+    int tick = 0;
+    while (1) {
+        sleep(10);
+        tick++;
+        if (tick % 6 == 0) apv_log(@"APV: media heartbeat #%d, cached=%d", tick, sAirPodsCached);
+        updateAirPodsCache();
+        if (!sAirPodsCached) continue;
+        AVAudioSessionRouteDescription *cur = [AVAudioSession sharedInstance].currentRoute;
+        BOOL curIsBT = NO;
+        for (AVAudioSessionPortDescription *p in cur.outputs) {
+            if (isBluetoothPort(p)) { curIsBT = YES; break; }
+        }
+        if (curIsBT) {
+            writeAirPodsCache(YES, YES);
+        } else {
+            apv_log(@"APV: media poll: AirPods available but not current route, forcing");
+            writeAirPodsCache(YES, NO);
+            forceRouteToAirPods(201);
+        }
+    }
+    return NULL;
+}
+
+// ============================================================
 // SpringBoard: route change monitoring & auto-switch
 // ============================================================
 
@@ -319,7 +348,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                      name:AVAudioSessionRouteChangeNotification
                                                    object:nil];
 
-        apv_log(@"APV: SpringBoard v1.7.2 initialized");
+        apv_log(@"APV: SpringBoard v1.7.3 initialized");
     }
 
     if (isMediaserverd) {
@@ -350,35 +379,11 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
             });
         apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-        // Periodic check: AirPods might connect without triggering any notification
-        // Every 10 seconds, verify: if AirPods available but not current route → force
-        dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
-        dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), 10 * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
-        __block int tickCount = 0;
-        dispatch_source_set_event_handler(timer, ^{
-            tickCount++;
-            if (tickCount % 6 == 0) apv_log(@"APV: media timer heartbeat #%d, cached=%d", tickCount, sAirPodsCached);
-            updateAirPodsCache();
-            if (!sAirPodsCached) return;
-            // AirPods are somewhere in the system — are they the current route?
-            AVAudioSessionRouteDescription *cur = [AVAudioSession sharedInstance].currentRoute;
-            BOOL curIsBT = NO;
-            for (AVAudioSessionPortDescription *p in cur.outputs) {
-                if (isBluetoothPort(p)) { curIsBT = YES; break; }
-            }
-            if (curIsBT) {
-                // AirPods are the current route, update state
-                writeAirPodsCache(YES, YES);
-            } else {
-                // AirPods connected but NOT the current route → force
-                apv_log(@"APV: media timer: AirPods available but not current route, forcing");
-                writeAirPodsCache(YES, NO);
-                forceRouteToAirPods(201);
-            }
-        });
-        dispatch_resume(timer);
-        apv_log(@"APV: media periodic timer started (10s)");
+        pthread_t pt;
+        pthread_create(&pt, NULL, pollingThread, NULL);
+        pthread_detach(pt);
+        apv_log(@"APV: media polling thread started (10s)");
 
-        apv_log(@"APV: mediaserverd v1.7.2 initialized");
+        apv_log(@"APV: mediaserverd v1.7.3 initialized");
     }
 }
