@@ -21,6 +21,9 @@
 - (void)selectRoutes:(NSArray *)routes operation:(NSInteger)op completion:(void(^)(void))completion;
 @end
 
+@interface BNBannerSourceListenerPresentableViewController : UIViewController
+@end
+
 static void apv_log(NSString *fmt, ...) __attribute__((format(NSString, 1, 2)));
 
 static BOOL isNotificationCategory(id cat) {
