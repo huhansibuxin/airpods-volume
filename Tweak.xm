@@ -354,7 +354,7 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
                                                      name:AVAudioSessionRouteChangeNotification
                                                    object:nil];
 
-        apv_log(@"APV: SpringBoard v1.6.0 initialized");
+        apv_log(@"APV: SpringBoard v1.6.1 initialized");
     }
 
     if (isMediaserverd) {
@@ -382,6 +382,6 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
             });
         apv_log(@"APV: media notify_register status=%u token=%d", status, _airpodsStateToken);
 
-        apv_log(@"APV: mediaserverd v1.6.0 initialized");
+        apv_log(@"APV: mediaserverd v1.6.1 initialized");
     }
 }
