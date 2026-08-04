@@ -131,7 +131,8 @@ static float applyVolumeCap(float vol) {
 
 static BOOL isSpringBoard = NO;
 static BOOL isMediaserverd = NO;
-static BOOL isBluetoothUIService = NO;
+static BOOL isBluetoothd = NO;
+static BOOL isBluetoothuserd = NO;
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
@@ -317,24 +318,33 @@ static __attribute__((used)) void forceRouteToAirPods(int reason) {
 // Block AirPods popup when opening case
 // ============================================================
 
-// Phase 2: log subviews added to SBSystemApertureWindow
-static BOOL isApertureWindow(id self) {
-    return [NSStringFromClass([self class]) isEqualToString:@"SBSystemApertureWindow"];
+// v1.2.8: log subviews added to ALL Banner/BN/Aperture windows
+static BOOL isBannerWindow(id self) {
+    NSString *name = NSStringFromClass([self class]);
+    return [name containsString:@"Banner"]
+        || [name containsString:@"BN"]
+        || [name containsString:@"Aperture"]
+        || [name containsString:@"Alert"];
 }
 %hook UIWindow
 - (void)addSubview:(UIView *)view {
-    if (isApertureWindow(self))
-        apv_log(@"APV: DIAG addSubview: %@", NSStringFromClass([view class]));
+    if (isBannerWindow(self))
+        apv_log(@"APV: DIAG %@ addSubview: %@", NSStringFromClass([self class]), NSStringFromClass([view class]));
     %orig;
 }
 - (void)insertSubview:(UIView *)view atIndex:(NSInteger)idx {
-    if (isApertureWindow(self))
-        apv_log(@"APV: DIAG insertSubview[%ld]: %@", (long)idx, NSStringFromClass([view class]));
+    if (isBannerWindow(self))
+        apv_log(@"APV: DIAG %@ insertSubview[%ld]: %@", NSStringFromClass([self class]), (long)idx, NSStringFromClass([view class]));
     %orig;
 }
 - (void)setRootViewController:(UIViewController *)vc {
-    if (isApertureWindow(self))
-        apv_log(@"APV: DIAG setRootVC: %@", NSStringFromClass([vc class]));
+    if (isBannerWindow(self))
+        apv_log(@"APV: DIAG %@ setRootVC: %@", NSStringFromClass([self class]), NSStringFromClass([vc class]));
+    %orig;
+}
+- (void)makeKeyAndVisible {
+    if (isBannerWindow(self))
+        apv_log(@"APV: DIAG %@ makeKeyAndVisible", NSStringFromClass([self class]));
     %orig;
 }
 %end
@@ -365,9 +375,10 @@ static BOOL isApertureWindow(id self) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     isSpringBoard = [bid isEqualToString:@"com.apple.springboard"];
     isMediaserverd = [bid isEqualToString:@"com.apple.mediaserverd"];
-    isBluetoothUIService = [bid isEqualToString:@"com.apple.BluetoothUIService"];
+    isBluetoothd = [bid isEqualToString:@"com.apple.bluetoothd"];
+    isBluetoothuserd = [bid isEqualToString:@"com.apple.bluetoothuserd"];
 
-    if (isSpringBoard || isMediaserverd || isBluetoothUIService) {
+    if (isSpringBoard || isMediaserverd || isBluetoothd || isBluetoothuserd) {
         if (isSpringBoard) {
             updateAirPodsCache();
             notify_register_check(kDarwinNotifyName, &_airpodsStateToken);
@@ -423,7 +434,7 @@ static BOOL isApertureWindow(id self) {
                                                          name:AVAudioSessionRouteChangeNotification
                                                        object:nil];
 
-            apv_log(@"APV: SpringBoard v1.2.7 initialized");
+            apv_log(@"APV: SpringBoard v1.2.9 initialized");
         }
 
         if (isMediaserverd) {
@@ -454,8 +465,53 @@ static BOOL isApertureWindow(id self) {
             apv_log(@"APV: mediaserverd v1.2.6 initialized");
         }
 
-        if (isBluetoothUIService) {
-            apv_log(@"APV: BluetoothUIService v1.2.6 initialized");
+        if (isBluetoothd) {
+            // Dump bluetooth-related classes in bluetoothd
+            static dispatch_once_t onceDumpBT;
+            dispatch_once(&onceDumpBT, ^{
+                apv_log(@"APV: === BLUETOOTHD CLASS DUMP ===");
+                int allCount = objc_getClassList(NULL, 0);
+                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
+                allCount = objc_getClassList(classes, allCount);
+                const char *patterns[] = {"Banner", "Pop", "Alert", "Battery", "AirPod", "Headphone", "Present", "Case", "Connect", "Notify", "UI", "Banner", "Proximity"};
+                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
+                for (int i = 0; i < allCount; i++) {
+                    const char *name = class_getName(classes[i]);
+                    for (int p = 0; p < nPatterns; p++) {
+                        if (strstr(name, patterns[p])) {
+                            apv_log(@"APV: BTCLASS %s", name);
+                            break;
+                        }
+                    }
+                }
+                free(classes);
+                apv_log(@"APV: === END BLUETOOTHD CLASS DUMP ===");
+            });
+            apv_log(@"APV: bluetoothd v1.2.9 initialized");
+        }
+
+        if (isBluetoothuserd) {
+            static dispatch_once_t onceDumpBTU;
+            dispatch_once(&onceDumpBTU, ^{
+                apv_log(@"APV: === BLUETOOTHUSERD CLASS DUMP ===");
+                int allCount = objc_getClassList(NULL, 0);
+                Class *classes = (Class *)malloc(sizeof(Class) * allCount);
+                allCount = objc_getClassList(classes, allCount);
+                const char *patterns[] = {"Banner", "Pop", "Alert", "Battery", "AirPod", "Headphone", "Present", "Case", "Connect", "Notify", "UI", "Proximity"};
+                int nPatterns = sizeof(patterns) / sizeof(patterns[0]);
+                for (int i = 0; i < allCount; i++) {
+                    const char *name = class_getName(classes[i]);
+                    for (int p = 0; p < nPatterns; p++) {
+                        if (strstr(name, patterns[p])) {
+                            apv_log(@"APV: BTUCLASS %s", name);
+                            break;
+                        }
+                    }
+                }
+                free(classes);
+                apv_log(@"APV: === END BLUETOOTHUSERD CLASS DUMP ===");
+            });
+            apv_log(@"APV: bluetoothuserd v1.2.9 initialized");
         }
     }
 }
