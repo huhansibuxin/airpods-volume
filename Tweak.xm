@@ -10,6 +10,10 @@
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
 @end
 
+@interface NCNotificationRequest : NSObject
+- (NSString *)sectionIdentifier;
+@end
+
 static BOOL isNotificationCategory(id cat) {
     NSString *s = [cat description];
     return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
@@ -110,6 +114,18 @@ static float applyVolumeCap(float vol) {
         }
     }
     return %orig;
+}
+%end
+
+// ============================================================
+// Block Shortcuts automation notifications
+// ============================================================
+
+%hook NCNotificationDispatcher
+- (void)postNotificationWithRequest:(NCNotificationRequest *)req {
+    if ([[req sectionIdentifier] isEqualToString:@"com.apple.shortcuts"])
+        return;
+    %orig;
 }
 %end
 
