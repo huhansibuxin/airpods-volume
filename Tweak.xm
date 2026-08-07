@@ -47,10 +47,10 @@ static void updateAirPodsCache(void) {
     }
 }
 
-static float applyVolumeCap(float vol) {
-    if (sAirPodsConnected)
-        return MIN(vol, 0.4f);
-    return 1.0f;
+static float applyVolumeCap(float vol, id cat) {
+    if (!sAirPodsConnected) return 1.0f;
+    if (isNotificationCategory(cat)) return MIN(vol, 0.4f);
+    return MIN(vol, 0.7f);
 }
 
 // ============================================================
@@ -59,22 +59,19 @@ static float applyVolumeCap(float vol) {
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
-    if (isNotificationCategory(cat))
-        vol = applyVolumeCap(vol);
+    vol = applyVolumeCap(vol, cat);
     return %orig;
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
-    if (isNotificationCategory(cat)) {
-        float cur;
-        if ([self getVolume:&cur forCategory:cat])
-            return [self setVolumeTo:applyVolumeCap(cur + delta) forCategory:cat];
-    }
+    float cur;
+    if ([self getVolume:&cur forCategory:cat])
+        return [self setVolumeTo:applyVolumeCap(cur + delta, cat) forCategory:cat];
     return %orig;
 }
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
     BOOL r = %orig;
-    if (r && isNotificationCategory(cat))
-        *vol = applyVolumeCap(*vol);
+    if (r)
+        *vol = applyVolumeCap(*vol, cat);
     return r;
 }
 %end
