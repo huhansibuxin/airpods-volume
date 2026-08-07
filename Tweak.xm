@@ -16,7 +16,6 @@
 
 @interface SBVolumeControl : NSObject
 - (BOOL)increaseVolume;
-- (BOOL)decreaseVolume;
 @end
 
 static BOOL isNotificationCategory(id cat) {
@@ -72,7 +71,6 @@ static float capForCategory(id cat) {
         float cur;
         // try media categories that might give us actual media volume
         if ([avc getVolume:&cur forCategory:@"Audio/Video"] ||
-            [avc getVolume:&cur forCategory:@"AVAudioSessionCategoryPlayback"] ||
             [avc getVolume:&cur forCategory:AVAudioSessionCategoryPlayback]) {
             if (cur >= 0.7f) return NO;
         }
@@ -93,13 +91,13 @@ static float capForCategory(id cat) {
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
     float cap = capForCategory(cat);
-    if (cap >= 1.0f) return %orig(delta, cat);
+    if (cap >= 1.0f) return %orig;
     float cur;
     if ([self getVolume:&cur forCategory:cat] && (cur + delta) > cap) {
         if (cur >= cap) return YES;
         return [self setVolumeTo:cap forCategory:cat];
     }
-    return %orig(delta, cat);
+    return %orig;
 }
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
     BOOL r = %orig(vol, cat);
