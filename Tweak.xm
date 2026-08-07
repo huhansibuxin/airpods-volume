@@ -8,6 +8,8 @@
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
 - (BOOL)changeVolumeBy:(float)v forCategory:(id)c;
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
+- (BOOL)setActiveCategoryVolumeTo:(float)v;
+- (float)activeCategoryVolume;
 @end
 
 @interface NCNotificationRequest : NSObject
@@ -73,6 +75,15 @@ static float applyVolumeCap(float vol, id cat) {
     if (r)
         *vol = applyVolumeCap(*vol, cat);
     return r;
+}
+- (BOOL)setActiveCategoryVolumeTo:(float)vol {
+    if (!sAirPodsConnected) return %orig;
+    return %orig(MIN(vol, 0.7f));
+}
+- (float)activeCategoryVolume {
+    float vol = %orig;
+    if (!sAirPodsConnected) return vol;
+    return MIN(vol, 0.7f);
 }
 %end
 
@@ -151,9 +162,13 @@ static float applyVolumeCap(float vol, id cat) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
+            float activeVol = [avc activeCategoryVolume];
+            if (activeVol > 0.7f)
+                [avc setActiveCategoryVolumeTo:0.7f];
         } else {
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            [avc setActiveCategoryVolumeTo:1.0f];
         }
     }];
 }
