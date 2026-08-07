@@ -51,7 +51,7 @@ static void updateAirPodsCache(void) {
 static float applyVolumeCap(float vol, id cat) {
     if (!sAirPodsConnected) return 1.0f;
     if (isNotificationCategory(cat)) return MIN(vol, 0.4f);
-    return MIN(vol, 0.7f);
+    return MIN(vol, 0.8f);
 }
 
 static void enforceMediaVolumeCap(void) {
@@ -59,13 +59,27 @@ static void enforceMediaVolumeCap(void) {
     for (UIView *v in vv.subviews) {
         if ([v isKindOfClass:[UISlider class]]) {
             UISlider *sl = (UISlider *)v;
-            if (sl.value > 0.7f) {
-                sl.value = 0.7f;
+            if (sl.value > 0.8f) {
+                sl.value = 0.8f;
                 [sl sendActionsForControlEvents:UIControlEventTouchUpInside];
             }
             break;
         }
     }
+}
+
+static NSTimer *sMediaTimer = nil;
+
+static void startMediaEnforcement(void) {
+    if (sMediaTimer) return;
+    sMediaTimer = [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *t) {
+        enforceMediaVolumeCap();
+    }];
+}
+
+static void stopMediaEnforcement(void) {
+    [sMediaTimer invalidate];
+    sMediaTimer = nil;
 }
 
 // ============================================================
@@ -168,8 +182,10 @@ static void enforceMediaVolumeCap(void) {
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
             dispatch_async(dispatch_get_main_queue(), ^{
                 enforceMediaVolumeCap();
+                startMediaEnforcement();
             });
         } else {
+            stopMediaEnforcement();
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
         }
