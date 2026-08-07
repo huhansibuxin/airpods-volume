@@ -180,7 +180,12 @@ static float capForCategory(id cat) {
 
     [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        updateAirPodsCache();
+        NSInteger reason = [n.userInfo[AVAudioSessionRouteChangeReasonKey] integerValue];
+        if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
+            sAirPodsConnected = NO;
+        } else {
+            updateAirPodsCache();
+        }
         if (sAirPodsConnected) {
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
