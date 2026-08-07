@@ -184,11 +184,7 @@ static float capForCategory(id cat) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            // cap media on connect only above 80%
-            float curMedia;
-            if ([avc getVolume:&curMedia forCategory:@"Audio/Video"] && curMedia > 0.8f) {
-                [avc setVolumeTo:0.8f forCategory:@"Audio/Video"];
-            }
+            [avc setVolumeTo:0.8f forCategory:@"Audio/Video"];
         } else {
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];

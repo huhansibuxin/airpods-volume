@@ -9,7 +9,7 @@ TWEAK_NAME = AirPodsVolume
 
 AirPodsVolume_FILES = Tweak.xm
 AirPodsVolume_CFLAGS = -fobjc-arc
-AirPodsVolume_FRAMEWORKS = AVFoundation MediaPlayer
+AirPodsVolume_FRAMEWORKS = AVFoundation
 
 include $(THEOS)/makefiles/common.mk
 include $(THEOS_MAKE_PATH)/tweak.mk
