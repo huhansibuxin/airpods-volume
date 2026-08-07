@@ -85,22 +85,22 @@ static float capForCategory(id cat) {
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
-    vol = capForCategory(cat) < 1.0f ? MIN(vol, capForCategory(cat)) : vol;
-    return %orig;
+    float cap = capForCategory(cat);
+    if (cap < 1.0f) vol = MIN(vol, cap);
+    return %orig(vol, cat);
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
     float cap = capForCategory(cat);
-    if (cap >= 1.0f) return %orig;
+    if (cap >= 1.0f) return %orig(delta, cat);
     float cur;
     if ([self getVolume:&cur forCategory:cat] && (cur + delta) > cap) {
-        if (cur >= cap) return YES; // already at cap, block increase
-        // otherwise set exactly to cap
+        if (cur >= cap) return YES;
         return [self setVolumeTo:cap forCategory:cat];
     }
-    return %orig;
+    return %orig(delta, cat);
 }
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
-    BOOL r = %orig;
+    BOOL r = %orig(vol, cat);
     if (r) {
         float cap = capForCategory(cat);
         if (cap < 1.0f) *vol = MIN(*vol, cap);
@@ -184,8 +184,11 @@ static float capForCategory(id cat) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            // also cap media on connect
-            [avc setVolumeTo:0.8f forCategory:@"Audio/Video"];
+            // cap media on connect only above 80%
+            float curMedia;
+            if ([avc getVolume:&curMedia forCategory:@"Audio/Video"] && curMedia > 0.8f) {
+                [avc setVolumeTo:0.8f forCategory:@"Audio/Video"];
+            }
         } else {
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
