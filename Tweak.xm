@@ -86,10 +86,15 @@ static float capForCategory(id cat) {
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     float cap = capForCategory(cat);
-    if (cap < 1.0f) vol = MIN(vol, cap);
+    if (!sAirPodsConnected && isNotificationCategory(cat))
+        vol = 1.0f;
+    else if (cap < 1.0f)
+        vol = MIN(vol, cap);
     return %orig(vol, cat);
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
+    if (!sAirPodsConnected && isNotificationCategory(cat))
+        return [self setVolumeTo:1.0f forCategory:cat];
     float cap = capForCategory(cat);
     if (cap >= 1.0f) return %orig;
     float cur;
@@ -103,7 +108,9 @@ static float capForCategory(id cat) {
     BOOL r = %orig(vol, cat);
     if (r) {
         float cap = capForCategory(cat);
-        if (cap < 1.0f) {
+        if (!sAirPodsConnected && isNotificationCategory(cat))
+            *vol = 1.0f;
+        else if (cap < 1.0f) {
             if (!isNotificationCategory(cat)) sLastUncappedMediaVol = *vol;
             *vol = MIN(*vol, cap);
         }
