@@ -52,10 +52,12 @@ static void updateAirPodsCache(void) {
     }
 }
 
+static float sLastUncappedMediaVol = -1.0f;
+
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
     if (isNotificationCategory(cat)) return 0.4f;
-    return 0.8f; // media + everything else: cap at 80%
+    return 0.7f; // media + everything else: cap at 70%
 }
 
 // ============================================================
@@ -72,7 +74,7 @@ static float capForCategory(id cat) {
         if ([avc getVolume:&cur forCategory:@"Audio/Video"] ||
             [avc getVolume:&cur forCategory:@"AVAudioSessionCategoryPlayback"] ||
             [avc getVolume:&cur forCategory:AVAudioSessionCategoryPlayback]) {
-            if (cur >= 0.8f) return NO;
+            if (cur >= 0.7f) return NO;
         }
     }
     return %orig;
@@ -103,7 +105,10 @@ static float capForCategory(id cat) {
     BOOL r = %orig(vol, cat);
     if (r) {
         float cap = capForCategory(cat);
-        if (cap < 1.0f) *vol = MIN(*vol, cap);
+        if (cap < 1.0f) {
+            if (!isNotificationCategory(cat)) sLastUncappedMediaVol = *vol;
+            *vol = MIN(*vol, cap);
+        }
     }
     return r;
 }
@@ -184,7 +189,9 @@ static float capForCategory(id cat) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            [avc setVolumeTo:0.8f forCategory:@"Audio/Video"];
+            [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime sLastUncappedMediaVol
+            if (sLastUncappedMediaVol > 0.7f)
+                [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
         } else {
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
