@@ -51,10 +51,11 @@ static void updateAirPodsCache(void) {
 static float applyVolumeCap(float vol, id cat) {
     if (!sAirPodsConnected) return 1.0f;
     if (isNotificationCategory(cat)) return MIN(vol, 0.4f);
-    return MIN(vol, 0.8f);
+    return 1.0f; // media vol capped in SBVolumeControl, not here
 }
 
-static void enforceMediaVolumeCap(void) {
+// One-time pull on connect: use MPVolumeView to get ref, then set to cap
+static void capMediaVolumeOnConnect(void) {
     MPVolumeView *vv = [[MPVolumeView alloc] initWithFrame:CGRectMake(-1000, -1000, 1, 1)];
     for (UIView *v in vv.subviews) {
         if ([v isKindOfClass:[UISlider class]]) {
@@ -68,22 +69,21 @@ static void enforceMediaVolumeCap(void) {
     }
 }
 
-static NSTimer *sMediaTimer = nil;
+// ============================================================
+// SBVolumeControl: blocks hardware buttons + CC slider
+// ============================================================
 
-static void startMediaEnforcement(void) {
-    if (sMediaTimer) return;
-    sMediaTimer = [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *t) {
-        enforceMediaVolumeCap();
-    }];
+%hook SBVolumeControl
+- (void)increaseVolume {
+    if (sAirPodsConnected && [AVAudioSession sharedInstance].outputVolume >= 0.8f) {
+        return;
+    }
+    %orig;
 }
-
-static void stopMediaEnforcement(void) {
-    [sMediaTimer invalidate];
-    sMediaTimer = nil;
-}
+%end
 
 // ============================================================
-// Volume cap: AVSystemController
+// Volume cap: AVSystemController (ringer / notifications)
 // ============================================================
 
 %hook AVSystemController
@@ -181,11 +181,9 @@ static void stopMediaEnforcement(void) {
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
             dispatch_async(dispatch_get_main_queue(), ^{
-                enforceMediaVolumeCap();
-                startMediaEnforcement();
+                capMediaVolumeOnConnect();
             });
         } else {
-            stopMediaEnforcement();
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
         }
