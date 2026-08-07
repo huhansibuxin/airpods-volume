@@ -2,14 +2,13 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <MediaPlayer/MediaPlayer.h>
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
 - (BOOL)setVolumeTo:(float)v forCategory:(id)c;
 - (BOOL)changeVolumeBy:(float)v forCategory:(id)c;
 - (BOOL)getVolume:(float *)v forCategory:(id)c;
-- (BOOL)setActiveCategoryVolumeTo:(float)v;
-- (float)activeCategoryVolume;
 @end
 
 @interface NCNotificationRequest : NSObject
@@ -55,6 +54,20 @@ static float applyVolumeCap(float vol, id cat) {
     return MIN(vol, 0.7f);
 }
 
+static void enforceMediaVolumeCap(void) {
+    MPVolumeView *vv = [[MPVolumeView alloc] initWithFrame:CGRectMake(-1000, -1000, 1, 1)];
+    for (UIView *v in vv.subviews) {
+        if ([v isKindOfClass:[UISlider class]]) {
+            UISlider *sl = (UISlider *)v;
+            if (sl.value > 0.7f) {
+                sl.value = 0.7f;
+                [sl sendActionsForControlEvents:UIControlEventTouchUpInside];
+            }
+            break;
+        }
+    }
+}
+
 // ============================================================
 // Volume cap: AVSystemController
 // ============================================================
@@ -75,15 +88,6 @@ static float applyVolumeCap(float vol, id cat) {
     if (r)
         *vol = applyVolumeCap(*vol, cat);
     return r;
-}
-- (BOOL)setActiveCategoryVolumeTo:(float)vol {
-    if (!sAirPodsConnected) return %orig;
-    return %orig(MIN(vol, 0.7f));
-}
-- (float)activeCategoryVolume {
-    float vol = %orig;
-    if (!sAirPodsConnected) return vol;
-    return MIN(vol, 0.7f);
 }
 %end
 
@@ -162,13 +166,12 @@ static float applyVolumeCap(float vol, id cat) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            float activeVol = [avc activeCategoryVolume];
-            if (activeVol > 0.7f)
-                [avc setActiveCategoryVolumeTo:0.7f];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                enforceMediaVolumeCap();
+            });
         } else {
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
-            [avc setActiveCategoryVolumeTo:1.0f];
         }
     }];
 }
