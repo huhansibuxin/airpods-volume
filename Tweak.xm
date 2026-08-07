@@ -2,7 +2,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
-#import <MediaPlayer/MediaPlayer.h>
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
@@ -13,6 +12,11 @@
 
 @interface NCNotificationRequest : NSObject
 - (NSString *)sectionIdentifier;
+@end
+
+@interface SBVolumeControl : NSObject
+- (BOOL)increaseVolume;
+- (BOOL)decreaseVolume;
 @end
 
 static BOOL isNotificationCategory(id cat) {
@@ -48,59 +52,59 @@ static void updateAirPodsCache(void) {
     }
 }
 
-static float applyVolumeCap(float vol, id cat) {
+static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
-    if (isNotificationCategory(cat)) return MIN(vol, 0.4f);
-    return 1.0f; // media vol capped in SBVolumeControl, not here
-}
-
-// One-time pull on connect: use MPVolumeView to get ref, then set to cap
-static void capMediaVolumeOnConnect(void) {
-    MPVolumeView *vv = [[MPVolumeView alloc] initWithFrame:CGRectMake(-1000, -1000, 1, 1)];
-    for (UIView *v in vv.subviews) {
-        if ([v isKindOfClass:[UISlider class]]) {
-            UISlider *sl = (UISlider *)v;
-            if (sl.value > 0.8f) {
-                sl.value = 0.8f;
-                [sl sendActionsForControlEvents:UIControlEventTouchUpInside];
-            }
-            break;
-        }
-    }
+    if (isNotificationCategory(cat)) return 0.4f;
+    return 0.8f; // media + everything else: cap at 80%
 }
 
 // ============================================================
-// SBVolumeControl: blocks hardware buttons + CC slider
+// SBVolumeControl: block hardware volume buttons
 // ============================================================
 
 %hook SBVolumeControl
-- (void)increaseVolume {
-    if (sAirPodsConnected && [AVAudioSession sharedInstance].outputVolume >= 0.8f) {
-        return;
+- (BOOL)increaseVolume {
+    if (sAirPodsConnected) {
+        // read current volume via AVSystemController (any non-ringer cat)
+        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+        float cur;
+        // try media categories that might give us actual media volume
+        if ([avc getVolume:&cur forCategory:@"Audio/Video"] ||
+            [avc getVolume:&cur forCategory:@"AVAudioSessionCategoryPlayback"] ||
+            [avc getVolume:&cur forCategory:AVAudioSessionCategoryPlayback]) {
+            if (cur >= 0.8f) return NO;
+        }
     }
-    %orig;
+    return %orig;
 }
 %end
 
 // ============================================================
-// Volume cap: AVSystemController (ringer / notifications)
+// AVSystemController: catch CC slider + all volume paths
 // ============================================================
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
-    vol = applyVolumeCap(vol, cat);
+    vol = capForCategory(cat) < 1.0f ? MIN(vol, capForCategory(cat)) : vol;
     return %orig;
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
+    float cap = capForCategory(cat);
+    if (cap >= 1.0f) return %orig;
     float cur;
-    if ([self getVolume:&cur forCategory:cat])
-        return [self setVolumeTo:applyVolumeCap(cur + delta, cat) forCategory:cat];
+    if ([self getVolume:&cur forCategory:cat] && (cur + delta) > cap) {
+        if (cur >= cap) return YES; // already at cap, block increase
+        // otherwise set exactly to cap
+        return [self setVolumeTo:cap forCategory:cat];
+    }
     return %orig;
 }
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
     BOOL r = %orig;
-    if (r)
-        *vol = applyVolumeCap(*vol, cat);
+    if (r) {
+        float cap = capForCategory(cat);
+        if (cap < 1.0f) *vol = MIN(*vol, cap);
+    }
     return r;
 }
 %end
@@ -180,9 +184,8 @@ static void capMediaVolumeOnConnect(void) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                capMediaVolumeOnConnect();
-            });
+            // also cap media on connect
+            [avc setVolumeTo:0.8f forCategory:@"Audio/Video"];
         } else {
             [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
