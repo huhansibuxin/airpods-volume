@@ -184,55 +184,52 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
 }
 
 // ============================================================
-// [DEBUG] AirPods 弹窗探测 —— 在 BluetoothUIService 进程内 hook 源头入口
-// activateBanner:withXPCConnection:，记录 presentableType / isLowBatteryBanner
-// / requestIdentifier，不拦截。确认取值后删除本段并改为精准拦截。
-// 注意：view 生命周期回调（viewWillAppear 等）是灵动岛宿主进程侧触发，
-// 在 BluetoothUIService 进程内不会被调用，故不能作为探测点（已验证为空）。
+// [DEBUG] AirPods 弹窗探测 —— 在 SpringBoard 内 hook 灵动岛宿主
+// BKSystemApertureController 的 presentPresentable:withOptions:userInfo:
+// （含 fallback addPresentable: / enqueuePresentable:withOptions:userInfo:），
+// 记录 presentable 的 class / presentableType / isLowBatteryBanner，不拦截。
+// 确认取值后删除本段并改为精准拦截（连接类掐掉、低电量放行）。
+// 架构：弹窗渲染宿主是 SpringBoard 内的 BKSystemApertureController
+// （BannerKit 框架装在 SpringBoard 进程，代码在 dyld 共享缓存），
+// BluetoothUIService 只是按需的数据源（被杀会被蓝牙栈重启），
+// 故 hook SpringBoard 可一网打尽，无需注入 BluetoothUIService。
 // ============================================================
 
-@interface BluetoothUIServiceBanner : UIViewController
-- (NSInteger)presentableType;
-- (BOOL)isLowBatteryBanner;
-- (NSString *)requestIdentifier;
-- (void)dismissBanner;
-@end
-
-@interface BluetoothUIService : NSObject
-- (void)activateBanner:(BluetoothUIServiceBanner *)banner withXPCConnection:(id)conn;
-@end
-
-%hook BluetoothUIService
-- (void)activateBanner:(BluetoothUIServiceBanner *)banner withXPCConnection:(id)conn {
+static void logPresentable(id presentable, NSString *via) {
+    if (!presentable) return;
     NSInteger t = 0;
     BOOL low = NO;
-    NSString *rid = nil;
-    @try { t = (NSInteger)[banner presentableType]; } @catch (id e) {}
-    @try { low = (BOOL)[banner isLowBatteryBanner]; } @catch (id e) {}
-    @try { rid = [banner requestIdentifier]; } @catch (id e) {}
+    NSString *pcls = NSStringFromClass([presentable class]);
+    @try { t = (NSInteger)[presentable presentableType]; } @catch (id e) {}
+    @try { low = (BOOL)[presentable isLowBatteryBanner]; } @catch (id e) {}
     NSString *line = [NSString stringWithFormat:
-        @"[AirPodsPopup] activateBanner presentableType=%ld isLowBattery=%d rid=%@\n",
-        (long)t, low, rid];
+        @"[AirPodsPopup] %@ class=%@ presentableType=%ld isLowBattery=%d\n",
+        via, pcls, (long)t, low];
     const char *p = [line UTF8String];
     FILE *f = fopen("/var/jb/tmp/airpods_popup_types.log", "a");
     if (f) { fputs(p, f); fclose(f); }
-    %orig;
 }
-%end
 
-// 辅助信号：若本进程真的把 banner 当 VC 加进窗口（宿主进程才会），
-// 这里会打印；BluetoothUIService 进程内预期不打印（验证架构假设）。
-%hook BluetoothUIServiceBanner
-- (void)viewWillAppear:(BOOL)animated {
-    NSInteger t = 0;
-    @try { t = (NSInteger)[self presentableType]; } @catch (id e) {}
-    NSString *line = [NSString stringWithFormat:@"[AirPodsPopup] VIEW viewWillAppear presentableType=%ld\n", (long)t];
-    const char *p = [line UTF8String];
-    FILE *f = fopen("/var/jb/tmp/airpods_popup_types.log", "a");
-    if (f) { fputs(p, f); fclose(f); }
-    %orig;
+static id (*origPresentPresentable)(id, SEL, id, id, id) = NULL;
+static id replPresentPresentable(id self, SEL _cmd, id presentable, id options, id userInfo) {
+    logPresentable(presentable, @"presentPresentable");
+    if (origPresentPresentable) return origPresentPresentable(self, _cmd, presentable, options, userInfo);
+    return nil;
 }
-%end
+
+static id (*origEnqueuePresentable)(id, SEL, id, id, id) = NULL;
+static id replEnqueuePresentable(id self, SEL _cmd, id presentable, id options, id userInfo) {
+    logPresentable(presentable, @"enqueuePresentable");
+    if (origEnqueuePresentable) return origEnqueuePresentable(self, _cmd, presentable, options, userInfo);
+    return nil;
+}
+
+static id (*origAddPresentable)(id, SEL, id) = NULL;
+static id replAddPresentable(id self, SEL _cmd, id presentable) {
+    logPresentable(presentable, @"addPresentable");
+    if (origAddPresentable) return origAddPresentable(self, _cmd, presentable);
+    return nil;
+}
 
 // ============================================================
 // %ctor
@@ -289,5 +286,22 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
                         (IMP)replPostNotification, (IMP *)&origPostNotification);
         MSHookMessageEx(ncdCls, @selector(modifyNotificationWithRequest:),
                         (IMP)replModifyNotification, (IMP *)&origModifyNotification);
+    }
+
+    // [DEBUG] AirPods 弹窗探测：hook SpringBoard 内的灵动岛宿主 BKSystemApertureController
+    Class saCls = NSClassFromString(@"BKSystemApertureController");
+    if (saCls) {
+        if ([saCls instancesRespondToSelector:@selector(presentPresentable:withOptions:userInfo:)]) {
+            MSHookMessageEx(saCls, @selector(presentPresentable:withOptions:userInfo:),
+                            (IMP)replPresentPresentable, (IMP *)&origPresentPresentable);
+        }
+        if ([saCls instancesRespondToSelector:@selector(enqueuePresentable:withOptions:userInfo:)]) {
+            MSHookMessageEx(saCls, @selector(enqueuePresentable:withOptions:userInfo:),
+                            (IMP)replEnqueuePresentable, (IMP *)&origEnqueuePresentable);
+        }
+        if ([saCls instancesRespondToSelector:@selector(addPresentable:)]) {
+            MSHookMessageEx(saCls, @selector(addPresentable:),
+                            (IMP)replAddPresentable, (IMP *)&origAddPresentable);
+        }
     }
 }
