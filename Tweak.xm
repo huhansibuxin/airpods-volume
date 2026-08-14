@@ -184,6 +184,24 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
 }
 
 // ============================================================
+// [DEBUG] AirPods 弹窗类型探测 —— 仅记录 presentableType，不拦截。
+// 用于区分"连接/开合弹窗"与"低电量弹窗"的真实取值，确认后删除本段。
+// 仅在 BluetoothUIService 进程内生效（SpringBoard 无此类，Logos 自动跳过）。
+// ============================================================
+%hook BluetoothUIServiceBanner
+- (void)viewWillAppear:(BOOL)animated {
+    NSInteger t = 0;
+    @try { t = (NSInteger)[self presentableType]; } @catch (id e) {}
+    NSString *line = [NSString stringWithFormat:@"[AirPodsPopup] presentableType=%ld class=%@\n",
+                      (long)t, NSStringFromClass([self class])];
+    const char *p = [line UTF8String];
+    FILE *f = fopen("/var/jb/tmp/airpods_popup_types.log", "a");
+    if (f) { fputs(p, f); fclose(f); }
+    %orig;
+}
+%end
+
+// ============================================================
 // %ctor
 // ============================================================
 
