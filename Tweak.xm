@@ -195,6 +195,12 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
 // 故 hook SpringBoard 可一网打尽，无需注入 BluetoothUIService。
 // ============================================================
 
+// 让编译器认识 presentable 上的两个属性选择器（运行时用 @try 兜底，安全）
+@interface NSObject (AirPodsPopupPresentable)
+- (NSInteger)presentableType;
+- (BOOL)isLowBatteryBanner;
+@end
+
 static void logPresentable(id presentable, NSString *via) {
     if (!presentable) return;
     NSInteger t = 0;
