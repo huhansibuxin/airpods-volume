@@ -184,21 +184,49 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
 }
 
 // ============================================================
-// [DEBUG] AirPods 弹窗类型探测 —— 仅记录 presentableType，不拦截。
-// 用于区分"连接/开合弹窗"与"低电量弹窗"的真实取值，确认后删除本段。
-// 仅在 BluetoothUIService 进程内生效（SpringBoard 无此类，Logos 自动跳过）。
+// [DEBUG] AirPods 弹窗探测 —— 在 BluetoothUIService 进程内 hook 源头入口
+// activateBanner:withXPCConnection:，记录 presentableType / isLowBatteryBanner
+// / requestIdentifier，不拦截。确认取值后删除本段并改为精准拦截。
+// 注意：view 生命周期回调（viewWillAppear 等）是灵动岛宿主进程侧触发，
+// 在 BluetoothUIService 进程内不会被调用，故不能作为探测点（已验证为空）。
 // ============================================================
+
 @interface BluetoothUIServiceBanner : UIViewController
 - (NSInteger)presentableType;
+- (BOOL)isLowBatteryBanner;
+- (NSString *)requestIdentifier;
 - (void)dismissBanner;
 @end
 
+@interface BluetoothUIService : NSObject
+- (void)activateBanner:(BluetoothUIServiceBanner *)banner withXPCConnection:(id)conn;
+@end
+
+%hook BluetoothUIService
+- (void)activateBanner:(BluetoothUIServiceBanner *)banner withXPCConnection:(id)conn {
+    NSInteger t = 0;
+    BOOL low = NO;
+    NSString *rid = nil;
+    @try { t = (NSInteger)[banner presentableType]; } @catch (id e) {}
+    @try { low = (BOOL)[banner isLowBatteryBanner]; } @catch (id e) {}
+    @try { rid = [banner requestIdentifier]; } @catch (id e) {}
+    NSString *line = [NSString stringWithFormat:
+        @"[AirPodsPopup] activateBanner presentableType=%ld isLowBattery=%d rid=%@\n",
+        (long)t, low, rid];
+    const char *p = [line UTF8String];
+    FILE *f = fopen("/var/jb/tmp/airpods_popup_types.log", "a");
+    if (f) { fputs(p, f); fclose(f); }
+    %orig;
+}
+%end
+
+// 辅助信号：若本进程真的把 banner 当 VC 加进窗口（宿主进程才会），
+// 这里会打印；BluetoothUIService 进程内预期不打印（验证架构假设）。
 %hook BluetoothUIServiceBanner
 - (void)viewWillAppear:(BOOL)animated {
     NSInteger t = 0;
     @try { t = (NSInteger)[self presentableType]; } @catch (id e) {}
-    NSString *line = [NSString stringWithFormat:@"[AirPodsPopup] presentableType=%ld class=%@\n",
-                      (long)t, NSStringFromClass([self class])];
+    NSString *line = [NSString stringWithFormat:@"[AirPodsPopup] VIEW viewWillAppear presentableType=%ld\n", (long)t];
     const char *p = [line UTF8String];
     FILE *f = fopen("/var/jb/tmp/airpods_popup_types.log", "a");
     if (f) { fputs(p, f); fclose(f); }
@@ -212,6 +240,15 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
 
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
+
+    // [DEBUG] 注入确认标记：任何被注入的进程都写一行，用于区分
+    // "未注入 BluetoothUIService" 与 "注入了但 hook 未触发"。确认后删除。
+    {
+        NSString *m = [NSString stringWithFormat:@"[AirPodsPopup] injected bid=%@\n", bid];
+        FILE *f = fopen("/var/jb/tmp/airpods_injection.log", "a");
+        if (f) { fputs([m UTF8String], f); fclose(f); }
+    }
+
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
 
     updateAirPodsCache();
