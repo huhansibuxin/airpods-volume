@@ -159,15 +159,29 @@ static float capForCategory(id cat) {
 
 // ============================================================
 // Block Shortcuts automation notifications
+// 手动 MSHookMessageEx，挂在 %ctor(SpringBoard) 内：先用 NSClassFromString
+// 强制 realize 类再挂 hook，规避 Logos %hook 在类未加载时静默失败（respring 偶发失效）；
+// 同时拦截 post + modify 两条路径（快捷指令通知常被系统合并/更新，原 hook 漏掉 modify）。
 // ============================================================
 
-%hook NCNotificationDispatcher
-- (void)postNotificationWithRequest:(NCNotificationRequest *)req {
-    if ([[req sectionIdentifier] isEqualToString:@"com.apple.shortcuts"])
-        return;
-    %orig;
+static BOOL isShortcutsNotification(id req) {
+    if (!req) return NO;
+    NSString *sid = [req sectionIdentifier];
+    return [sid isEqualToString:@"com.apple.shortcuts"];
 }
-%end
+
+static void (*origPostNotification)(id, SEL, id) = NULL;
+static void (*origModifyNotification)(id, SEL, id) = NULL;
+
+static void replPostNotification(id self, SEL _cmd, id req) {
+    if (isShortcutsNotification(req)) return;
+    if (origPostNotification) origPostNotification(self, _cmd, req);
+}
+
+static void replModifyNotification(id self, SEL _cmd, id req) {
+    if (isShortcutsNotification(req)) return;
+    if (origModifyNotification) origModifyNotification(self, _cmd, req);
+}
 
 // ============================================================
 // %ctor
@@ -207,4 +221,13 @@ static float capForCategory(id cat) {
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
         }
     }];
+
+    // 拦截快捷指令通知：类已强制加载，手动挂 hook（覆盖 post + modify 两条路径）
+    Class ncdCls = NSClassFromString(@"NCNotificationDispatcher");
+    if (ncdCls) {
+        MSHookMessageEx(ncdCls, @selector(postNotificationWithRequest:),
+                        (IMP)replPostNotification, (IMP *)&origPostNotification);
+        MSHookMessageEx(ncdCls, @selector(modifyNotificationWithRequest:),
+                        (IMP)replModifyNotification, (IMP *)&origModifyNotification);
+    }
 }
