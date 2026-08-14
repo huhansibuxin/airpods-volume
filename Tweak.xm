@@ -218,14 +218,14 @@ static void storeOrig(SEL sel, Class c, IMP imp) {
         CFDictionarySetValue(gOrigBySel, key, per);
         CFRelease(per);
     }
-    CFDictionarySetValue(per, c, imp);
+    CFDictionarySetValue(per, (__bridge void *)c, (void *)imp);
 }
 static IMP fetchOrig(SEL sel, Class c) {
     if (!gOrigBySel) return NULL;
     CFStringRef key = (__bridge CFStringRef)NSStringFromSelector(sel);
-    CFDictionaryRef per = CFDictionaryGetValue(gOrigBySel, key);
+    CFDictionaryRef per = (CFDictionaryRef)CFDictionaryGetValue(gOrigBySel, key);
     if (!per) return NULL;
-    return (IMP)CFDictionaryGetValue(per, c);
+    return (IMP)CFDictionaryGetValue(per, (__bridge void *)c);
 }
 
 static void appendLog(NSString *line) {
