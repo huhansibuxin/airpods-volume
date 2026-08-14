@@ -1,1 +1,1 @@
-{ Filter = { Bundles = (com.apple.springboard, com.apple.mediaserverd); }; }
+{ Filter = { Bundles = (com.apple.springboard); }; }
