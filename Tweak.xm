@@ -188,6 +188,11 @@ static void replModifyNotification(id self, SEL _cmd, id req) {
 // 用于区分"连接/开合弹窗"与"低电量弹窗"的真实取值，确认后删除本段。
 // 仅在 BluetoothUIService 进程内生效（SpringBoard 无此类，Logos 自动跳过）。
 // ============================================================
+@interface BluetoothUIServiceBanner : UIViewController
+- (NSInteger)presentableType;
+- (void)dismissBanner;
+@end
+
 %hook BluetoothUIServiceBanner
 - (void)viewWillAppear:(BOOL)animated {
     NSInteger t = 0;
