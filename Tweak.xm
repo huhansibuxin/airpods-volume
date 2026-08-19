@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <dlfcn.h>
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
@@ -159,15 +160,36 @@ static float capForCategory(id cat) {
 
 // ============================================================
 // Block Shortcuts automation notifications
+// iOS16 上 NCNotificationDispatcher.postNotificationWithRequest:
+// 不是唯一入口：自动化通知常被系统合并/更新，走
+// modifyNotificationWithRequest:（见 b04019a 实证），只 hook post
+// 会漏拦。且 Logos %hook 在 SpringBoard 启动早期类未加载时会
+// 静默失败（respring 偶发失效），故改在 %ctor 内先 dlopen
+// 强制加载 UserNotificationsKit，再 NSClassFromString realize 类、
+// respondsToSelector 防御后 MSHookMessageEx 挂 post + modify 双路径。
+// 返回类型按 dump 签名用 id：- (id)postNotificationWithRequest: / modifyNotificationWithRequest:
 // ============================================================
 
-%hook NCNotificationDispatcher
-- (void)postNotificationWithRequest:(NCNotificationRequest *)req {
-    if ([[req sectionIdentifier] isEqualToString:@"com.apple.shortcuts"])
-        return;
-    %orig;
+static BOOL isShortcutsRequest(id req) {
+    if (!req) return NO;
+    NSString *sid = [req sectionIdentifier];
+    return sid != nil && [sid isEqualToString:@"com.apple.shortcuts"];
 }
-%end
+
+static id (*origDispatcherPost)(id, SEL, id) = NULL;
+static id (*origDispatcherModify)(id, SEL, id) = NULL;
+
+static id replDispatcherPost(id self, SEL _cmd, id req) {
+    if (isShortcutsRequest(req)) return nil;
+    if (origDispatcherPost) return origDispatcherPost(self, _cmd, req);
+    return nil;
+}
+
+static id replDispatcherModify(id self, SEL _cmd, id req) {
+    if (isShortcutsRequest(req)) return nil;
+    if (origDispatcherModify) return origDispatcherModify(self, _cmd, req);
+    return nil;
+}
 
 // ============================================================
 // %ctor
@@ -207,4 +229,16 @@ static float capForCategory(id cat) {
             [avc setVolumeTo:1.0f forCategory:@"Alert"];
         }
     }];
+
+    // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
+    dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
+    Class ncdCls = NSClassFromString(@"NCNotificationDispatcher");
+    if (ncdCls) {
+        if ([ncdCls instancesRespondToSelector:@selector(postNotificationWithRequest:)])
+            MSHookMessageEx(ncdCls, @selector(postNotificationWithRequest:),
+                            (IMP)replDispatcherPost, (IMP *)&origDispatcherPost);
+        if ([ncdCls instancesRespondToSelector:@selector(modifyNotificationWithRequest:)])
+            MSHookMessageEx(ncdCls, @selector(modifyNotificationWithRequest:),
+                            (IMP)replDispatcherModify, (IMP *)&origDispatcherModify);
+    }
 }
