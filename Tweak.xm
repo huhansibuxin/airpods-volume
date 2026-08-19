@@ -292,8 +292,8 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 @end
 
 static id sAirPodsOutputDevice = nil;      // 缓存的 AirPods 输出设备对象
-static NSTimeInterval sLastRouteForce = 0; // stolen 强制切换冷却（3s 逃生通道）
-static NSTimeInterval sLastAttachedForce = 0; // attached 去重（0.8s，防多通知源叠加重复切）
+static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却（3s 逃生通道；戴上时重置）
+static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（戴上 0→1 重置冷却）
 
 // 缓存当前输出中的 AirPods 设备对象（AVOutputContext）
 static void cacheAirPodsDeviceIfPresent(void) {
@@ -336,17 +336,12 @@ static void routeLog(NSString *msg) {
 // AVOutputContext 回调同进程，标准 block 语义；保守起见 completionHandler
 // 内不捕获外部 ObjC 对象，why 用 const char*。
 static void forceRouteToAirPods(const char *why) {
-    BOOL isAttached = (why && why[0] == 'a'); // "attached" vs "stolen"
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    // 分开冷却：attached 0.8s 去重（多通知源叠加防重复），stolen 3s 逃生通道
-    if (isAttached) {
-        if (now - sLastAttachedForce < 0.8) return;
-        sLastAttachedForce = now;
-    } else {
-        if (now - sLastRouteForce < 3.0) return;
-        sLastRouteForce = now;
-    }
-    // 幂等去重：输出已是 AirPods 就不再切
+    // 统一 3s 冷却 = 逃生通道：3s 内连点喇叭/车载 2 次，第二次不被抢回。
+    // 戴上必切不受影响：蓝牙 0→1 时 enforceAirPodsRoute 会重置 sLastRouteForce。
+    if (now - sLastRouteForce < 3.0) return;
+    sLastRouteForce = now;
+    // 幂等去重：输出已是 AirPods 就不再切（多通知源叠加时避免重复）
     if (currentOutputIsAirPods()) return;
     if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
     id dev = sAirPodsOutputDevice;
@@ -406,6 +401,10 @@ static void enforceAirPodsRoute(void) {
     @try {
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
+        // 戴上（蓝牙 0→1）：重置 3s 逃生冷却，保证"戴上必切"不被连点冷却挡住
+        if (airInBT && !sPrevAirInBT)
+            sLastRouteForce = 0;
+        sPrevAirInBT = airInBT;
         sAirPodsConnected = airInRoute || airInBT;
         if (!sAirPodsConnected) {
             sOutputWasAirPods = NO; // 不在场，重置状态
