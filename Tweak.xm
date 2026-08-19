@@ -158,8 +158,11 @@ static float capForCategory(id cat) {
         if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
             *vol = 1.0f;
         else if (cap < 1.0f) {
-            if (!isNotificationCategory(cat)) sLastUncappedMediaVol = *vol;
             *vol = MIN(*vol, cap);
+        } else if (!sAirPodsConnected && !isNotificationCategory(cat)) {
+            // 未戴 AirPods 时持续记录当前媒体音量（用户戴前真实值）——
+            // 戴上时系统会把媒体音量重置为 70%，不能在戴上时覆盖记录
+            sLastUncappedMediaVol = *vol;
         }
     }
     return r;
@@ -444,15 +447,14 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 摘下媒体音量：无条件强制 100%（老板要求）——sLast 记录不可靠：
-            // 戴上 AirPods 时系统会把媒体音量重置为 70%（蓝牙默认），
-            // sLast 记的是 70 而非戴前用户值，永远恢复不对。
+            // 摘下媒体音量：优先恢复戴前真实值（sLast 由"未戴时轮询/事件"持续记录，
+            // 是用户自己的值，不是系统重置的 70）；没记录过才强制 100%
             if (!sMediaRestored) {
-                BOOL ok = [avc setVolumeTo:1.0f forCategory:@"Audio/Video"];
-                routeLog([NSString stringWithFormat:@"restore media ->100%% ok=%d", ok]);
+                float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
+                BOOL ok = [avc setVolumeTo:restore forCategory:@"Audio/Video"];
+                routeLog([NSString stringWithFormat:@"restore media restore=%.2f sLast=%.2f ok=%d", restore, sLastUncappedMediaVol, ok]);
                 sLastUncappedMediaVol = -1.0f;
                 sMediaRestored = YES;
-            }
             }
         }
         enforceAirPodsRoute();
@@ -492,11 +494,18 @@ static void handleRouteEvent(NSString *source) {
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(timer, ^{
         if (!airPodsInBluetoothDevices()) {
-            // 不在场：清理状态，不做任何其它查询/切换
+            // 不在场：清理状态；同时持续记录当前媒体音量（用户戴前真实值，
+            // 摘下恢复用它——戴上时系统会重置音量，不能在戴上时记录）
             if (sAirPodsConnected) {
                 sAirPodsConnected = NO;
                 sOutputWasAirPods = NO;
                 sLastEvtState = 0;
+            }
+            if (!sMediaRestored) {
+                id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+                float cur = -1.0f;
+                if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur >= 0.0f)
+                    sLastUncappedMediaVol = cur;
             }
             return;
         }
