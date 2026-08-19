@@ -19,6 +19,11 @@
 - (BOOL)increaseVolume;
 @end
 
+@interface SBSoundDefaults : NSObject
++ (id)standardDefaults;
+- (BOOL)isRingerMuted;
+@end
+
 static BOOL isNotificationCategory(id cat) {
     NSString *s = [cat description];
     return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
