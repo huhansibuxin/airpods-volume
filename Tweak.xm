@@ -250,24 +250,26 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
-// MRAVOutputContext.setOutputDevices: 是控制中心"音频输出"的底层 API
-//（iOS16 实机验证：sharedSystemAudioContext 可用，outputDevices 返回
-//  当前输出，AirPods Pro uid=MAC-tacl；BluetoothManager connectedDevices
-//  返回所有已连接蓝牙设备，可判断 AirPods 是否在场）。
-// 戴上 AirPods 时缓存其 MRAVOutputDevice 对象；输出被切走（如车载激活）
-// 而 AirPods 仍在蓝牙连接时，用缓存对象强制切回（2s 冷却防反复抢占打架）。
+// 改用 AVOutputContext（AVFoundation 公开 API）：
+// MRAVOutputContext.setOutputDevices: 的 block 在 MediaRemote XPC
+// 回复回调里执行，SpringBoard 进程直接调必崩（实测 EXC_BAD_ACCESS
+// objc_storeStrong，两次确认）；AVOutputContext 的
+// setOutputDevice:options:completionHandler: 是同进程标准回调，安全。
+// BluetoothManager connectedDevices 判断 AirPods 是否在场（不依赖当前路由）。
+// 戴上时缓存 AVOutputDevice 对象；输出被切走（如车载激活）而 AirPods
+// 仍在蓝牙连接时，用缓存对象强制切回（2s 冷却防反复抢占打架）。
 // ============================================================
 
-@interface MRAVOutputDevice : NSObject
+@interface AVOutputDevice : NSObject
 - (NSString *)name;
 - (NSString *)uid;
 @end
 
-@interface MRAVOutputContext : NSObject
+@interface AVOutputContext : NSObject
 + (id)sharedSystemAudioContext;
 - (NSArray *)outputDevices;
-- (void)setOutputDevices:(NSArray *)devices withPassword:(NSString *)pwd
-     withCallbackQueue:(dispatch_queue_t)q block:(void (^)(BOOL, NSError *))block;
+- (void)setOutputDevice:(id)device options:(NSUInteger)options
+      completionHandler:(void (^)(NSError *))handler;
 @end
 
 @interface BluetoothDevice : NSObject
@@ -298,10 +300,10 @@ static BOOL airPodsInBluetoothDevices(void) {
     return NO;
 }
 
-// 缓存当前输出中的 AirPods 设备对象
+// 缓存当前输出中的 AirPods 设备对象（AVOutputContext）
 static void cacheAirPodsDeviceIfPresent(void) {
     @try {
-        id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
+        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
         NSArray *devs = [ctx outputDevices];
         for (id d in devs) {
             if (isAirPodsName([d name])) { sAirPodsOutputDevice = d; return; }
@@ -312,7 +314,7 @@ static void cacheAirPodsDeviceIfPresent(void) {
 // 当前输出路由是否全部为 AirPods
 static BOOL currentOutputIsAirPods(void) {
     @try {
-        id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
+        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
         NSArray *devs = [ctx outputDevices];
         if (!devs || devs.count == 0) return NO;
         for (id d in devs) {
@@ -333,9 +335,8 @@ static void routeLog(NSString *msg) {
 }
 
 // 强制切到 AirPods（2s 冷却防与车载反复抢占）
-// 注意：block 会在 MediaRemote XPC 异步回调里执行，绝不能捕获任何 ObjC 对象
-// （NSString 等），否则 use-after-free 崩（实测 EXC_BAD_ACCESS objc_storeStrong）。
-// why 用 const char*（C 字符串，不参与 ARC 管理）。
+// AVOutputContext 回调同进程，标准 block 语义；保守起见 completionHandler
+// 内不捕获外部 ObjC 对象，why 用 const char*。
 static void forceRouteToAirPods(const char *why) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - sLastRouteForce < 2.0) return;
@@ -343,17 +344,16 @@ static void forceRouteToAirPods(const char *why) {
     id dev = sAirPodsOutputDevice;
     if (!dev) return;
     @try {
-        id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
+        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
         if (!ctx) return;
         sLastRouteForce = now;
-        [ctx setOutputDevices:@[dev] withPassword:nil
-            withCallbackQueue:dispatch_get_main_queue() block:^(BOOL ok, NSError *err) {
+        [ctx setOutputDevice:dev options:0 completionHandler:^(NSError *err) {
             (void)err;
-            routeLog([NSString stringWithFormat:@"force(%s) ok=%d", why ? why : "?", ok]);
+            routeLog([NSString stringWithFormat:@"av-force(%s) done", why ? why : "?"]);
         }];
-        routeLog([NSString stringWithFormat:@"force(%s) triggered uid=%@", why ? why : "?", [dev uid]]);
+        routeLog([NSString stringWithFormat:@"av-force(%s) triggered uid=%@", why ? why : "?", [dev uid]]);
     } @catch (id e) {
-        routeLog([NSString stringWithFormat:@"force(%s) EXC %@", why ? why : "?", e]);
+        routeLog([NSString stringWithFormat:@"av-force(%s) EXC %@", why ? why : "?", e]);
     }
 }
 
