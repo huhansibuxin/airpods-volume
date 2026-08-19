@@ -33,6 +33,21 @@ static BOOL isBluetoothPort(AVAudioSessionPortDescription *p) {
 
 static BOOL sAirPodsConnected = NO;
 
+// 静音开关状态（SBSoundDefaults 域，iOS16 实机验证返回值随开关实时翻转）
+// 摘下耳机"强制 100"的通知音必须跳过静音模式：静音时不允许把 Ringtone/Alert 拉回 100
+static BOOL isRingerMuted(void) {
+    @try {
+        Class cls = NSClassFromString(@"SBSoundDefaults");
+        if (!cls) return NO;
+        id sbsd = [cls standardDefaults];
+        if (!sbsd) return NO;
+        if (![sbsd respondsToSelector:@selector(isRingerMuted)]) return NO;
+        return (BOOL)[sbsd isRingerMuted];
+    } @catch (id e) {
+        return NO;
+    }
+}
+
 static void updateAirPodsCache(void) {
     sAirPodsConnected = NO;
     AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
@@ -87,14 +102,14 @@ static float capForCategory(id cat) {
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     float cap = capForCategory(cat);
-    if (!sAirPodsConnected && isNotificationCategory(cat))
+    if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         vol = 1.0f;
     else if (cap < 1.0f)
         vol = MIN(vol, cap);
     return %orig(vol, cat);
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
-    if (!sAirPodsConnected && isNotificationCategory(cat))
+    if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         return [self setVolumeTo:1.0f forCategory:cat];
     float cap = capForCategory(cat);
     if (cap >= 1.0f) return %orig;
@@ -109,7 +124,7 @@ static float capForCategory(id cat) {
     BOOL r = %orig(vol, cat);
     if (r) {
         float cap = capForCategory(cat);
-        if (!sAirPodsConnected && isNotificationCategory(cat))
+        if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
             *vol = 1.0f;
         else if (cap < 1.0f) {
             if (!isNotificationCategory(cat)) sLastUncappedMediaVol = *vol;
@@ -239,7 +254,7 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
     updateAirPodsCache();
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    if (!sAirPodsConnected) {
+    if (!sAirPodsConnected && !isRingerMuted()) {
         [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
         [avc setVolumeTo:1.0f forCategory:@"Alert"];
     }
@@ -262,8 +277,11 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
             if (sLastUncappedMediaVol > 0.7f)
                 [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
         } else {
-            [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
-            [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            // 摘下耳机：恢复通知音 100%，但静音模式下不允许强制（保持静音状态）
+            if (!isRingerMuted()) {
+                [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
+                [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            }
         }
     }];
 
