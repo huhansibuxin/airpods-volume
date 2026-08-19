@@ -413,14 +413,21 @@ static void enforceAirPodsRoute(void) {
     } @catch (id e) {}
 }
 
+static int sLastEvtState = -1; // 日志限流：AirPods 在场状态 0/1，变化才写日志
+
 static void handleRouteEvent(NSString *source) {
     @try {
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
         sAirPodsConnected = airInRoute || airInBT;
-        routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
-                  source, airInRoute, airInBT, sAirPodsConnected]);
+        // 日志限流：outputdev 通知戴上时高频触发（每秒多次），状态未变化不刷日志
+        int state = sAirPodsConnected ? 1 : 0;
+        if (state != sLastEvtState) {
+            sLastEvtState = state;
+            routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
+                      source, airInRoute, airInBT, sAirPodsConnected]);
+        }
         if (sAirPodsConnected) {
             sMediaRestored = NO; // 重新戴上：允许下次摘下时恢复媒体音量
             float cur;
@@ -428,8 +435,7 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime sLastUncappedMediaVol
-            routeLog([NSString stringWithFormat:@"limit attached sLastMedia=%.2f", sLastUncappedMediaVol]);
+            [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime（仅用于 cap 判断，不依赖其记录）
             if (sLastUncappedMediaVol > 0.7f)
                 [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
         } else {
@@ -438,15 +444,15 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 恢复媒体音量：只恢复一次（防摘下后连续事件重复覆盖）——
-            // 有记录（sLast>=0）恢复原值；没记录（-1，戴上时无播放会话
-            // getVolume 失败）兜底恢复 1.0，宁可回 100 也不停在 70。
+            // 摘下媒体音量：无条件强制 100%（老板要求）——sLast 记录不可靠：
+            // 戴上 AirPods 时系统会把媒体音量重置为 70%（蓝牙默认），
+            // sLast 记的是 70 而非戴前用户值，永远恢复不对。
             if (!sMediaRestored) {
-                float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
-                BOOL ok = [avc setVolumeTo:restore forCategory:@"Audio/Video"];
-                routeLog([NSString stringWithFormat:@"restore media restore=%.2f sLast=%.2f ok=%d", restore, sLastUncappedMediaVol, ok]);
+                BOOL ok = [avc setVolumeTo:1.0f forCategory:@"Audio/Video"];
+                routeLog([NSString stringWithFormat:@"restore media ->100%% ok=%d", ok]);
                 sLastUncappedMediaVol = -1.0f;
                 sMediaRestored = YES;
+            }
             }
         }
         enforceAirPodsRoute();
@@ -479,12 +485,21 @@ static void handleRouteEvent(NSString *source) {
         handleRouteEvent(@"outputdev");
     }];
 
-    // 1.5s 轮询兜底：戴上 AirPods 时若系统不切输出，设备列表无变化、通知不触发——
-    // 轮询保证"戴上必切"（事件漏了也能补上；轮询触发不刷日志）
+    // 1.5s 轮询兜底：保证"戴上必切"（系统不切输出时设备列表无变化、通知不触发）。
+    // 没连 AirPods 时只做一次轻量蓝牙列表查询就返回（仅保留检测"戴上"的最小开销）
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(timer, ^{
+        if (!airPodsInBluetoothDevices()) {
+            // 不在场：清理状态，不做任何其它查询/切换
+            if (sAirPodsConnected) {
+                sAirPodsConnected = NO;
+                sOutputWasAirPods = NO;
+                sLastEvtState = 0;
+            }
+            return;
+        }
         enforceAirPodsRoute();
     });
     dispatch_resume(timer);
