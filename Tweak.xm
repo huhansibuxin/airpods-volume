@@ -192,6 +192,43 @@ static id replDispatcherModify(id self, SEL _cmd, id req) {
 }
 
 // ============================================================
+// Block AirPods open-case / connect popup (bottom transient overlay)
+// 开盒/连接弹窗 = SharingViewService 的 HeadphoneFlow 远程内容，
+// 经 SBRemoteTransientOverlaySessionManager 呈现（iOS16 实机 Frida 实证：
+// serviceName=com.apple.SharingViewService
+// vcClass=SharingViewService.HeadphoneFlowViewController）。
+// 在该决策方法返回 NO 即拒绝呈现，弹窗不出现（已验证生效）。
+// 不拦截 shouldActivateWithContext:，单点决策足够。
+// ============================================================
+
+@interface SBRemoteTransientOverlaySession : NSObject
+- (id)definition;
+@end
+
+@interface SBSRemoteAlertDefinition : NSObject
+- (NSString *)serviceName;
+- (NSString *)viewControllerClassName;
+@end
+
+static BOOL (*origPerformPresentationRequest)(id, SEL, id, id) = NULL;
+
+static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id request) {
+    @try {
+        id def = [session definition];
+        NSString *svc = [def serviceName];
+        NSString *vc = [def viewControllerClassName];
+        if (svc && vc &&
+            [svc isEqualToString:@"com.apple.SharingViewService"] &&
+            [vc isEqualToString:@"SharingViewService.HeadphoneFlowViewController"]) {
+            return NO; // 拦截 AirPods 开盒/连接弹窗
+        }
+    } @catch (id e) {}
+    if (origPerformPresentationRequest)
+        return origPerformPresentationRequest(self, _cmd, session, request);
+    return YES;
+}
+
+// ============================================================
 // %ctor
 // ============================================================
 
@@ -240,5 +277,14 @@ static id replDispatcherModify(id self, SEL _cmd, id req) {
         if ([ncdCls instancesRespondToSelector:@selector(modifyNotificationWithRequest:)])
             MSHookMessageEx(ncdCls, @selector(modifyNotificationWithRequest:),
                             (IMP)replDispatcherModify, (IMP *)&origDispatcherModify);
+    }
+
+    // AirPods 开盒/连接弹窗拦截：远程 overlay 决策点返回 NO
+    Class rtoCls = NSClassFromString(@"SBRemoteTransientOverlaySessionManager");
+    if (rtoCls) {
+        SEL selPP = @selector(remoteTransientOverlaySession:performPresentationRequest:);
+        if ([rtoCls instancesRespondToSelector:selPP])
+            MSHookMessageEx(rtoCls, selPP,
+                            (IMP)replPerformPresentationRequest, (IMP *)&origPerformPresentationRequest);
     }
 }
