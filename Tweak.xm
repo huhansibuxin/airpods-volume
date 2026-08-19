@@ -313,13 +313,13 @@ static void routeLog(NSString *msg) {
     }
 }
 
-// 强制切到 AirPods（2s 冷却：既是防抖，也是"手动切车载逃生通道"——
-// 想用车载时 2s 内连点车载 2 次，第二次在冷却期内不会被拉回）
+// 强制切到 AirPods（3s 冷却：既是防抖，也是"手动切车载逃生通道"——
+// 想用车载时 3s 内连点车载 2 次，第二次在冷却期内不会被拉回）
 // AVOutputContext 回调同进程，标准 block 语义；保守起见 completionHandler
 // 内不捕获外部 ObjC 对象，why 用 const char*。
 static void forceRouteToAirPods(const char *why) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - sLastRouteForce < 2.0) return;
+    if (now - sLastRouteForce < 3.0) return;
     if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
     id dev = sAirPodsOutputDevice;
     if (!dev) return;
