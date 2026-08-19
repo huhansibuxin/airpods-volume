@@ -333,22 +333,27 @@ static void routeLog(NSString *msg) {
 }
 
 // 强制切到 AirPods（2s 冷却防与车载反复抢占）
-static void forceRouteToAirPods(NSString *reason) {
+// 注意：block 会在 MediaRemote XPC 异步回调里执行，绝不能捕获任何 ObjC 对象
+// （NSString 等），否则 use-after-free 崩（实测 EXC_BAD_ACCESS objc_storeStrong）。
+// why 用 const char*（C 字符串，不参与 ARC 管理）。
+static void forceRouteToAirPods(const char *why) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - sLastRouteForce < 2.0) return;
     if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
-    if (!sAirPodsOutputDevice) return;
+    id dev = sAirPodsOutputDevice;
+    if (!dev) return;
     @try {
         id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
         if (!ctx) return;
         sLastRouteForce = now;
-        [ctx setOutputDevices:@[sAirPodsOutputDevice] withPassword:nil
+        [ctx setOutputDevices:@[dev] withPassword:nil
             withCallbackQueue:dispatch_get_main_queue() block:^(BOOL ok, NSError *err) {
-            routeLog([NSString stringWithFormat:@"force(%@) ok=%d err=%@", reason, ok, err]);
+            (void)err;
+            routeLog([NSString stringWithFormat:@"force(%s) ok=%d", why ? why : "?", ok]);
         }];
-        routeLog([NSString stringWithFormat:@"force(%@) triggered uid=%@", reason, [sAirPodsOutputDevice uid]]);
+        routeLog([NSString stringWithFormat:@"force(%s) triggered uid=%@", why ? why : "?", [dev uid]]);
     } @catch (id e) {
-        routeLog([NSString stringWithFormat:@"force(%@) EXC %@", reason, e]);
+        routeLog([NSString stringWithFormat:@"force(%s) EXC %@", why ? why : "?", e]);
     }
 }
 
@@ -400,7 +405,7 @@ static void forceRouteToAirPods(NSString *reason) {
             // AirPods 在场：戴上时主动切（解决"偶尔不自动切"）；输出被切走时切回（防抢）
             BOOL newlyAttached = (reason == AVAudioSessionRouteChangeReasonNewDeviceAvailable);
             if (newlyAttached || !currentOutputIsAirPods()) {
-                NSString *why = newlyAttached ? @"attached" : @"stolen";
+                const char *why = newlyAttached ? "attached" : "stolen";
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     forceRouteToAirPods(why);
