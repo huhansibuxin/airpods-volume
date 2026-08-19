@@ -358,31 +358,28 @@ static void forceRouteToAirPods(const char *why) {
 }
 
 // ============================================================
-// %ctor
+// 统一路由事件处理器
+// 触发源：
+//  1) AVAudioSessionRouteChangeNotification（播放中切换音频路由时触发）
+//  2) AVOutputContextOutputDevicesDidChangeNotification（输出设备列表变化，
+//     控制中心切喇叭/切耳机、设备加入都触发，不依赖播放会话——手动切输出
+//     往往只走 MediaRemote 路由，不触发 AVAudioSession 通知）
+// 逻辑：在场 = 实时路由(availableInputs) || 蓝牙列表；输出非 AirPods 且
+// AirPods 在场 → 强制切回。newlyAttached 用蓝牙列表 0→1 判定（比 reason 可靠）。
 // ============================================================
 
-%ctor {
-    NSString *bid = NSBundle.mainBundle.bundleIdentifier;
-    if (![bid isEqualToString:@"com.apple.springboard"]) return;
+static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（判定刚戴上）
 
-    routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
-    sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
-    cacheAirPodsDeviceIfPresent(); // 启动时若已连 AirPods 先缓存输出设备对象
-
-    id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    if (!sAirPodsConnected && !isRingerMuted()) {
-        [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
-        [avc setVolumeTo:1.0f forCategory:@"Alert"];
-    }
-
-    [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
-        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        NSInteger reason = [n.userInfo[AVAudioSessionRouteChangeReasonKey] integerValue];
-        // 在场判断：实时路由（快，戴上即测）|| 蓝牙列表（慢但可靠）——二者任一命中即在场
+static void handleRouteEvent(NSString *source) {
+    @try {
+        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
+        BOOL newlyAttached = airInBT && !sPrevAirInBT;
+        sPrevAirInBT = airInBT;
         sAirPodsConnected = airInRoute || airInBT;
-        routeLog([NSString stringWithFormat:@"routeChange reason=%ld airInRoute=%d airInBT=%d conn=%d", (long)reason, airInRoute, airInBT, sAirPodsConnected]);
+        routeLog([NSString stringWithFormat:@"evt(%@) reason=n/a airInRoute=%d airInBT=%d conn=%d newAttach=%d",
+                  source, airInRoute, airInBT, sAirPodsConnected, newlyAttached]);
         if (sAirPodsConnected) {
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
@@ -406,19 +403,42 @@ static void forceRouteToAirPods(const char *why) {
             sLastUncappedMediaVol = -1.0f;
         }
 
-        // AirPods 路由强制：戴上即切 + 防车载抢路由（在场判断用合并结果，attached 免冷却）
+        // AirPods 路由强制：戴上即切 + 防车载抢路由（attached 免冷却，stolen 3s 冷却）
         cacheAirPodsDeviceIfPresent();
-        if (sAirPodsConnected) {
-            // AirPods 在场：戴上时主动切（解决"偶尔不自动切"）；输出被切走时切回（防抢）
-            BOOL newlyAttached = (reason == AVAudioSessionRouteChangeReasonNewDeviceAvailable);
-            if (newlyAttached || !currentOutputIsAirPods()) {
-                const char *why = newlyAttached ? "attached" : "stolen";
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    forceRouteToAirPods(why);
-                });
-            }
+        if (sAirPodsConnected && !currentOutputIsAirPods()) {
+            const char *why = newlyAttached ? "attached" : "stolen";
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                forceRouteToAirPods(why);
+            });
         }
+    } @catch (id e) {
+        routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
+    }
+}
+%ctor {
+    NSString *bid = NSBundle.mainBundle.bundleIdentifier;
+    if (![bid isEqualToString:@"com.apple.springboard"]) return;
+
+    routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
+    sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
+    cacheAirPodsDeviceIfPresent(); // 启动时若已连 AirPods 先缓存输出设备对象
+
+    id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+    if (!sAirPodsConnected && !isRingerMuted()) {
+        [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
+        [avc setVolumeTo:1.0f forCategory:@"Alert"];
+    }
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
+        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        handleRouteEvent(@"avroute");
+    }];
+
+    // 输出设备列表变化（控制中心切喇叭/切耳机、设备加入都触发，不依赖播放会话）
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"AVOutputContextOutputDevicesDidChangeNotification"
+        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        handleRouteEvent(@"outputdev");
     }];
 
     // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
