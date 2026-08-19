@@ -379,6 +379,25 @@ static void forceRouteToAirPods(const char *why) {
 // ============================================================
 
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
+static NSTimeInterval sLastReactivate = 0; // 会话重激活防抖（5s 内一次）
+
+// 间接强制：重激活音频会话触发系统重新路由。
+// 仅当拿不到 AirPods 设备对象（缓存为空，如 respring 后首次戴上且系统没切，
+// AVOutputContext 只有当前输出）时兜底——系统重新路由时蓝牙连接中的 AirPods
+// 会被优先选中。5s 防抖防反复打断。
+static void reactivateAudioSession(const char *why) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - sLastReactivate < 5.0) return;
+    sLastReactivate = now;
+    @try {
+        AVAudioSession *s = [AVAudioSession sharedInstance];
+        [s setActive:NO withOptions:0 error:nil];
+        [s setActive:YES withOptions:0 error:nil];
+        routeLog([NSString stringWithFormat:@"reactivate(%s) triggered", why ? why : "?"]);
+    } @catch (id e) {
+        routeLog([NSString stringWithFormat:@"reactivate(%s) EXC %@", why ? why : "?", e]);
+    }
+}
 
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
 // "不管系统切不切都保证切"：输出刚变成 AirPods（系统切的）时，我们也主动
@@ -412,6 +431,14 @@ static void enforceAirPodsRoute(void) {
                            dispatch_get_main_queue(), ^{
                 forceRouteToAirPods(why);
             });
+            // 缓存为空（拿不到设备对象，respring 后首次/系统没切）→ 间接强制：
+            // 重激活会话让系统重新路由到 AirPods（有缓存对象时不触发，不影响正常抢回）
+            if (!sAirPodsOutputDevice) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    reactivateAudioSession(why);
+                });
+            }
         }
     } @catch (id e) {}
 }
