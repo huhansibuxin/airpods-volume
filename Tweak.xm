@@ -456,7 +456,6 @@ static void handleRouteEvent(NSString *source) {
         routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
     }
 }
-}
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
