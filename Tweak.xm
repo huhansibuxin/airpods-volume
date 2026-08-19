@@ -304,7 +304,8 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 @end
 
 static id sAirPodsOutputDevice = nil;      // 缓存的 AirPods 输出设备对象
-static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却时间戳
+static NSTimeInterval sLastRouteForce = 0; // stolen 强制切换冷却（3s 逃生通道）
+static NSTimeInterval sLastAttachedForce = 0; // attached 去重（0.8s，防多通知源叠加重复切）
 
 // 缓存当前输出中的 AirPods 设备对象（AVOutputContext）
 static void cacheAirPodsDeviceIfPresent(void) {
@@ -349,8 +350,15 @@ static void routeLog(NSString *msg) {
 static void forceRouteToAirPods(const char *why) {
     BOOL isAttached = (why && why[0] == 'a'); // "attached" vs "stolen"
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (!isAttached && now - sLastRouteForce < 3.0) return;
-    // 幂等去重：输出已是 AirPods 就不再切（多通知源叠加时避免重复 attached）
+    // 分开冷却：attached 0.8s 去重（多通知源叠加防重复），stolen 3s 逃生通道
+    if (isAttached) {
+        if (now - sLastAttachedForce < 0.8) return;
+        sLastAttachedForce = now;
+    } else {
+        if (now - sLastRouteForce < 3.0) return;
+        sLastRouteForce = now;
+    }
+    // 幂等去重：输出已是 AirPods 就不再切
     if (currentOutputIsAirPods()) return;
     if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
     id dev = sAirPodsOutputDevice;
@@ -466,12 +474,13 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 摘下媒体音量：优先恢复戴前真实值（sLast 由"未戴时轮询/事件"持续记录，
-            // 是用户自己的值，不是系统重置的 70）；没记录过才强制 100%
+            // 摘下媒体音量：无条件强制 100%（老板决定）——sLast 记录链路不可靠：
+            // 无播放会话时 getVolume 返回缓存值（戴上时系统设的 70）污染 sLast，
+            // 恢复 93/84 无法保证。日志实证摘下时 setVolumeTo 有效（ok=1），
+            // 强制 100% 最稳，用户摘下后自己调。
             if (!sMediaRestored) {
-                float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
-                BOOL ok = [avc setVolumeTo:restore forCategory:@"Audio/Video"];
-                routeLog([NSString stringWithFormat:@"restore media restore=%.2f sLast=%.2f ok=%d", restore, sLastUncappedMediaVol, ok]);
+                BOOL ok = [avc setVolumeTo:1.0f forCategory:@"Audio/Video"];
+                routeLog([NSString stringWithFormat:@"restore media ->100%% ok=%d", ok]);
                 sLastUncappedMediaVol = -1.0f;
                 sMediaRestored = YES;
             }
