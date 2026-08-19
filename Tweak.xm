@@ -362,24 +362,46 @@ static void forceRouteToAirPods(const char *why) {
 // 触发源：
 //  1) AVAudioSessionRouteChangeNotification（播放中切换音频路由时触发）
 //  2) AVOutputContextOutputDevicesDidChangeNotification（输出设备列表变化，
-//     控制中心切喇叭/切耳机、设备加入都触发，不依赖播放会话——手动切输出
-//     往往只走 MediaRemote 路由，不触发 AVAudioSession 通知）
-// 逻辑：在场 = 实时路由(availableInputs) || 蓝牙列表；输出非 AirPods 且
-// AirPods 在场 → 强制切回。newlyAttached 用蓝牙列表 0→1 判定（比 reason 可靠）。
+//     控制中心切喇叭/切耳机、设备加入都触发，不依赖播放会话）
+//  3) 1.5s 轮询兜底（系统不切输出时设备列表无变化、通知可能不触发——
+//     戴上必切不能依赖通知）
+// 在场 = 实时路由(availableInputs) || 蓝牙列表。
+// attached/stolen 用"输出状态跳变"判定：上次输出是 AirPods（被切走）→
+// stolen（3s 冷却逃生）；上次输出非 AirPods（戴上/刚连）→ attached（免冷却必切）。
 // ============================================================
 
-static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（判定刚戴上）
+static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
+
+// 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）
+static void enforceAirPodsRoute(void) {
+    @try {
+        BOOL airInRoute = airPodsInCurrentRoute();
+        BOOL airInBT = airPodsInBluetoothDevices();
+        sAirPodsConnected = airInRoute || airInBT;
+        cacheAirPodsDeviceIfPresent();
+        BOOL outIsAP = currentOutputIsAirPods();
+        BOOL wasAP = sOutputWasAirPods;
+        sOutputWasAirPods = outIsAP;
+        if (sAirPodsConnected && !outIsAP) {
+            const char *why = wasAP ? "stolen" : "attached";
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                forceRouteToAirPods(why);
+            });
+        } else if (!sAirPodsConnected) {
+            sOutputWasAirPods = NO; // 不在场，重置状态
+        }
+    } @catch (id e) {}
+}
 
 static void handleRouteEvent(NSString *source) {
     @try {
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
-        BOOL newlyAttached = airInBT && !sPrevAirInBT;
-        sPrevAirInBT = airInBT;
         sAirPodsConnected = airInRoute || airInBT;
-        routeLog([NSString stringWithFormat:@"evt(%@) reason=n/a airInRoute=%d airInBT=%d conn=%d newAttach=%d",
-                  source, airInRoute, airInBT, sAirPodsConnected, newlyAttached]);
+        routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
+                  source, airInRoute, airInBT, sAirPodsConnected]);
         if (sAirPodsConnected) {
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
@@ -396,22 +418,18 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 恢复媒体音量（戴上前的值，避免停在 70% 限制值）
-            float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
-            BOOL ok = [avc setVolumeTo:restore forCategory:@"Audio/Video"];
-            routeLog([NSString stringWithFormat:@"restore media restore=%.2f sLast=%.2f ok=%d", restore, sLastUncappedMediaVol, ok]);
-            sLastUncappedMediaVol = -1.0f;
+            // 恢复媒体音量：只在有记录时恢复（sLast>=0），且只恢复一次——
+            // 摘下后连续多个事件会重复进此分支，若 sLast 已 -1 再设 1.0 会
+            // 覆盖用户戴前的原设音量（实测 restore=1.00 sLast=-1 覆盖 70%）
+            if (sLastUncappedMediaVol >= 0.0f) {
+                BOOL ok = [avc setVolumeTo:sLastUncappedMediaVol forCategory:@"Audio/Video"];
+                routeLog([NSString stringWithFormat:@"restore media restore=%.2f ok=%d", sLastUncappedMediaVol, ok]);
+                sLastUncappedMediaVol = -1.0f;
+            } else {
+                routeLog(@"restore media skipped (no recorded vol, keep user value)");
+            }
         }
-
-        // AirPods 路由强制：戴上即切 + 防车载抢路由（attached 免冷却，stolen 3s 冷却）
-        cacheAirPodsDeviceIfPresent();
-        if (sAirPodsConnected && !currentOutputIsAirPods()) {
-            const char *why = newlyAttached ? "attached" : "stolen";
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                forceRouteToAirPods(why);
-            });
-        }
+        enforceAirPodsRoute();
     } @catch (id e) {
         routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
     }
@@ -440,6 +458,16 @@ static void handleRouteEvent(NSString *source) {
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         handleRouteEvent(@"outputdev");
     }];
+
+    // 1.5s 轮询兜底：戴上 AirPods 时若系统不切输出，设备列表无变化、通知不触发——
+    // 轮询保证"戴上必切"（事件漏了也能补上；轮询触发不刷日志）
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
+                              1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(timer, ^{
+        enforceAirPodsRoute();
+    });
+    dispatch_resume(timer);
 
     // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
     dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
