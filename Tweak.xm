@@ -488,30 +488,44 @@ static void handleRouteEvent(NSString *source) {
     }];
 
     // 1.5s 轮询兜底：保证"戴上必切"（系统不切输出时设备列表无变化、通知不触发）。
-    // 没连 AirPods 时只做一次轻量蓝牙列表查询就返回（仅保留检测"戴上"的最小开销）
+    // 动态启停：初始暂停（没连 AirPods 完全不轮询、省电）；
+    // AirPods 蓝牙连接成功通知 → 启动；断开通知 → 停止。
+    __block BOOL sTimerRunning = NO;
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(timer, ^{
-        if (!airPodsInBluetoothDevices()) {
-            // 不在场：清理状态；同时持续记录当前媒体音量（用户戴前真实值，
-            // 摘下恢复用它——戴上时系统会重置音量，不能在戴上时记录）
-            if (sAirPodsConnected) {
-                sAirPodsConnected = NO;
-                sOutputWasAirPods = NO;
-                sLastEvtState = 0;
-            }
-            if (!sMediaRestored) {
-                id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                float cur = -1.0f;
-                if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur >= 0.0f)
-                    sLastUncappedMediaVol = cur;
-            }
-            return;
+        // 记录当前媒体音量（AirPods 不在场时=用户戴前真实值；摘下恢复用它）
+        if (!sMediaRestored) {
+            id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+            float cur = -1.0f;
+            if ([avc2 getVolume:&cur forCategory:@"Audio/Video"] && cur >= 0.0f)
+                sLastUncappedMediaVol = cur;
         }
         enforceAirPodsRoute();
     });
-    dispatch_resume(timer);
+    dispatch_suspend(timer); // 初始不轮询（省电），等 AirPods 连接通知启动
+
+    // AirPods 蓝牙连接成功 → 启动轮询 + 立即强制路由
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
+        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        if (airPodsInBluetoothDevices()) {
+            if (!sTimerRunning) { dispatch_resume(timer); sTimerRunning = YES; }
+            handleRouteEvent(@"btconnect");
+        }
+    }];
+    // AirPods 蓝牙断开 → 停止轮询
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceDisconnectSuccessNotification"
+        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        if (sTimerRunning) { dispatch_suspend(timer); sTimerRunning = NO; }
+        handleRouteEvent(@"btdisconnect");
+    }];
+
+    // 启动时若已连 AirPods（如 respring 后仍连着）：启动轮询 + 初始强制切
+    if (sAirPodsConnected) {
+        if (!sTimerRunning) { dispatch_resume(timer); sTimerRunning = YES; }
+        handleRouteEvent(@"ctor-init");
+    }
 
     // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
     dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
