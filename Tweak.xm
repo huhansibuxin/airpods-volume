@@ -373,6 +373,28 @@ static void forceRouteToAirPods(const char *why) {
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
 static NSTimeInterval sLastReactivate = 0; // 会话重激活防抖（5s 内一次）
 
+// ============================================================
+// 轮询窗口化管理（老板要求：只在需要兜底时轮询 1 分钟，平时零轮询）
+// 触发：戴上（btconnect）、被抢（输出切走）→ 启动/重置 1 分钟窗口；
+// 窗口到期自动停；AirPods 断开立即停。系统稳定（输出已是 AirPods
+// 超过 1 分钟）后完全不轮询。
+// ============================================================
+
+static dispatch_source_t sPollTimer = NULL;
+static BOOL sPollRunning = NO;
+static NSTimeInterval sPollWindowEnd = 0;
+
+static void startPollWindow(void) {
+    if (!sPollTimer) return;
+    sPollWindowEnd = [[NSDate date] timeIntervalSince1970] + 60.0; // 1 分钟窗口
+    if (!sPollRunning) { dispatch_resume(sPollTimer); sPollRunning = YES; }
+}
+
+static void stopPoll(void) {
+    sPollWindowEnd = 0;
+    if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
+}
+
 // 间接强制：重激活音频会话触发系统重新路由。
 // 仅当拿不到 AirPods 设备对象（缓存为空，如 respring 后首次戴上且系统没切，
 // AVOutputContext 只有当前输出）时兜底——系统重新路由时蓝牙连接中的 AirPods
@@ -427,6 +449,9 @@ static void enforceAirPodsRoute(void) {
                            dispatch_get_main_queue(), ^{
                 forceRouteToAirPods(why);
             });
+            // 被抢/戴上需要切 → 重启 1 分钟轮询窗口（车载再开、系统抖动都能兜底；
+            // 系统稳定后窗口到期自动停，平时零轮询）
+            startPollWindow();
             // 缓存为空（拿不到设备对象，respring 后首次/系统没切）→ 间接强制：
             // 重激活会话让系统重新路由到 AirPods（有缓存对象时不触发，不影响正常抢回）
             if (!sAirPodsOutputDevice) {
@@ -505,35 +530,39 @@ static void handleRouteEvent(NSString *source) {
     }];
 
     // 1.5s 轮询兜底：保证"戴上必切"（系统不切输出时设备列表无变化、通知不触发）。
-    // 动态启停：初始暂停（没连 AirPods 完全不轮询、省电）；
-    // AirPods 蓝牙连接成功通知 → 启动；断开通知 → 停止。
-    __block BOOL sTimerRunning = NO;
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
+    // 1.5s 轮询兜底：**窗口化**（老板要求）——戴上/被抢时启动 1 分钟兜底窗口，
+    // 窗口到期自动停；车载再次打开（再抢）→ 事件触发重启 1 分钟窗口。平时零轮询。
+    sPollTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(sPollTimer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(timer, ^{
+    dispatch_source_set_event_handler(sPollTimer, ^{
+        // 窗口到期自动停止（零轮询）
+        if ([[NSDate date] timeIntervalSince1970] > sPollWindowEnd) {
+            if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
+            return;
+        }
         enforceAirPodsRoute();
     });
-    dispatch_suspend(timer); // 初始不轮询（省电），等 AirPods 连接通知启动
+    dispatch_suspend(sPollTimer); // 初始不轮询，等事件启动窗口
 
-    // AirPods 蓝牙连接成功（开盒即连接，此时还没戴上）→ 启动轮询 + 立即强制路由
+    // AirPods 蓝牙连接成功（开盒即连接）→ 启动轮询窗口 + 立即强制路由
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         if (airPodsInBluetoothDevices()) {
-            if (!sTimerRunning) { dispatch_resume(timer); sTimerRunning = YES; }
+            startPollWindow();
             handleRouteEvent(@"btconnect");
         }
     }];
-    // AirPods 蓝牙断开 → 停止轮询
+    // AirPods 蓝牙断开 → 立即停止轮询（不等窗口到期）
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceDisconnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        if (sTimerRunning) { dispatch_suspend(timer); sTimerRunning = NO; }
+        stopPoll();
         handleRouteEvent(@"btdisconnect");
     }];
 
-    // 启动时若已连 AirPods（如 respring 后仍连着）：启动轮询 + 初始强制切
+    // 启动时若已连 AirPods（如 respring 后仍连着）：启动轮询窗口 + 初始强制切
     if (sAirPodsConnected) {
-        if (!sTimerRunning) { dispatch_resume(timer); sTimerRunning = YES; }
+        startPollWindow();
         handleRouteEvent(@"ctor-init");
     }
 
