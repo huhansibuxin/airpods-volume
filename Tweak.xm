@@ -29,14 +29,37 @@ static BOOL isNotificationCategory(id cat) {
     return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
 }
 
-static BOOL isBluetoothPort(AVAudioSessionPortDescription *p) {
-    NSString *type = p.portType;
-    return [type isEqualToString:AVAudioSessionPortBluetoothA2DP]
-        || [type isEqualToString:AVAudioSessionPortBluetoothHFP]
-        || [type isEqualToString:AVAudioSessionPortBluetoothLE];
+static BOOL sAirPodsConnected = NO;
+
+// ============================================================
+// AirPods 在场判断（BluetoothManager 已连接设备列表）
+// sAirPodsConnected 语义 = "AirPods 在场"（不是"有蓝牙设备"）：
+// 车载单独连接不触发音量限制；摘下 AirPods（车载仍在）也能正确恢复音量。
+// ============================================================
+
+@interface BluetoothDevice : NSObject
+- (NSString *)name;
+@end
+
+@interface BluetoothManager : NSObject
++ (id)sharedInstance;
+- (NSArray *)connectedDevices;
+@end
+
+static BOOL isAirPodsName(NSString *name) {
+    return name && [name containsString:@"AirPods"];
 }
 
-static BOOL sAirPodsConnected = NO;
+static BOOL airPodsInBluetoothDevices(void) {
+    @try {
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        NSArray *devs = [bm connectedDevices];
+        for (id d in devs) {
+            if (isAirPodsName([d name])) return YES;
+        }
+    } @catch (id e) {}
+    return NO;
+}
 
 // 静音开关状态（SBSoundDefaults 域，iOS16 实机验证返回值随开关实时翻转）
 // 摘下耳机"强制 100"的通知音必须跳过静音模式：静音时不允许把 Ringtone/Alert 拉回 100
@@ -50,25 +73,6 @@ static BOOL isRingerMuted(void) {
         return (BOOL)[sbsd isRingerMuted];
     } @catch (id e) {
         return NO;
-    }
-}
-
-static void updateAirPodsCache(void) {
-    sAirPodsConnected = NO;
-    AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
-    for (AVAudioSessionPortDescription *p in route.outputs) {
-        if (isBluetoothPort(p)) {
-            sAirPodsConnected = YES;
-            break;
-        }
-    }
-    if (!sAirPodsConnected) {
-        for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
-            if (isBluetoothPort(p)) {
-                sAirPodsConnected = YES;
-                break;
-            }
-        }
     }
 }
 
@@ -272,33 +276,8 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
       completionHandler:(void (^)(NSError *))handler;
 @end
 
-@interface BluetoothDevice : NSObject
-- (NSString *)name;
-@end
-
-@interface BluetoothManager : NSObject
-+ (id)sharedInstance;
-- (NSArray *)connectedDevices;
-@end
-
 static id sAirPodsOutputDevice = nil;      // 缓存的 AirPods 输出设备对象
 static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却时间戳
-
-static BOOL isAirPodsName(NSString *name) {
-    return name && [name containsString:@"AirPods"];
-}
-
-// AirPods 是否仍在已连接蓝牙设备列表（防抢判断用，车载连上时列表同时含 AirPods+车载）
-static BOOL airPodsInBluetoothDevices(void) {
-    @try {
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        NSArray *devs = [bm connectedDevices];
-        for (id d in devs) {
-            if (isAirPodsName([d name])) return YES;
-        }
-    } @catch (id e) {}
-    return NO;
-}
 
 // 缓存当前输出中的 AirPods 设备对象（AVOutputContext）
 static void cacheAirPodsDeviceIfPresent(void) {
@@ -334,12 +313,13 @@ static void routeLog(NSString *msg) {
     }
 }
 
-// 强制切到 AirPods（0.6s 冷却：防切换瞬间抖动/极端死循环，但手动快速连点也能被拉回）
+// 强制切到 AirPods（2s 冷却：既是防抖，也是"手动切车载逃生通道"——
+// 想用车载时 2s 内连点车载 2 次，第二次在冷却期内不会被拉回）
 // AVOutputContext 回调同进程，标准 block 语义；保守起见 completionHandler
 // 内不捕获外部 ObjC 对象，why 用 const char*。
 static void forceRouteToAirPods(const char *why) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - sLastRouteForce < 0.6) return;
+    if (now - sLastRouteForce < 2.0) return;
     if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
     id dev = sAirPodsOutputDevice;
     if (!dev) return;
@@ -365,7 +345,7 @@ static void forceRouteToAirPods(const char *why) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
 
-    updateAirPodsCache();
+    sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
     cacheAirPodsDeviceIfPresent(); // 启动时若已连 AirPods 先缓存输出设备对象
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
@@ -377,11 +357,9 @@ static void forceRouteToAirPods(const char *why) {
     [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         NSInteger reason = [n.userInfo[AVAudioSessionRouteChangeReasonKey] integerValue];
-        if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
-            sAirPodsConnected = NO;
-        } else {
-            updateAirPodsCache();
-        }
+        // sAirPodsConnected = "AirPods 在场"（BluetoothManager），区分 AirPods 与车载：
+        // 车载单独连接不触发限制；摘下 AirPods（车载仍在）能正确恢复音量
+        sAirPodsConnected = airPodsInBluetoothDevices();
         if (sAirPodsConnected) {
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
@@ -389,17 +367,19 @@ static void forceRouteToAirPods(const char *why) {
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
             [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime sLastUncappedMediaVol
+            routeLog([NSString stringWithFormat:@"limit attached sLastMedia=%.2f", sLastUncappedMediaVol]);
             if (sLastUncappedMediaVol > 0.7f)
                 [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
         } else {
-            // 摘下耳机：恢复通知音 100%，但静音模式下不允许强制（保持静音状态）
+            // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
             if (!isRingerMuted()) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 摘下耳机：恢复媒体音量（戴上前的值，避免停在 70% 限制值）
+            // 恢复媒体音量（戴上前的值，避免停在 70% 限制值）
             float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
-            [avc setVolumeTo:restore forCategory:@"Audio/Video"];
+            BOOL ok = [avc setVolumeTo:restore forCategory:@"Audio/Video"];
+            routeLog([NSString stringWithFormat:@"restore media restore=%.2f sLast=%.2f ok=%d", restore, sLastUncappedMediaVol, ok]);
             sLastUncappedMediaVol = -1.0f;
         }
 
