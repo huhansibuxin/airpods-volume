@@ -262,7 +262,7 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 
 @interface AVOutputDevice : NSObject
 - (NSString *)name;
-- (NSString *)uid;
+- (NSString *)logicalDeviceID;
 @end
 
 @interface AVOutputContext : NSObject
@@ -334,12 +334,12 @@ static void routeLog(NSString *msg) {
     }
 }
 
-// 强制切到 AirPods（2s 冷却防与车载反复抢占）
+// 强制切到 AirPods（0.6s 冷却：防切换瞬间抖动/极端死循环，但手动快速连点也能被拉回）
 // AVOutputContext 回调同进程，标准 block 语义；保守起见 completionHandler
 // 内不捕获外部 ObjC 对象，why 用 const char*。
 static void forceRouteToAirPods(const char *why) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - sLastRouteForce < 2.0) return;
+    if (now - sLastRouteForce < 0.6) return;
     if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
     id dev = sAirPodsOutputDevice;
     if (!dev) return;
@@ -351,7 +351,7 @@ static void forceRouteToAirPods(const char *why) {
             (void)err;
             routeLog([NSString stringWithFormat:@"av-force(%s) done", why ? why : "?"]);
         }];
-        routeLog([NSString stringWithFormat:@"av-force(%s) triggered uid=%@", why ? why : "?", [dev uid]]);
+        routeLog([NSString stringWithFormat:@"av-force(%s) triggered id=%@", why ? why : "?", [dev logicalDeviceID]]);
     } @catch (id e) {
         routeLog([NSString stringWithFormat:@"av-force(%s) EXC %@", why ? why : "?", e]);
     }
@@ -397,6 +397,10 @@ static void forceRouteToAirPods(const char *why) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
+            // 摘下耳机：恢复媒体音量（戴上前的值，避免停在 70% 限制值）
+            float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
+            [avc setVolumeTo:restore forCategory:@"Audio/Video"];
+            sLastUncappedMediaVol = -1.0f;
         }
 
         // AirPods 路由强制：戴上即切 + 防车载抢路由
