@@ -249,6 +249,110 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 }
 
 // ============================================================
+// AirPods 路由强制：戴上即切 + 防车载抢路由
+// MRAVOutputContext.setOutputDevices: 是控制中心"音频输出"的底层 API
+//（iOS16 实机验证：sharedSystemAudioContext 可用，outputDevices 返回
+//  当前输出，AirPods Pro uid=MAC-tacl；BluetoothManager connectedDevices
+//  返回所有已连接蓝牙设备，可判断 AirPods 是否在场）。
+// 戴上 AirPods 时缓存其 MRAVOutputDevice 对象；输出被切走（如车载激活）
+// 而 AirPods 仍在蓝牙连接时，用缓存对象强制切回（2s 冷却防反复抢占打架）。
+// ============================================================
+
+@interface MRAVOutputDevice : NSObject
+- (NSString *)name;
+- (NSString *)uid;
+@end
+
+@interface MRAVOutputContext : NSObject
++ (id)sharedSystemAudioContext;
+- (NSArray *)outputDevices;
+- (void)setOutputDevices:(NSArray *)devices withPassword:(NSString *)pwd
+     withCallbackQueue:(dispatch_queue_t)q block:(void (^)(BOOL, NSError *))block;
+@end
+
+@interface BluetoothDevice : NSObject
+- (NSString *)name;
+@end
+
+@interface BluetoothManager : NSObject
++ (id)sharedInstance;
+- (NSArray *)connectedDevices;
+@end
+
+static id sAirPodsOutputDevice = nil;      // 缓存的 AirPods 输出设备对象
+static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却时间戳
+
+static BOOL isAirPodsName(NSString *name) {
+    return name && [name containsString:@"AirPods"];
+}
+
+// AirPods 是否仍在已连接蓝牙设备列表（防抢判断用，车载连上时列表同时含 AirPods+车载）
+static BOOL airPodsInBluetoothDevices(void) {
+    @try {
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        NSArray *devs = [bm connectedDevices];
+        for (id d in devs) {
+            if (isAirPodsName([d name])) return YES;
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// 缓存当前输出中的 AirPods 设备对象
+static void cacheAirPodsDeviceIfPresent(void) {
+    @try {
+        id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
+        NSArray *devs = [ctx outputDevices];
+        for (id d in devs) {
+            if (isAirPodsName([d name])) { sAirPodsOutputDevice = d; return; }
+        }
+    } @catch (id e) {}
+}
+
+// 当前输出路由是否全部为 AirPods
+static BOOL currentOutputIsAirPods(void) {
+    @try {
+        id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
+        NSArray *devs = [ctx outputDevices];
+        if (!devs || devs.count == 0) return NO;
+        for (id d in devs) {
+            if (!isAirPodsName([d name])) return NO;
+        }
+        return YES;
+    } @catch (id e) {}
+    return NO;
+}
+
+// 路由事件日志（写文件，oslog 捕获不到注入 dylib 的 NSLog）
+static void routeLog(NSString *msg) {
+    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
+}
+
+// 强制切到 AirPods（2s 冷却防与车载反复抢占）
+static void forceRouteToAirPods(NSString *reason) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - sLastRouteForce < 2.0) return;
+    if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
+    if (!sAirPodsOutputDevice) return;
+    @try {
+        id ctx = [NSClassFromString(@"MRAVOutputContext") sharedSystemAudioContext];
+        if (!ctx) return;
+        sLastRouteForce = now;
+        [ctx setOutputDevices:@[sAirPodsOutputDevice] withPassword:nil
+            withCallbackQueue:dispatch_get_main_queue() block:^(BOOL ok, NSError *err) {
+            routeLog([NSString stringWithFormat:@"force(%@) ok=%d err=%@", reason, ok, err]);
+        }];
+        routeLog([NSString stringWithFormat:@"force(%@) triggered uid=%@", reason, [sAirPodsOutputDevice uid]]);
+    } @catch (id e) {
+        routeLog([NSString stringWithFormat:@"force(%@) EXC %@", reason, e]);
+    }
+}
+
+// ============================================================
 // %ctor
 // ============================================================
 
@@ -257,6 +361,7 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
 
     updateAirPodsCache();
+    cacheAirPodsDeviceIfPresent(); // 启动时若已连 AirPods 先缓存输出设备对象
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
     if (!sAirPodsConnected && !isRingerMuted()) {
@@ -286,6 +391,20 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
             if (!isRingerMuted()) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            }
+        }
+
+        // AirPods 路由强制：戴上即切 + 防车载抢路由
+        cacheAirPodsDeviceIfPresent();
+        if (airPodsInBluetoothDevices()) {
+            // AirPods 在场：戴上时主动切（解决"偶尔不自动切"）；输出被切走时切回（防抢）
+            BOOL newlyAttached = (reason == AVAudioSessionRouteChangeReasonNewDeviceAvailable);
+            if (newlyAttached || !currentOutputIsAirPods()) {
+                NSString *why = newlyAttached ? @"attached" : @"stolen";
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    forceRouteToAirPods(why);
+                });
             }
         }
     }];
