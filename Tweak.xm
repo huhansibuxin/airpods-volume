@@ -93,8 +93,7 @@ static BOOL isRingerMuted(void) {
     }
 }
 
-static float sLastUncappedMediaVol = -1.0f;
-static BOOL sMediaRestored = NO; // 摘下后媒体音量已恢复（防连续事件重复恢复覆盖）
+static float sLastUncappedMediaVol = -1.0f; // 戴上时 cap 判断用（不用于摘下恢复——系统自动恢复设备记忆音量）
 
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
@@ -129,13 +128,6 @@ static float capForCategory(id cat) {
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     float cap = capForCategory(cat);
-    // 记录"戴前真实媒体音量"：
-    //  未戴时用户手动调音量（如 98%）→ 记录（这是摘下恢复的基准）。
-    //  戴上时系统重置 70 / 我们 cap 0.7 → 不记录（vol<=cap），不会被覆盖。
-    if (!sAirPodsConnected && !isNotificationCategory(cat) && vol > 0.0f)
-        sLastUncappedMediaVol = vol;
-    if (sAirPodsConnected && cap < 1.0f && !isNotificationCategory(cat) && vol > cap)
-        sLastUncappedMediaVol = vol;
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         vol = 1.0f;
     else if (cap < 1.0f)
@@ -162,10 +154,6 @@ static float capForCategory(id cat) {
             *vol = 1.0f;
         else if (cap < 1.0f) {
             *vol = MIN(*vol, cap);
-        } else if (!sAirPodsConnected && !isNotificationCategory(cat)) {
-            // 未戴 AirPods 时持续记录当前媒体音量（用户戴前真实值）——
-            // 戴上时系统会把媒体音量重置为 70%，不能在戴上时覆盖记录
-            sLastUncappedMediaVol = *vol;
         }
     }
     return r;
@@ -430,21 +418,6 @@ static void enforceAirPodsRoute(void) {
 
 static int sLastEvtState = -1; // 日志限流：AirPods 在场状态 0/1，变化才写日志
 
-// 记录"戴前真实媒体音量"：AirPods 已连接（蓝牙）但输出还没切到 AirPods
-//（未戴上）的时刻，音量还是喇叭音量（用户戴前值）——摘下恢复用它。
-// 戴上后输出已是 AirPods → 条件不满足，不会用 70 覆盖记录。
-static void recordPreAttachVolumeIfApplicable(void) {
-    if (sMediaRestored) return;
-    if (!airPodsInBluetoothDevices()) return;
-    if (currentOutputIsAirPods()) return; // 已戴上/输出已切，音量已是 AirPods 值
-    @try {
-        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        float cur = -1.0f;
-        if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur >= 0.0f)
-            sLastUncappedMediaVol = cur;
-    } @catch (id e) {}
-}
-
 static void handleRouteEvent(NSString *source) {
     @try {
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
@@ -459,13 +432,12 @@ static void handleRouteEvent(NSString *source) {
                       source, airInRoute, airInBT, sAirPodsConnected]);
         }
         if (sAirPodsConnected) {
-            sMediaRestored = NO; // 重新戴上：允许下次摘下时恢复媒体音量
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime（仅用于 cap 判断，不依赖其记录）
+            [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime（仅用于 cap 判断）
             if (sLastUncappedMediaVol > 0.7f)
                 [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
         } else {
@@ -474,21 +446,16 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 摘下媒体音量：无条件强制 100%（老板决定）——sLast 记录链路不可靠：
-            // 无播放会话时 getVolume 返回缓存值（戴上时系统设的 70）污染 sLast，
-            // 恢复 93/84 无法保证。日志实证摘下时 setVolumeTo 有效（ok=1），
-            // 强制 100% 最稳，用户摘下后自己调。
-            if (!sMediaRestored) {
-                BOOL ok = [avc setVolumeTo:1.0f forCategory:@"Audio/Video"];
-                routeLog([NSString stringWithFormat:@"restore media ->100%% ok=%d", ok]);
-                sLastUncappedMediaVol = -1.0f;
-                sMediaRestored = YES;
-            }
+            // 摘下媒体音量：不碰——iOS 为每个输出设备独立记忆音量，
+            // 输出切回喇叭时系统自动恢复喇叭记忆音量（老板实测手动点喇叭
+            // 会自动回到戴前值 93）。之前主动 setVolumeTo 反而覆盖了系统恢复。
+            // sLastUncappedMediaVol 保留用于戴上时的 cap 判断（不用于恢复）。
         }
         enforceAirPodsRoute();
     } @catch (id e) {
         routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
     }
+}
 }
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
@@ -523,8 +490,6 @@ static void handleRouteEvent(NSString *source) {
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(timer, ^{
-        // 开盒连接后到戴上前的窗口：记录戴前真实媒体音量（摘下恢复源）
-        recordPreAttachVolumeIfApplicable();
         enforceAirPodsRoute();
     });
     dispatch_suspend(timer); // 初始不轮询（省电），等 AirPods 连接通知启动
@@ -533,7 +498,6 @@ static void handleRouteEvent(NSString *source) {
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         if (airPodsInBluetoothDevices()) {
-            recordPreAttachVolumeIfApplicable(); // 开盒未戴时刻：记录喇叭音量（戴前值）
             if (!sTimerRunning) { dispatch_resume(timer); sTimerRunning = YES; }
             handleRouteEvent(@"btconnect");
         }
