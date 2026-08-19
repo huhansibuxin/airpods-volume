@@ -94,6 +94,7 @@ static BOOL isRingerMuted(void) {
 }
 
 static float sLastUncappedMediaVol = -1.0f;
+static BOOL sMediaRestored = NO; // 摘下后媒体音量已恢复（防连续事件重复恢复覆盖）
 
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
@@ -128,6 +129,10 @@ static float capForCategory(id cat) {
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     float cap = capForCategory(cat);
+    // 戴上时记录"被 cap 前的原值"：系统/用户设 100 → cap 70，记录 100。
+    // 比 getVolume prime 可靠（getVolume 在无播放会话时可能返回 NO 不记录）
+    if (sAirPodsConnected && cap < 1.0f && !isNotificationCategory(cat) && vol > cap)
+        sLastUncappedMediaVol = vol;
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         vol = 1.0f;
     else if (cap < 1.0f)
@@ -372,24 +377,38 @@ static void forceRouteToAirPods(const char *why) {
 
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
 
-// 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）
+// 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
+// "不管系统切不切都保证切"：输出刚变成 AirPods（系统切的）时，我们也主动
+// attached 切一次（幂等无害）——确保切换由我们执行而非依赖系统。
 static void enforceAirPodsRoute(void) {
     @try {
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
         sAirPodsConnected = airInRoute || airInBT;
+        if (!sAirPodsConnected) {
+            sOutputWasAirPods = NO; // 不在场，重置状态
+            return;
+        }
         cacheAirPodsDeviceIfPresent();
         BOOL outIsAP = currentOutputIsAirPods();
         BOOL wasAP = sOutputWasAirPods;
         sOutputWasAirPods = outIsAP;
-        if (sAirPodsConnected && !outIsAP) {
+        if (outIsAP) {
+            // 输出已是 AirPods（系统切的）：仅当刚变成时我们也 attached 切一次（幂等）
+            if (!wasAP) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    forceRouteToAirPods("attached");
+                });
+            }
+        } else {
+            // 输出非 AirPods：上次输出是 AirPods（被切走）→ stolen（3s 冷却）；
+            // 上次输出非 AirPods（戴上/刚连）→ attached（免冷却必切）
             const char *why = wasAP ? "stolen" : "attached";
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 forceRouteToAirPods(why);
             });
-        } else if (!sAirPodsConnected) {
-            sOutputWasAirPods = NO; // 不在场，重置状态
         }
     } @catch (id e) {}
 }
@@ -403,6 +422,7 @@ static void handleRouteEvent(NSString *source) {
         routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
                   source, airInRoute, airInBT, sAirPodsConnected]);
         if (sAirPodsConnected) {
+            sMediaRestored = NO; // 重新戴上：允许下次摘下时恢复媒体音量
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
@@ -418,15 +438,15 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
-            // 恢复媒体音量：只在有记录时恢复（sLast>=0），且只恢复一次——
-            // 摘下后连续多个事件会重复进此分支，若 sLast 已 -1 再设 1.0 会
-            // 覆盖用户戴前的原设音量（实测 restore=1.00 sLast=-1 覆盖 70%）
-            if (sLastUncappedMediaVol >= 0.0f) {
-                BOOL ok = [avc setVolumeTo:sLastUncappedMediaVol forCategory:@"Audio/Video"];
-                routeLog([NSString stringWithFormat:@"restore media restore=%.2f ok=%d", sLastUncappedMediaVol, ok]);
+            // 恢复媒体音量：只恢复一次（防摘下后连续事件重复覆盖）——
+            // 有记录（sLast>=0）恢复原值；没记录（-1，戴上时无播放会话
+            // getVolume 失败）兜底恢复 1.0，宁可回 100 也不停在 70。
+            if (!sMediaRestored) {
+                float restore = (sLastUncappedMediaVol >= 0.0f) ? sLastUncappedMediaVol : 1.0f;
+                BOOL ok = [avc setVolumeTo:restore forCategory:@"Audio/Video"];
+                routeLog([NSString stringWithFormat:@"restore media restore=%.2f sLast=%.2f ok=%d", restore, sLastUncappedMediaVol, ok]);
                 sLastUncappedMediaVol = -1.0f;
-            } else {
-                routeLog(@"restore media skipped (no recorded vol, keep user value)");
+                sMediaRestored = YES;
             }
         }
         enforceAirPodsRoute();
