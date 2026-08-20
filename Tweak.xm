@@ -308,6 +308,12 @@ static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
         @try { src = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
         BOOL isUNA = alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")];
         routeLog([NSString stringWithFormat:@"PROBE-A activateAlertItem class=%@ src=%@ isUNA=%d", cn, src, isUNA]);
+        if (isUNA && [src isEqualToString:@"pasted"]) {
+            // 调用栈：定位是谁激活的（显示链）
+            NSArray *stack = [NSThread callStackSymbols];
+            for (NSUInteger i = 1; i < stack.count && i < 8; i++)
+                routeLog([NSString stringWithFormat:@"  A-STACK %@", stack[i]]);
+        }
     } @catch (id e) {}
     if (alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")]) {
         NSString *source = nil;
@@ -373,6 +379,20 @@ static void replSetAperturePref(id self, SEL _cmd, BOOL pref) {
         }
     } @catch (id e) {}
     if (origSetAperturePref) origSetAperturePref(self, _cmd, pref);
+}
+
+// 探针 F：SBUserNotificationAlert -_setActivated:（激活状态设置——最底层拦截）
+static void (*origSetActivated)(id, SEL, BOOL);
+static void replSetActivated(id self, SEL _cmd, BOOL activated) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([src isEqualToString:@"pasted"]) {
+            routeLog([NSString stringWithFormat:@"PROBE-F _setActivated:%d src=pasted -> FORCE NO", activated]);
+            activated = NO; // 粘贴提示永不激活（源头掐断）
+        }
+    } @catch (id e) {}
+    if (origSetActivated) origSetActivated(self, _cmd, activated);
 }
 
 // ============================================================
@@ -789,6 +809,8 @@ static void handleRouteEvent(NSString *source) {
         if (unaCls) {
             Method me = class_getInstanceMethod(unaCls, NSSelectorFromString(@"setPrefersSystemAperturePresentation:"));
             if (me) MSHookFunction(method_getImplementation(me), (IMP)replSetAperturePref, (IMP *)&origSetAperturePref);
+            Method mf = class_getInstanceMethod(unaCls, NSSelectorFromString(@"_setActivated:"));
+            if (mf) MSHookFunction(method_getImplementation(mf), (IMP)replSetActivated, (IMP *)&origSetActivated);
         }
     }
 }
