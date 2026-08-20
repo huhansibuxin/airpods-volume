@@ -292,6 +292,14 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 
 static void (*origActivateAlertItem)(id, SEL, id) = NULL;
 static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
+    // 探针 A：全量记录（v1.9.30 排查"粘贴自"横幅路径）
+    @try {
+        NSString *cn = alertItem ? NSStringFromClass([alertItem class]) : @"nil";
+        NSString *src = @"?";
+        @try { src = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
+        BOOL isUNA = alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")];
+        routeLog([NSString stringWithFormat:@"PROBE-A activateAlertItem class=%@ src=%@ isUNA=%d", cn, src, isUNA]);
+    } @catch (id e) {}
     if (alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")]) {
         NSString *source = nil;
         @try { source = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
@@ -300,12 +308,34 @@ static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
                 [alertItem _setActivated:NO];
                 if ([alertItem respondsToSelector:@selector(_sendResponseAndCleanUp:)])
                     [alertItem _sendResponseAndCleanUp:YES];
+                routeLog(@"PROBE-A BLOCKED pasted alert");
             } @catch (id e) {}
             return; // 已拦截：不显示
         }
     }
     if (origActivateAlertItem)
         origActivateAlertItem(self, _cmd, alertItem);
+}
+
+// 探针 B：SBUserNotificationAlert 展示状态变化（横幅/弹窗展示必走）
+static void (*origUNASetState)(id, SEL, long long, long long);
+static void replUNASetState(id self, SEL _cmd, long long from, long long to) {
+    @try {
+        routeLog([NSString stringWithFormat:@"PROBE-B UNA state from=%lld to=%lld class=%@", from, to, NSStringFromClass([self class])]);
+    } @catch (id e) {}
+    if (origUNASetState) origUNASetState(self, _cmd, from, to);
+}
+
+// 探针 C：SBAlertItemsController 实例激活路径
+static void (*origCtrlActivate)(id, SEL, id);
+static void replCtrlActivate(id self, SEL _cmd, id alertItem) {
+    @try {
+        NSString *cn = alertItem ? NSStringFromClass([alertItem class]) : @"nil";
+        NSString *src = @"?";
+        @try { src = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
+        routeLog([NSString stringWithFormat:@"PROBE-C ctrlActivate class=%@ src=%@", cn, src]);
+    } @catch (id e) {}
+    if (origCtrlActivate) origCtrlActivate(self, _cmd, alertItem);
 }
 
 // ============================================================
@@ -375,10 +405,13 @@ static BOOL currentOutputIsAirPods(void) {
 // 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
 // 需要排查时把本函数体恢复即可）
 // 路由事件日志（写文件，oslog 捕获不到注入 dylib 的 NSLog）
-// 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
-// 需要排查时把本函数体恢复即可——2026-08-20 老板要求静默，v1.9.28）
+// 路由事件日志（排查模式：写文件，oslog 捕获不到注入 dylib 的 NSLog）
 static void routeLog(NSString *msg) {
-    (void)msg;
+    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
@@ -702,6 +735,20 @@ static void handleRouteEvent(NSString *source) {
                 IMP imp = method_getImplementation(m);
                 MSHookFunction(imp, (IMP)replActivateAlertItem, (IMP *)&origActivateAlertItem);
             }
+        }
+    }
+
+    // 探针 B/C（v1.9.30 排查"粘贴自"横幅真实路径）：UNA 展示状态 + 控制器激活
+    {
+        Class unaCls = NSClassFromString(@"SBUserNotificationAlert");
+        if (unaCls) {
+            Method mb = class_getInstanceMethod(unaCls, NSSelectorFromString(@"presentationStateDidChangeFromState:toState:"));
+            if (mb) MSHookFunction(method_getImplementation(mb), (IMP)replUNASetState, (IMP *)&origUNASetState);
+        }
+        Class ctrlCls = NSClassFromString(@"SBAlertItemsController");
+        if (ctrlCls) {
+            Method mc = class_getInstanceMethod(ctrlCls, NSSelectorFromString(@"activateAlertItem:"));
+            if (mc) MSHookFunction(method_getImplementation(mc), (IMP)replCtrlActivate, (IMP *)&origCtrlActivate);
         }
     }
 }
