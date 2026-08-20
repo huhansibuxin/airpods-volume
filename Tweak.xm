@@ -343,10 +343,14 @@ static BOOL currentOutputIsAirPods(void) {
 // 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
 // 需要排查时把本函数体恢复即可）
 // 路由事件日志（写文件，oslog 捕获不到注入 dylib 的 NSLog）
-// 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
-// 需要排查时把本函数体恢复即可——2026-08-20 老板要求静默）
+// 路由事件日志（排查模式：写文件，oslog 捕获不到注入 dylib 的 NSLog；
+// 生产静默时把函数体清空即可）
 static void routeLog(NSString *msg) {
-    (void)msg;
+    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
@@ -524,8 +528,31 @@ static void handleRouteEvent(NSString *source) {
             // 不经过 setVolumeTo hook 的 cap）；② 戴上前音量就是 93/100
             // （旧 sLast 记录机制记录不到，不压）。
             // 当前 ≤70（如 50）不碰，不会把低音量抬到 70。
-            if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur > 0.7f)
-                [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
+            // v1.9.24 排查：记录 getVolume 返回值/压的结果/1.5s 后复查（验证
+            // 是否被系统后续设置覆盖）
+            float mvol = -1.0f;
+            if ([avc getVolume:&mvol forCategory:@"Audio/Video"]) {
+                routeLog([NSString stringWithFormat:@"attach(%@) media cur=%.2f", source, mvol]);
+                if (mvol > 0.7f) {
+                    BOOL pok = [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
+                    routeLog([NSString stringWithFormat:@"attach(%@) media press->70 ok=%d", source, pok]);
+                    // 1.5s 后复查：若被系统覆盖（又 >70）说明系统用 MediaRemote
+                    // 路径重设了音量，需要换时机/换机制
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        float re = -1.0f;
+                        id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+                        if ([avc2 getVolume:&re forCategory:@"Audio/Video"])
+                            routeLog([NSString stringWithFormat:@"attach recheck media cur=%.2f (overwritten? %@)", re, re > 0.7f ? @"YES" : @"no"]);
+                        else
+                            routeLog(@"attach recheck media getVolume FAIL");
+                    });
+                } else {
+                    routeLog([NSString stringWithFormat:@"attach(%@) media no-press cur=%.2f (<=70)", source, mvol]);
+                }
+            } else {
+                routeLog([NSString stringWithFormat:@"attach(%@) media getVolume FAIL", source]);
+            }
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
             if (!isRingerMuted()) {
