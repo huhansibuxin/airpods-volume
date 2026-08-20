@@ -64,29 +64,10 @@ static BOOL airPodsInBluetoothDevices(void) {
     return NO;
 }
 
-// AirPods 入耳检测状态（iOS16 实测 p/s bitmask：0=未戴 3=双耳，摘戴实时跳变）。
-// 这是"戴上必切"的权威信号：系统用入耳检测决定"戴上切输出"，但不稳定
-// （偶尔戴上不切）；我们监听同一信号，戴上（0→非0）必切。
-// 返回值 = 是否戴上（p 或 s 任一非 0）；p/s 通过指针带出（日志用）。
-static BOOL airPodsInEarStatus(int *outP, int *outS) {
-    @try {
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        NSArray *devs = [bm connectedDevices];
-        for (id d in devs) {
-            if (isAirPodsName([d name])) {
-                unsigned char p = 0, s = 0;
-                [d inEarStatusPrimary:&p secondary:&s];
-                if (outP) *outP = p;
-                if (outS) *outS = s;
-                return (p != 0 || s != 0);
-            }
-        }
-    } @catch (id e) {}
-    return NO;
-}
-
-// （airPodsWorn 已删：enforce 直接用 airPodsInEarStatus，无调用方；
-//  -Werror 会把 unused function 当编译错误）
+// （v1.9.21：入耳检测 worn 门控已整体删除——其滞后/假阳性导致
+//  开盒未戴不切、摘下抢回；"开盒必切"不依赖入耳检测，在场即切。
+//  相关代码：airPodsInEarStatus / sWornCache / handleInEarChange /
+//  BluetoothAccessorySettingsChanged 监听均已移除）
 
 // 实时音频路由检测 AirPods 在场（不依赖输出路由）：
 // AirPods 连接即有 HFP 输入（availableInputs），戴上瞬间即可检测到，
@@ -432,33 +413,13 @@ static void forceRouteToAirPods(const char *why) {
 // ============================================================
 
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
-static BOOL sPrevWorn = NO;         // 上次 worn 状态（戴上 0→1 重置冷却）
-static NSTimeInterval sLastUnworn = 0; // 最近检测到"未戴"时刻（摘下保护期：期内不抢回）
-static int sLastWornLog = -1;       // 日志限流：worn 状态 0/1，变化才写
-static BOOL sWornCache = NO;        // 入耳状态缓存：只在 BluetoothAccessorySettingsChanged
-                                    // 通知回调里更新（读取时机最新，避免其他事件实时读
-                                    // 到滞后/假阳性——摘下瞬间仍读到 3 导致抢回）
-static NSTimeInterval sLastInEarChange = 0; // 入耳通知时间（30s 无通知则兜底刷新）
+static NSTimeInterval sLastDisconnect = 0; // 最近一次"AirPods 不在场"时刻
+                                           // （断开保护期：5s 内不抢回——摘下放回
+                                           //  盒子蓝牙断开时不抢；重新开盒会清除）
 
 // 前向声明（定义在下方）
 static void enforceAirPodsRoute(void);
 static void startPollWindow(void);
-
-// 入耳变化处理：通知回调里读 inEarStatus（此刻是蓝牙层最新值）→ 更新缓存 →
-// enforce 用缓存判断，彻底解决"摘下瞬间实时读还是 3"的滞后抢回
-static void handleInEarChange(void) {
-    @try {
-        sWornCache = airPodsInEarStatus(NULL, NULL);
-        sLastInEarChange = [[NSDate date] timeIntervalSince1970];
-        int ws = sWornCache ? 1 : 0;
-        if (ws != sLastWornLog) {
-            sLastWornLog = ws;
-            routeLog([NSString stringWithFormat:@"inear worn=%d", sWornCache]);
-        }
-        enforceAirPodsRoute();
-        startPollWindow(); // 摘戴窗口期轮询兜底（1 分钟）
-    } @catch (id e) {}
-}
 
 // ============================================================
 // 轮询窗口化管理（老板要求：只在需要兜底时轮询 1 分钟，平时零轮询）
@@ -483,64 +444,34 @@ static void stopPoll(void) {
 }
 
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
-// "戴上必切"（v1.9.18）：纯靠入耳检测 worn，不依赖 inEarDetectEnabled
-// （该方法是 id 返回值，按 BOOL 判断不可靠——v1.9.17 曾因此误判检测关闭
-// 走了"在场即切"退化分支，摘下蓝牙还连时反复抢回）。
-// 对齐系统行为"开盒不切、戴上切"：
-//   未戴（worn=0）→ 开盒不切、摘下不抢（刷新摘下保护期）
-//   戴上（0→非0）→ 清除保护期 + 重置冷却 → 必切（单耳 p/s 任一非 0 同样触发）
-//   戴着但 3s 内摘过（worn 读取滞后窗口）→ 不抢回
-//   戴着且稳定（3s 外）→ 输出被切走（车载）→ 抢回
+// "开盒必切"（v1.9.21，老板定案）：不依赖入耳检测（worn 门控已删——
+// 其滞后/假阳性导致开盒未戴不切、摘下抢回），切换条件 = AirPods 在场
+// （蓝牙列表/音频路由任一命中）→ 输出非 AirPods → 强制切回。
+//   开盒（btconnect）→ 重置冷却 + 清断开保护期 → attached 必切
+//   车载抢（在场）→ stolen 抢回
+//   摘下放回盒子（蓝牙断开）→ 断开保护期 5s 内不抢（白送优化，老板
+//     已接受摘下拿手里/蓝牙还连时的抢回行为）
+//   手动切喇叭连点 2 次 → 3s 逃生通道保留
 static void enforceAirPodsRoute(void) {
     @try {
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
-        // 戴上（蓝牙 0→1）：重置 3s 逃生冷却，保证"戴上必切"不被连点冷却挡住
+        // 连接（蓝牙 0→1）：重置 3s 逃生冷却，保证"开盒必切"不被连点冷却挡住
         if (airInBT && !sPrevAirInBT)
             sLastRouteForce = 0;
         sPrevAirInBT = airInBT;
         sAirPodsConnected = airInRoute || airInBT;
         if (!sAirPodsConnected) {
             sOutputWasAirPods = NO; // 不在场，重置状态
-            sPrevWorn = NO;
-            sLastUnworn = now;      // 不在场 = 未戴，刷新保护期
+            sLastDisconnect = now;  // 断开保护期（摘下放回盒子）
             return;
         }
-        // 入耳状态：优先用通知缓存（sWornCache，读取时机最新）；
-        // 入耳通知 30s 没来过（通知丢失兜底）→ 实时刷新一次
-        int ep = 0, es = 0;
-        BOOL worn = sWornCache;
-        if (now - sLastInEarChange > 30.0) {
-            worn = airPodsInEarStatus(&ep, &es);
-            sWornCache = worn;
-        }
-        if (!worn) {
-            // 未戴（开盒/摘下）：不切不抢，刷新摘下保护期
-            sLastUnworn = now;
-            sPrevWorn = NO;
-            sOutputWasAirPods = NO; // 重置状态（下次戴上判定为 attached）
-            return;
-        }
-        // worn = YES（戴上）
-        if (!sPrevWorn) {
-            // 刚戴上：清除摘下保护期 + 重置冷却 → 必切
-            sLastUnworn = 0;
-            sLastRouteForce = 0;
-        }
-        sPrevWorn = YES;
-        // 摘下保护期（双保险，防通知丢失后兜底刷新读到滞后值）：
-        // 5s 内曾检测到未戴 → 不抢回
-        if (sLastUnworn > 0 && now - sLastUnworn < 5.0) {
+        // 断开保护期：5s 内 AirPods 不在场过（摘下放回盒子）→ 不抢回，
+        // 避免摘下瞬间输出被系统切走时我们抢回
+        if (now - sLastDisconnect < 5.0) {
             sOutputWasAirPods = NO;
             return;
-        }
-        // 日志（worn 状态跳变才写，防高频刷屏）
-        int ws = worn ? 1 : 0;
-        if (ws != sLastWornLog) {
-            sLastWornLog = ws;
-            routeLog([NSString stringWithFormat:@"enforce worn=%d inEar=%d/%d conn=%d",
-                      worn, ep, es, sAirPodsConnected]);
         }
         BOOL outIsAP = currentOutputIsAirPods();
         BOOL wasAP = sOutputWasAirPods;
@@ -614,10 +545,6 @@ static void handleRouteEvent(NSString *source) {
 
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
-    // 启动时初始化入耳缓存（respring 后仍戴着时不会再有入耳通知）
-    sWornCache = airPodsInEarStatus(NULL, NULL);
-    sLastInEarChange = [[NSDate date] timeIntervalSince1970];
-
     // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
     // availableRoutes 为空导致的 no-route-yet 半秒延迟（开盒即能直接切）
     @try {
@@ -643,16 +570,8 @@ static void handleRouteEvent(NSString *source) {
         handleRouteEvent(@"outputdev");
     }];
 
-    // 入耳检测变化（戴上/摘下触发，iOS16 实测：obj=BluetoothDevice，
-    // 通知名 BluetoothAccessorySettingsChanged）→ 更新 worn 缓存 + 强制路由。
-    // 在通知回调里读 inEarStatus（最新值），enforce 用缓存避免滞后误判。
-    [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothAccessorySettingsChanged"
-        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        handleInEarChange();
-    }];
-
-    // 1.5s 轮询兜底：保证"戴上必切"（系统不切输出时设备列表无变化、通知不触发）。
-    // 1.5s 轮询兜底：**窗口化**（老板要求）——戴上/被抢时启动 1 分钟兜底窗口，
+    // 1.5s 轮询兜底：保证"开盒必切"（系统不切输出时设备列表无变化、通知不触发）。
+    // **窗口化**（老板要求）——连接/被抢时启动 1 分钟兜底窗口，
     // 窗口到期自动停；车载再次打开（再抢）→ 事件触发重启 1 分钟窗口。平时零轮询。
     sPollTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(sPollTimer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
@@ -675,7 +594,8 @@ static void handleRouteEvent(NSString *source) {
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         if (airPodsInBluetoothDevices()) {
-            sLastRouteForce = 0; // 车载/设备连接：重置冷却，确保抢回
+            sLastRouteForce = 0;    // 车载/设备连接：重置冷却，确保开盒必切/抢回
+            sLastDisconnect = 0;    // 清除断开保护期：重新开盒必切（不被摘盒保护挡）
             startPollWindow();
             handleRouteEvent(@"btconnect");
         }
