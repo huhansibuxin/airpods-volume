@@ -277,6 +277,38 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 }
 
 // ============================================================
+// Block "X 粘贴自 Y" 剪贴板读取提示（iOS 16）
+// 社区方案（0xkuj/NoPasteAlerts16，iOS16 验证可用）：
+// 剪贴板读取提示 = SBUserNotificationAlert（_alertSource == @"pasted"），
+// 经 SBAlertItem +activateAlertItem: 激活展示。拦截：检测到即不激活
+// 并清理（_setActivated:NO + _sendResponseAndCleanUp:YES），提示不出现，
+// App 读取剪贴板功能不受影响。
+// ============================================================
+
+@interface SBUserNotificationAlert : NSObject
+- (void)_setActivated:(BOOL)activated;
+- (void)_sendResponseAndCleanUp:(BOOL)cleanup;
+@end
+
+static void (*origActivateAlertItem)(id, SEL, id) = NULL;
+static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
+    if (alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")]) {
+        NSString *source = nil;
+        @try { source = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([source isEqualToString:@"pasted"]) {
+            @try {
+                [alertItem _setActivated:NO];
+                if ([alertItem respondsToSelector:@selector(_sendResponseAndCleanUp:)])
+                    [alertItem _sendResponseAndCleanUp:YES];
+            } @catch (id e) {}
+            return; // 已拦截：不显示
+        }
+    }
+    if (origActivateAlertItem)
+        origActivateAlertItem(self, _cmd, alertItem);
+}
+
+// ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
 // 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
 // "音频输出"列表的底层实现）：
@@ -658,5 +690,18 @@ static void handleRouteEvent(NSString *source) {
         if ([rtoCls instancesRespondToSelector:selPP])
             MSHookMessageEx(rtoCls, selPP,
                             (IMP)replPerformPresentationRequest, (IMP *)&origPerformPresentationRequest);
+    }
+
+    // 剪贴板"粘贴自"提示拦截（iOS16：SBAlertItem +activateAlertItem: 类方法，
+    // 用 MSHookFunction 挂类方法 IMP——MSHookMessageEx 只支持实例方法）
+    {
+        Class sbaCls = NSClassFromString(@"SBAlertItem");
+        if (sbaCls) {
+            Method m = class_getClassMethod(sbaCls, NSSelectorFromString(@"activateAlertItem:"));
+            if (m) {
+                IMP imp = method_getImplementation(m);
+                MSHookFunction(imp, (IMP)replActivateAlertItem, (IMP *)&origActivateAlertItem);
+            }
+        }
     }
 }
