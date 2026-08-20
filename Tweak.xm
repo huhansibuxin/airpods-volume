@@ -85,20 +85,8 @@ static BOOL airPodsInEarStatus(int *outP, int *outS) {
     return NO;
 }
 
-// 兼容旧调用（带出 device）
-static BOOL airPodsWorn(id *outDevice) {
-    BOOL worn = airPodsInEarStatus(NULL, NULL);
-    if (outDevice) {
-        *outDevice = nil;
-        @try {
-            id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-            for (id d in [bm connectedDevices]) {
-                if (isAirPodsName([d name])) { *outDevice = d; break; }
-            }
-        } @catch (id e) {}
-    }
-    return worn;
-}
+// （airPodsWorn 已删：enforce 直接用 airPodsInEarStatus，无调用方；
+//  -Werror 会把 unused function 当编译错误）
 
 // 实时音频路由检测 AirPods 在场（不依赖输出路由）：
 // AirPods 连接即有 HFP 输入（availableInputs），戴上瞬间即可检测到，
@@ -647,10 +635,15 @@ static void handleRouteEvent(NSString *source) {
     });
     dispatch_suspend(sPollTimer); // 初始不轮询，等事件启动窗口
 
-    // AirPods 蓝牙连接成功（开盒即连接）→ 启动轮询窗口 + 立即强制路由
+    // 蓝牙设备连接成功（开盒 AirPods、车载等任何蓝牙设备都触发）
+    // → 启动轮询窗口 + 立即强制路由。
+    // 关键：**先重置 3s 逃生冷却**——车载连接是"自动事件"，必须保证抢回
+    // 不被逃生通道挡住（戴上后很快开车载的场景）；手动切喇叭/车载连点
+    // 2 次走 outputdev 通知（不重置冷却），逃生通道保留。
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         if (airPodsInBluetoothDevices()) {
+            sLastRouteForce = 0; // 车载/设备连接：重置冷却，确保抢回
             startPollWindow();
             handleRouteEvent(@"btconnect");
         }
