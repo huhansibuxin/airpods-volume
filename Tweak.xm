@@ -501,6 +501,40 @@ static void replCtrlActivateAnimated(id self, SEL _cmd, id alertItem, BOOL anima
     if (origCtrlActivateAnimated) origCtrlActivateAnimated(self, _cmd, alertItem, animated);
 }
 
+// 探针 K：SBUserNotificationCenter 分发入口（A-STACK 符号化确认：
+// 显示链 = startUserNotificationCenter_block -> dispatchUserNotification:
+// -> initWithMessage: -> updateWithMessage: -> 展示。在此源头拦截最有效）
+static void (*origUNCDispatch)(id, SEL, id, id, id, id);
+static void replUNCDispatch(id self, SEL _cmd, id userNotification, id flags, id replyPort, id auditToken) {
+    @try {
+        NSString *desc = @"?";
+        @try { desc = [userNotification description]; } @catch (id e) {}
+        // 找 pasted 特征
+        BOOL isPasted = desc && ([desc containsString:@"pasted"] || [desc containsString:@"Pasted"]);
+        routeLog([NSString stringWithFormat:@"PROBE-K dispatchUserNotification pasted=%d len=%lu", isPasted, (unsigned long)desc.length]);
+        if (isPasted) {
+            routeLog([NSString stringWithFormat:@"PROBE-K BLOCKED pasted notification: %@", desc]);
+            return; // 源头拦截：不分发
+        }
+        if (desc.length < 400) routeLog([NSString stringWithFormat:@"PROBE-K other: %@", desc]);
+    } @catch (id e) {}
+    if (origUNCDispatch) origUNCDispatch(self, _cmd, userNotification, flags, replyPort, auditToken);
+}
+
+// 探针 L：-[SBUserNotificationAlert updateWithMessage:requestFlags:]（src 设置点）
+static void (*origUNAUpdate)(id, SEL, id, id);
+static void replUNAUpdate(id self, SEL _cmd, id message, id flags) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([src isEqualToString:@"pasted"]) {
+            routeLog(@"PROBE-L updateWithMessage src=pasted -> SKIP");
+            return; // 不更新（保持未配置状态，不进入展示）
+        }
+    } @catch (id e) {}
+    if (origUNAUpdate) origUNAUpdate(self, _cmd, message, flags);
+}
+
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
 // 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
@@ -932,6 +966,16 @@ static void handleRouteEvent(NSString *source) {
             if (mp) MSHookFunction(method_getImplementation(mp), (IMP)replCtrlPresent, (IMP *)&origCtrlPresent);
             Method ma = class_getInstanceMethod(ctrlCls, NSSelectorFromString(@"activateAlertItem:animated:"));
             if (ma) MSHookFunction(method_getImplementation(ma), (IMP)replCtrlActivateAnimated, (IMP *)&origCtrlActivateAnimated);
+        }
+        Class uncCls = NSClassFromString(@"SBUserNotificationCenter");
+        if (uncCls) {
+            Method mk = class_getClassMethod(uncCls, NSSelectorFromString(@"dispatchUserNotification:flags:replyPort:auditToken:"));
+            if (mk) MSHookFunction(method_getImplementation(mk), (IMP)replUNCDispatch, (IMP *)&origUNCDispatch);
+        }
+        Class unaCls2 = NSClassFromString(@"SBUserNotificationAlert");
+        if (unaCls2) {
+            Method ml = class_getInstanceMethod(unaCls2, NSSelectorFromString(@"updateWithMessage:requestFlags:"));
+            if (ml) MSHookFunction(method_getImplementation(ml), (IMP)replUNAUpdate, (IMP *)&origUNAUpdate);
         }
     }
 }
