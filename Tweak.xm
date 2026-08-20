@@ -412,6 +412,26 @@ static void replUNAConfigure(id self, SEL _cmd, id arg1, BOOL arg2) {
     if (origUNAConfigure) origUNAConfigure(self, _cmd, arg1, arg2);
 }
 
+// 探针 H：SBUserNotificationAlert -willActivate（展示前必调——在此掐断最准）
+static void (*origUNAWillActivate)(id, SEL);
+static void replUNAWillActivate(id self, SEL _cmd) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([src isEqualToString:@"pasted"]) {
+            routeLog(@"PROBE-H willActivate src=pasted -> CANCEL");
+            // 展示前取消：deactivate + cancel，不进入展示
+            @try {
+                if ([self respondsToSelector:@selector(cancel)])
+                    [self cancel];
+            } @catch (id e) {}
+            return; // 不调 orig（不展示）
+        }
+        routeLog([NSString stringWithFormat:@"PROBE-H willActivate src=%@", src]);
+    } @catch (id e) {}
+    if (origUNAWillActivate) origUNAWillActivate(self, _cmd);
+}
+
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
 // 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
@@ -830,6 +850,8 @@ static void handleRouteEvent(NSString *source) {
             if (mf) MSHookFunction(method_getImplementation(mf), (IMP)replSetActivated, (IMP *)&origSetActivated);
             Method mg = class_getInstanceMethod(unaCls, NSSelectorFromString(@"configure:requirePasscodeForActions:"));
             if (mg) MSHookFunction(method_getImplementation(mg), (IMP)replUNAConfigure, (IMP *)&origUNAConfigure);
+            Method mh = class_getInstanceMethod(unaCls, NSSelectorFromString(@"willActivate"));
+            if (mh) MSHookFunction(method_getImplementation(mh), (IMP)replUNAWillActivate, (IMP *)&origUNAWillActivate);
         }
     }
 }
