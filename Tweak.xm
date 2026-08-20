@@ -39,6 +39,10 @@ static BOOL sAirPodsConnected = NO;
 
 @interface BluetoothDevice : NSObject
 - (NSString *)name;
+- (BOOL)inEarDetectEnabled;
+// 入耳检测状态（iOS16 实机验证）：unsigned char 输出参数，bitmask——
+// 0=未戴, 1=左耳, 2=右耳, 3=双耳（frida 实测摘戴实时跳变 0↔3）
+- (void)inEarStatusPrimary:(unsigned char *)primary secondary:(unsigned char *)secondary;
 @end
 
 @interface BluetoothManager : NSObject
@@ -56,6 +60,40 @@ static BOOL airPodsInBluetoothDevices(void) {
         NSArray *devs = [bm connectedDevices];
         for (id d in devs) {
             if (isAirPodsName([d name])) return YES;
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// AirPods 是否已戴上（入耳检测，iOS16 实测 p/s bitmask：0=未戴 3=双耳）。
+// 这是"戴上必切"的权威信号：系统用入耳检测决定"戴上切输出"，但不稳定
+// （偶尔戴上不切）；我们监听同一信号，戴上（0→非0）必切。
+// 注意：返回的 device 通过指针参数带出（判断入耳检测是否开启用）。
+static BOOL airPodsWorn(id *outDevice) {
+    @try {
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        NSArray *devs = [bm connectedDevices];
+        for (id d in devs) {
+            if (isAirPodsName([d name])) {
+                unsigned char p = 0, s = 0;
+                [d inEarStatusPrimary:&p secondary:&s];
+                if (outDevice) *outDevice = d;
+                return (p != 0 || s != 0);
+            }
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// AirPods 入耳检测是否开启（关闭时 inEarStatus 恒 0，退化用"在场即切"兜底）
+static BOOL airPodsInEarDetectOn(void) {
+    @try {
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        NSArray *devs = [bm connectedDevices];
+        for (id d in devs) {
+            if (isAirPodsName([d name])) {
+                return [d inEarDetectEnabled];
+            }
         }
     } @catch (id e) {}
     return NO;
@@ -405,6 +443,7 @@ static void forceRouteToAirPods(const char *why) {
 // ============================================================
 
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
+static BOOL sPrevWorn = NO;         // 上次入耳检测是否戴上（戴上 0→1 重置冷却）
 
 // ============================================================
 // 轮询窗口化管理（老板要求：只在需要兜底时轮询 1 分钟，平时零轮询）
@@ -429,8 +468,10 @@ static void stopPoll(void) {
 }
 
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
-// "不管系统切不切都保证切"：输出刚变成 AirPods（系统切的）时，我们也主动
-// attached 切一次（幂等无害）——确保切换由我们执行而非依赖系统。
+// "戴上必切"（v1.9.17）：切换条件 = AirPods 在场 &&（入耳检测到戴上 ||
+// 入耳检测关闭时退化"在场即切"）。对齐系统行为"开盒不切、戴上切"——
+// 开盒（蓝牙连未戴）不切；戴上（0→非0）必切（重置冷却）；摘下（→0）
+// 不抢（即使输出被系统切走）；车载抢（戴着）照抢。
 static void enforceAirPodsRoute(void) {
     @try {
         BOOL airInRoute = airPodsInCurrentRoute();
@@ -442,6 +483,18 @@ static void enforceAirPodsRoute(void) {
         sAirPodsConnected = airInRoute || airInBT;
         if (!sAirPodsConnected) {
             sOutputWasAirPods = NO; // 不在场，重置状态
+            sPrevWorn = NO;
+            return;
+        }
+        // 入耳检测（iOS16 实测 inEarStatusPrimary:secondary: bitmask 0↔3 实时跳变）
+        BOOL worn = airPodsWorn(NULL);
+        BOOL detectOn = airPodsInEarDetectOn();
+        if (worn && !sPrevWorn)
+            sLastRouteForce = 0; // 刚戴上：重置冷却，戴上必切
+        sPrevWorn = worn;
+        if (!worn && detectOn) {
+            // 没戴上（且入耳检测可用）：开盒不切、摘下不抢
+            sOutputWasAirPods = NO; // 重置状态（下次戴上判定为 attached）
             return;
         }
         BOOL outIsAP = currentOutputIsAirPods();
@@ -540,6 +593,15 @@ static void handleRouteEvent(NSString *source) {
     [[NSNotificationCenter defaultCenter] addObserverForName:@"AVOutputContextOutputDevicesDidChangeNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         handleRouteEvent(@"outputdev");
+    }];
+
+    // 入耳检测变化（戴上/摘下触发，iOS16 实测：obj=BluetoothDevice，
+    // 通知名 BluetoothAccessorySettingsChanged）→ 戴上必切/摘下不抢。
+    // enforceAirPodsRoute 内部用 inEarStatus 判断方向，统一入口。
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothAccessorySettingsChanged"
+        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        enforceAirPodsRoute();
+        startPollWindow(); // 摘戴窗口期轮询兜底（1 分钟）
     }];
 
     // 1.5s 轮询兜底：保证"戴上必切"（系统不切输出时设备列表无变化、通知不触发）。
