@@ -321,24 +321,52 @@ static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
 }
 
 // 探针 B：SBUserNotificationAlert 展示状态变化（横幅/弹窗展示必走）
-static void (*origUNASetState)(id, SEL, long long, long long);
-static void replUNASetState(id self, SEL _cmd, long long from, long long to) {
+// 注意：presentationStateDidChangeFromState:toState: 定义在父类 SBAlertItem，
+// class_getInstanceMethod(SBUserNotificationAlert,...) 查不到——须用 SBAlertItem
+static void (*origAlertItemSetState)(id, SEL, long long, long long);
+static void replAlertItemSetState(id self, SEL _cmd, long long from, long long to) {
     @try {
-        routeLog([NSString stringWithFormat:@"PROBE-B UNA state from=%lld to=%lld class=%@", from, to, NSStringFromClass([self class])]);
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        BOOL isUNA = [self isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")];
+        routeLog([NSString stringWithFormat:@"PROBE-B alertItem state from=%lld to=%lld class=%@ src=%@ isUNA=%d",
+                  from, to, NSStringFromClass([self class]), src, isUNA]);
+        // 拦截：pasted 横幅禁止进入展示状态（源头上掐）
+        if (isUNA && [src isEqualToString:@"pasted"]) {
+            if (origAlertItemSetState) origAlertItemSetState(self, _cmd, from, to);
+            @try {
+                if ([self respondsToSelector:@selector(deactivate)])
+                    [self deactivate];
+            } @catch (id e) {}
+            return; // 展示状态已设置但立即 deactivate
+        }
     } @catch (id e) {}
-    if (origUNASetState) origUNASetState(self, _cmd, from, to);
+    if (origAlertItemSetState) origAlertItemSetState(self, _cmd, from, to);
 }
 
-// 探针 C：SBAlertItemsController 实例激活路径
-static void (*origCtrlActivate)(id, SEL, id);
-static void replCtrlActivate(id self, SEL _cmd, id alertItem) {
+// 探针 D：SBAlertItem -deactivate（看横幅是否被 deactivate）
+static void (*origAlertItemDeactivate)(id, SEL);
+static void replAlertItemDeactivate(id self, SEL _cmd) {
     @try {
-        NSString *cn = alertItem ? NSStringFromClass([alertItem class]) : @"nil";
         NSString *src = @"?";
-        @try { src = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
-        routeLog([NSString stringWithFormat:@"PROBE-C ctrlActivate class=%@ src=%@", cn, src]);
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        routeLog([NSString stringWithFormat:@"PROBE-D deactivate class=%@ src=%@", NSStringFromClass([self class]), src]);
     } @catch (id e) {}
-    if (origCtrlActivate) origCtrlActivate(self, _cmd, alertItem);
+    if (origAlertItemDeactivate) origAlertItemDeactivate(self, _cmd);
+}
+
+// 探针 E：SBUserNotificationAlert -setPrefersSystemAperturePresentation:（灵动岛展示偏好）
+static void (*origSetAperturePref)(id, SEL, BOOL);
+static void replSetAperturePref(id self, SEL _cmd, BOOL pref) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        routeLog([NSString stringWithFormat:@"PROBE-E aperturePref=%d class=%@ src=%@", pref, NSStringFromClass([self class]), src]);
+        if ([src isEqualToString:@"pasted"]) {
+            pref = NO; // 禁止灵动岛展示"粘贴自"
+        }
+    } @catch (id e) {}
+    if (origSetAperturePref) origSetAperturePref(self, _cmd, pref);
 }
 
 // ============================================================
@@ -741,17 +769,20 @@ static void handleRouteEvent(NSString *source) {
         }
     }
 
-    // 探针 B/C（v1.9.30 排查"粘贴自"横幅真实路径）：UNA 展示状态 + 控制器激活
+    // 探针 B/D/E（v1.9.31 强化拦截"粘贴自"横幅展示层）：
+    // B = SBAlertItem 展示状态（父类方法）；D = deactivate；E = 灵动岛展示偏好
     {
+        Class alertItemCls = NSClassFromString(@"SBAlertItem");
+        if (alertItemCls) {
+            Method mb = class_getInstanceMethod(alertItemCls, NSSelectorFromString(@"presentationStateDidChangeFromState:toState:"));
+            if (mb) MSHookFunction(method_getImplementation(mb), (IMP)replAlertItemSetState, (IMP *)&origAlertItemSetState);
+            Method md = class_getInstanceMethod(alertItemCls, NSSelectorFromString(@"deactivate"));
+            if (md) MSHookFunction(method_getImplementation(md), (IMP)replAlertItemDeactivate, (IMP *)&origAlertItemDeactivate);
+        }
         Class unaCls = NSClassFromString(@"SBUserNotificationAlert");
         if (unaCls) {
-            Method mb = class_getInstanceMethod(unaCls, NSSelectorFromString(@"presentationStateDidChangeFromState:toState:"));
-            if (mb) MSHookFunction(method_getImplementation(mb), (IMP)replUNASetState, (IMP *)&origUNASetState);
-        }
-        Class ctrlCls = NSClassFromString(@"SBAlertItemsController");
-        if (ctrlCls) {
-            Method mc = class_getInstanceMethod(ctrlCls, NSSelectorFromString(@"activateAlertItem:"));
-            if (mc) MSHookFunction(method_getImplementation(mc), (IMP)replCtrlActivate, (IMP *)&origCtrlActivate);
+            Method me = class_getInstanceMethod(unaCls, NSSelectorFromString(@"setPrefersSystemAperturePresentation:"));
+            if (me) MSHookFunction(method_getImplementation(me), (IMP)replSetAperturePref, (IMP *)&origSetAperturePref);
         }
     }
 }
