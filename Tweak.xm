@@ -432,6 +432,37 @@ static void replUNAWillActivate(id self, SEL _cmd) {
     if (origUNAWillActivate) origUNAWillActivate(self, _cmd);
 }
 
+// 探针 I：aperture（灵动岛）展示链——PROBE-E 每次命中证明横幅走 aperture 路径。
+// hook _createSystemApertureElement + systemApertureContentDefinition：
+// pasted -> return nil（不创建展示元素 → 不显示）
+static id (*origCreateApertureElement)(id, SEL);
+static id replCreateApertureElement(id self, SEL _cmd) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([src isEqualToString:@"pasted"]) {
+            routeLog(@"PROBE-I _createSystemApertureElement src=pasted -> nil");
+            return nil; // 不创建灵动岛元素
+        }
+    } @catch (id e) {}
+    if (origCreateApertureElement) return origCreateApertureElement(self, _cmd);
+    return nil;
+}
+
+static id (*origApertureContentDef)(id, SEL);
+static id replApertureContentDef(id self, SEL _cmd) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([src isEqualToString:@"pasted"]) {
+            routeLog(@"PROBE-I systemApertureContentDefinition src=pasted -> nil");
+            return nil;
+        }
+    } @catch (id e) {}
+    if (origApertureContentDef) return origApertureContentDef(self, _cmd);
+    return nil;
+}
+
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
 // 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
@@ -852,6 +883,10 @@ static void handleRouteEvent(NSString *source) {
             if (mg) MSHookFunction(method_getImplementation(mg), (IMP)replUNAConfigure, (IMP *)&origUNAConfigure);
             Method mh = class_getInstanceMethod(unaCls, NSSelectorFromString(@"willActivate"));
             if (mh) MSHookFunction(method_getImplementation(mh), (IMP)replUNAWillActivate, (IMP *)&origUNAWillActivate);
+            Method mi = class_getInstanceMethod(unaCls, NSSelectorFromString(@"_createSystemApertureElement"));
+            if (mi) MSHookFunction(method_getImplementation(mi), (IMP)replCreateApertureElement, (IMP *)&origCreateApertureElement);
+            Method mj = class_getInstanceMethod(unaCls, NSSelectorFromString(@"systemApertureContentDefinition"));
+            if (mj) MSHookFunction(method_getImplementation(mj), (IMP)replApertureContentDef, (IMP *)&origApertureContentDef);
         }
     }
 }
