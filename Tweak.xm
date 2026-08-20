@@ -395,6 +395,23 @@ static void replSetActivated(id self, SEL _cmd, BOOL activated) {
     if (origSetActivated) origSetActivated(self, _cmd, activated);
 }
 
+// 探针 G：SBUserNotificationAlert -configure:requirePasscodeForActions:
+// （展示链：init -> configure -> prepareAlertController -> 展示。
+//  configure 是展示必经且 _alertSource 已就绪——在此拦截最准）
+static void (*origUNAConfigure)(id, SEL, id, BOOL);
+static void replUNAConfigure(id self, SEL _cmd, id arg1, BOOL arg2) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
+        if ([src isEqualToString:@"pasted"]) {
+            routeLog([NSString stringWithFormat:@"PROBE-G configure src=pasted -> BLOCKED (no orig)"]);
+            return; // 不配置 → 不进入展示链
+        }
+        routeLog([NSString stringWithFormat:@"PROBE-G configure src=%@", src]);
+    } @catch (id e) {}
+    if (origUNAConfigure) origUNAConfigure(self, _cmd, arg1, arg2);
+}
+
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
 // 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
@@ -811,6 +828,8 @@ static void handleRouteEvent(NSString *source) {
             if (me) MSHookFunction(method_getImplementation(me), (IMP)replSetAperturePref, (IMP *)&origSetAperturePref);
             Method mf = class_getInstanceMethod(unaCls, NSSelectorFromString(@"_setActivated:"));
             if (mf) MSHookFunction(method_getImplementation(mf), (IMP)replSetActivated, (IMP *)&origSetActivated);
+            Method mg = class_getInstanceMethod(unaCls, NSSelectorFromString(@"configure:requirePasscodeForActions:"));
+            if (mg) MSHookFunction(method_getImplementation(mg), (IMP)replUNAConfigure, (IMP *)&origUNAConfigure);
         }
     }
 }
