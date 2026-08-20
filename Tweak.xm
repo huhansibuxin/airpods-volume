@@ -525,27 +525,33 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            // 媒体音量：只在"新戴上"（conn 0→1 跳变）时无条件压到 70
-            // （v1.9.26）：不读 getVolume——日志实证它恒返回缓存假值 0.70
-            // （无播放会话时不可靠），">70 才压"永不成立。戴上无条件设 0.7：
-            // 边界 = 戴上时音量本就 <70（如 50）会被抬到 70（老板已接受，
-            // 防爆音优先）。
-            // 关键保护：摘下方向（conn 1→0 / 蓝牙还连）绝不进此分支——
-            // sPrevAttached 跳变判定，摘下后不碰媒体音量（系统自动恢复）。
+            // 媒体音量：只在"新戴上"（conn 0→1 跳变）时压到 70（v1.9.27）。
+            // ⚠️ 关键时序修复：**绝不立即压**——btconnect 瞬间输出还在喇叭，
+            // setVolumeTo(0.7) 会改喇叭音量+污染喇叭记忆（摘下后系统恢复的
+            // 喇叭记忆被我们改成 70 → 回不到戴前值，老板实测"摘下停在 70"）。
+            // 正确做法：等 attached 切换完成（输出确认是 AirPods）再压——
+            // 只改 AirPods 音量/记忆，喇叭记忆不碰，摘下后系统正常恢复。
+            // 压三次（0.8s/2.0s/3.2s，输出是 AirPods 才压）：覆盖系统经
+            // MediaRemote 路径的延迟音量设置。getVolume 恒假值不读取。
             BOOL newlyAttached = !sPrevAttached;
             if (newlyAttached) {
-                [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
-                routeLog([NSString stringWithFormat:@"attach(%@) press media ->70 (newlyAttached)", source]);
-                // 1.2s 复查补压：系统可能经 MediaRemote 路径延迟重设音量；
-                // 仅当输出仍在 AirPods 时补压（摘下/被切走后不碰喇叭音量）
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    if (currentOutputIsAirPods()) {
-                        id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                        [avc2 setVolumeTo:0.7f forCategory:@"Audio/Video"];
-                        routeLog(@"attach delayed press media ->70 (output still AirPods)");
-                    }
-                });
+                if (currentOutputIsAirPods()) {
+                    [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
+                    routeLog([NSString stringWithFormat:@"attach(%@) press media ->70 (already AirPods)", source]);
+                }
+                void (^pressWhenAirPods)(double, NSString *) = ^(double delay, NSString *tag) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        if (currentOutputIsAirPods()) {
+                            id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+                            [avc2 setVolumeTo:0.7f forCategory:@"Audio/Video"];
+                            routeLog([NSString stringWithFormat:@"attach(%@) %@ press media ->70 (output AirPods)", source, tag]);
+                        }
+                    });
+                };
+                pressWhenAirPods(0.8, @"t0.8");
+                pressWhenAirPods(2.0, @"t2.0");
+                pressWhenAirPods(3.2, @"t3.2");
             }
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
