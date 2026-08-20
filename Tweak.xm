@@ -285,6 +285,9 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 // App 读取剪贴板功能不受影响。
 // ============================================================
 
+// 前向声明：routeLog 定义在下方路由模块（探针先于其调用）
+static void routeLog(NSString *msg);
+
 @interface SBUserNotificationAlert : NSObject
 - (void)_setActivated:(BOOL)activated;
 - (void)_sendResponseAndCleanUp:(BOOL)cleanup;
