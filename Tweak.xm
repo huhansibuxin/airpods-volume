@@ -591,9 +591,24 @@ static void handleRouteEvent(NSString *source) {
     // druid 进程：只挂剪贴板"粘贴自"提示拦截（DRPasteAnnouncer -announcePaste: 置空）
     if (isDruid) {
         Class dpa = NSClassFromString(@"DRPasteAnnouncer");
-        if (dpa && [dpa instancesRespondToSelector:@selector(announcePaste:)])
+        BOOL hookOK = NO;
+        if (dpa && [dpa instancesRespondToSelector:@selector(announcePaste:)]) {
             MSHookMessageEx(dpa, @selector(announcePaste:),
                             (IMP)replAnnouncePaste, (IMP *)&origAnnouncePaste);
+            hookOK = YES;
+        }
+        // 诊断标记：确认 druid 进程是否真的注入了 dylib（横幅弹瞬间 druid 启动几秒）
+        FILE *f = fopen("/var/jb/tmp/druid_diag.txt", "w");
+        if (f) {
+            pid_t pid = getpid();
+            NSString *cls = dpa ? @"YES" : @"NO";
+            NSString *sel = (dpa && [dpa instancesRespondToSelector:@selector(announcePaste:)]) ? @"YES" : @"NO";
+            NSString *hook = hookOK ? @"YES" : @"NO";
+            NSString *ver = @"1.9.43-diag";
+            fprintf(f, "pid=%d proc=%@ DRPasteAnnouncer=%@ announcePasteSel=%@ hooked=%@ ver=%@ dylib=INJECTED\n",
+                    pid, procName, cls, sel, hook, ver);
+            fclose(f);
+        }
         return;
     }
 
