@@ -293,6 +293,12 @@ static void routeLog(NSString *msg);
 - (void)_sendResponseAndCleanUp:(BOOL)cleanup;
 @end
 
+// SBAlertItem 部分接口（展示层拦截用）
+@interface SBAlertItem : NSObject
+- (void)deactivate;
+- (void)presentationStateDidChangeFromState:(long long)from toState:(long long)to;
+@end
+
 static void (*origActivateAlertItem)(id, SEL, id) = NULL;
 static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
     // 探针 A：全量记录（v1.9.30 排查"粘贴自"横幅路径）
