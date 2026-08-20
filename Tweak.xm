@@ -343,14 +343,10 @@ static BOOL currentOutputIsAirPods(void) {
 // 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
 // 需要排查时把本函数体恢复即可）
 // 路由事件日志（写文件，oslog 捕获不到注入 dylib 的 NSLog）
-// 路由事件日志（排查模式：写文件，oslog 捕获不到注入 dylib 的 NSLog；
-// 生产静默时把函数体清空即可）
+// 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
+// 需要排查时把本函数体恢复即可——2026-08-20 老板要求静默，v1.9.28）
 static void routeLog(NSString *msg) {
-    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
-    if (f) {
-        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    }
+    (void)msg;
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
