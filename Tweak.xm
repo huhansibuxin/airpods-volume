@@ -274,6 +274,22 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
     if (origPerformPresentationRequest)
         return origPerformPresentationRequest(self, _cmd, session, request);
     return YES;
+
+}
+
+// ============================================================
+// 剪贴板"粘贴自"提示拦截（druid 进程）
+// "XX pasted from YY" 横幅由 DragUI 框架的 DRPasteAnnouncer 显示
+//（druid 进程 = /System/Library/PrivateFrameworks/DragUI.framework/Support/druid，
+//  NOT SpringBoard 主进程——此前在 SB 里 hook 各种类全抓不到的原因）。
+// 社区验证方案（brendonjkding/NoPastedFrom，iOS 16）：hook
+// -announcePaste: 置空即可，App 读剪贴板功能不受影响。
+// 依赖 plist Filter 的 Executables=(druid) 注入 druid 进程。
+// ============================================================
+static void (*origAnnouncePaste)(id, SEL, id) = NULL;
+static void replAnnouncePaste(id self, SEL _cmd, id arg1) {
+    // 置空：不显示"粘贴自"提示（NoPastedFrom 方案，不调用原方法）
+    (void)self; (void)_cmd; (void)arg1;
 }
 
 // ============================================================
@@ -567,7 +583,19 @@ static void handleRouteEvent(NSString *source) {
 }
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
-    if (![bid isEqualToString:@"com.apple.springboard"]) return;
+    NSString *procName = [[NSProcessInfo processInfo] processName];
+    BOOL isSB = [bid isEqualToString:@"com.apple.springboard"];
+    BOOL isDruid = [procName isEqualToString:@"druid"]; // DragUI 进程："粘贴自"横幅宿主
+    if (!isSB && !isDruid) return;
+
+    // druid 进程：只挂剪贴板"粘贴自"提示拦截（DRPasteAnnouncer -announcePaste: 置空）
+    if (isDruid) {
+        Class dpa = NSClassFromString(@"DRPasteAnnouncer");
+        if (dpa && [dpa instancesRespondToSelector:@selector(announcePaste:)])
+            MSHookMessageEx(dpa, @selector(announcePaste:),
+                            (IMP)replAnnouncePaste, (IMP *)&origAnnouncePaste);
+        return;
+    }
 
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
