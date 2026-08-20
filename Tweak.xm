@@ -309,9 +309,15 @@ static void replActivateAlertItem(id self, SEL _cmd, id alertItem) {
         BOOL isUNA = alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")];
         routeLog([NSString stringWithFormat:@"PROBE-A activateAlertItem class=%@ src=%@ isUNA=%d", cn, src, isUNA]);
         if (isUNA && [src isEqualToString:@"pasted"]) {
-            // 调用栈：定位是谁激活的（显示链）
+            // 调用栈：定位是谁激活的（显示链）——dladdr 解析符号（SpringBoard 带符号表）
+            void *caller = __builtin_return_address(0);
+            Dl_info di;
+            if (dladdr(caller, &di)) {
+                routeLog([NSString stringWithFormat:@"  CALLER sname=%s fname=%s",
+                          di.dli_sname ? di.dli_sname : "?", di.dli_fname ? di.dli_fname : "?"]);
+            }
             NSArray *stack = [NSThread callStackSymbols];
-            for (NSUInteger i = 1; i < stack.count && i < 8; i++)
+            for (NSUInteger i = 1; i < stack.count && i < 6; i++)
                 routeLog([NSString stringWithFormat:@"  A-STACK %@", stack[i]]);
         }
     } @catch (id e) {}
