@@ -136,6 +136,11 @@ static float capForCategory(id cat) {
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     float cap = capForCategory(cat);
+    // 记录被 cap 前的原值：戴上时系统设媒体音量（如 100）→ cap 70，
+    // 记录 100 供 handleRouteEvent 戴上瞬间"主动压 70"使用（戴上立即生效，
+    // 不等系统设置）；摘下不记录（摘下媒体音量交给系统自动恢复）
+    if (sAirPodsConnected && cap < 1.0f && !isNotificationCategory(cat) && vol > cap)
+        sLastUncappedMediaVol = vol;
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         vol = 1.0f;
     else if (cap < 1.0f)
@@ -342,12 +347,10 @@ static BOOL currentOutputIsAirPods(void) {
 // 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
 // 需要排查时把本函数体恢复即可）
 // 路由事件日志（写文件，oslog 捕获不到注入 dylib 的 NSLog）
+// 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
+// 需要排查时把本函数体恢复即可——2026-08-20 老板要求静默）
 static void routeLog(NSString *msg) {
-    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
-    if (f) {
-        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    }
+    (void)msg;
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
