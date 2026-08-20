@@ -39,7 +39,6 @@ static BOOL sAirPodsConnected = NO;
 
 @interface BluetoothDevice : NSObject
 - (NSString *)name;
-- (BOOL)inEarDetectEnabled;
 // 入耳检测状态（iOS16 实机验证）：unsigned char 输出参数，bitmask——
 // 0=未戴, 1=左耳, 2=右耳, 3=双耳（frida 实测摘戴实时跳变 0↔3）
 - (void)inEarStatusPrimary:(unsigned char *)primary secondary:(unsigned char *)secondary;
@@ -65,11 +64,11 @@ static BOOL airPodsInBluetoothDevices(void) {
     return NO;
 }
 
-// AirPods 是否已戴上（入耳检测，iOS16 实测 p/s bitmask：0=未戴 3=双耳）。
+// AirPods 入耳检测状态（iOS16 实测 p/s bitmask：0=未戴 3=双耳，摘戴实时跳变）。
 // 这是"戴上必切"的权威信号：系统用入耳检测决定"戴上切输出"，但不稳定
 // （偶尔戴上不切）；我们监听同一信号，戴上（0→非0）必切。
-// 注意：返回的 device 通过指针参数带出（判断入耳检测是否开启用）。
-static BOOL airPodsWorn(id *outDevice) {
+// 返回值 = 是否戴上（p 或 s 任一非 0）；p/s 通过指针带出（日志用）。
+static BOOL airPodsInEarStatus(int *outP, int *outS) {
     @try {
         id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
         NSArray *devs = [bm connectedDevices];
@@ -77,7 +76,8 @@ static BOOL airPodsWorn(id *outDevice) {
             if (isAirPodsName([d name])) {
                 unsigned char p = 0, s = 0;
                 [d inEarStatusPrimary:&p secondary:&s];
-                if (outDevice) *outDevice = d;
+                if (outP) *outP = p;
+                if (outS) *outS = s;
                 return (p != 0 || s != 0);
             }
         }
@@ -85,18 +85,19 @@ static BOOL airPodsWorn(id *outDevice) {
     return NO;
 }
 
-// AirPods 入耳检测是否开启（关闭时 inEarStatus 恒 0，退化用"在场即切"兜底）
-static BOOL airPodsInEarDetectOn(void) {
-    @try {
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        NSArray *devs = [bm connectedDevices];
-        for (id d in devs) {
-            if (isAirPodsName([d name])) {
-                return [d inEarDetectEnabled];
+// 兼容旧调用（带出 device）
+static BOOL airPodsWorn(id *outDevice) {
+    BOOL worn = airPodsInEarStatus(NULL, NULL);
+    if (outDevice) {
+        *outDevice = nil;
+        @try {
+            id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+            for (id d in [bm connectedDevices]) {
+                if (isAirPodsName([d name])) { *outDevice = d; break; }
             }
-        }
-    } @catch (id e) {}
-    return NO;
+        } @catch (id e) {}
+    }
+    return worn;
 }
 
 // 实时音频路由检测 AirPods 在场（不依赖输出路由）：
@@ -444,6 +445,8 @@ static void forceRouteToAirPods(const char *why) {
 
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
 static BOOL sPrevWorn = NO;         // 上次入耳检测是否戴上（戴上 0→1 重置冷却）
+static NSTimeInterval sLastUnworn = 0; // 最近检测到"未戴"时刻（摘下保护期：3s 内不抢回）
+static int sLastWornLog = -1;       // 日志限流：worn 状态 0/1，变化才写
 
 // ============================================================
 // 轮询窗口化管理（老板要求：只在需要兜底时轮询 1 分钟，平时零轮询）
@@ -468,12 +471,17 @@ static void stopPoll(void) {
 }
 
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
-// "戴上必切"（v1.9.17）：切换条件 = AirPods 在场 &&（入耳检测到戴上 ||
-// 入耳检测关闭时退化"在场即切"）。对齐系统行为"开盒不切、戴上切"——
-// 开盒（蓝牙连未戴）不切；戴上（0→非0）必切（重置冷却）；摘下（→0）
-// 不抢（即使输出被系统切走）；车载抢（戴着）照抢。
+// "戴上必切"（v1.9.18）：纯靠入耳检测 worn，不依赖 inEarDetectEnabled
+// （该方法是 id 返回值，按 BOOL 判断不可靠——v1.9.17 曾因此误判检测关闭
+// 走了"在场即切"退化分支，摘下蓝牙还连时反复抢回）。
+// 对齐系统行为"开盒不切、戴上切"：
+//   未戴（worn=0）→ 开盒不切、摘下不抢（刷新摘下保护期）
+//   戴上（0→非0）→ 清除保护期 + 重置冷却 → 必切（单耳 p/s 任一非 0 同样触发）
+//   戴着但 3s 内摘过（worn 读取滞后窗口）→ 不抢回
+//   戴着且稳定（3s 外）→ 输出被切走（车载）→ 抢回
 static void enforceAirPodsRoute(void) {
     @try {
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
         // 戴上（蓝牙 0→1）：重置 3s 逃生冷却，保证"戴上必切"不被连点冷却挡住
@@ -484,18 +492,37 @@ static void enforceAirPodsRoute(void) {
         if (!sAirPodsConnected) {
             sOutputWasAirPods = NO; // 不在场，重置状态
             sPrevWorn = NO;
+            sLastUnworn = now;      // 不在场 = 未戴，刷新保护期
             return;
         }
         // 入耳检测（iOS16 实测 inEarStatusPrimary:secondary: bitmask 0↔3 实时跳变）
-        BOOL worn = airPodsWorn(NULL);
-        BOOL detectOn = airPodsInEarDetectOn();
-        if (worn && !sPrevWorn)
-            sLastRouteForce = 0; // 刚戴上：重置冷却，戴上必切
-        sPrevWorn = worn;
-        if (!worn && detectOn) {
-            // 没戴上（且入耳检测可用）：开盒不切、摘下不抢
+        int ep = 0, es = 0;
+        BOOL worn = airPodsInEarStatus(&ep, &es);
+        if (!worn) {
+            // 未戴（开盒/摘下）：不切不抢，刷新摘下保护期
+            sLastUnworn = now;
+            sPrevWorn = NO;
             sOutputWasAirPods = NO; // 重置状态（下次戴上判定为 attached）
+        } else {
+            if (!sPrevWorn) {
+                // 刚戴上：清除摘下保护期 + 重置冷却 → 必切
+                sLastUnworn = 0;
+                sLastRouteForce = 0;
+            }
+            sPrevWorn = YES;
+        }
+        // 摘下保护期：3s 内曾检测到未戴（摘下/开盒），worn 可能读取滞后
+        // （摘下瞬间 inEarStatus 还没更新为 0），不抢回，避免"摘下被抢回"
+        if (sLastUnworn > 0 && now - sLastUnworn < 3.0) {
+            sOutputWasAirPods = NO;
             return;
+        }
+        // 日志（worn 状态跳变才写，防高频刷屏）
+        int ws = worn ? 1 : 0;
+        if (ws != sLastWornLog) {
+            sLastWornLog = ws;
+            routeLog([NSString stringWithFormat:@"enforce worn=%d inEar=%d/%d conn=%d",
+                      worn, ep, es, sAirPodsConnected]);
         }
         BOOL outIsAP = currentOutputIsAirPods();
         BOOL wasAP = sOutputWasAirPods;
