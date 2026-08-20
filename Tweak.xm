@@ -504,26 +504,27 @@ static void replCtrlActivateAnimated(id self, SEL _cmd, id alertItem, BOOL anima
 // 探针 K：SBUserNotificationCenter 分发入口（A-STACK 符号化确认：
 // 显示链 = startUserNotificationCenter_block -> dispatchUserNotification:
 // -> initWithMessage: -> updateWithMessage: -> 展示。在此源头拦截最有效）
-static void (*origUNCDispatch)(id, SEL, id, id, id, id);
-static void replUNCDispatch(id self, SEL _cmd, id userNotification, id flags, id replyPort, id auditToken) {
+// ⚠️ 签名坑（v1.9.38 崩因）：flags 是整数、replyPort 是 mach_port_t、auditToken
+// 是结构体——绝不能声明成 id，否则 ARC 转发时对整数做 retain/release 必崩。
+static void (*origUNCDispatch)(id, SEL, id, long, long, void *);
+static void replUNCDispatch(id self, SEL _cmd, id userNotification, long flags, long replyPort, void *auditToken) {
     @try {
         NSString *desc = @"?";
         @try { desc = [userNotification description]; } @catch (id e) {}
         // 找 pasted 特征
         BOOL isPasted = desc && ([desc containsString:@"pasted"] || [desc containsString:@"Pasted"]);
         routeLog([NSString stringWithFormat:@"PROBE-K dispatchUserNotification pasted=%d len=%lu", isPasted, (unsigned long)desc.length]);
-        if (isPasted) {
-            routeLog([NSString stringWithFormat:@"PROBE-K BLOCKED pasted notification: %@", desc]);
-            return; // 源头拦截：不分发
-        }
+        // ⚠️ 先只探针不拦截：这是所有系统用户通知的总入口，description 匹配
+        // "pasted" 可能误伤正常通知。等确认 pasted=1 的特征稳定存在再启用拦截。
         if (desc.length < 400) routeLog([NSString stringWithFormat:@"PROBE-K other: %@", desc]);
     } @catch (id e) {}
     if (origUNCDispatch) origUNCDispatch(self, _cmd, userNotification, flags, replyPort, auditToken);
 }
 
 // 探针 L：-[SBUserNotificationAlert updateWithMessage:requestFlags:]（src 设置点）
-static void (*origUNAUpdate)(id, SEL, id, id);
-static void replUNAUpdate(id self, SEL _cmd, id message, id flags) {
+// ⚠️ requestFlags 是整数，不能声明成 id（同 K 的 ARC 崩溃坑）
+static void (*origUNAUpdate)(id, SEL, id, long long);
+static void replUNAUpdate(id self, SEL _cmd, id message, long long flags) {
     @try {
         NSString *src = @"?";
         @try { src = [self valueForKey:@"_alertSource"]; } @catch (id e) {}
