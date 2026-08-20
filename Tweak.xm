@@ -101,8 +101,6 @@ static BOOL isRingerMuted(void) {
     }
 }
 
-static float sLastUncappedMediaVol = -1.0f; // 戴上时 cap 判断用（不用于摘下恢复——系统自动恢复设备记忆音量）
-
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
     if (isNotificationCategory(cat)) return 0.4f;
@@ -136,11 +134,9 @@ static float capForCategory(id cat) {
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     float cap = capForCategory(cat);
-    // 记录被 cap 前的原值：戴上时系统设媒体音量（如 100）→ cap 70，
-    // 记录 100 供 handleRouteEvent 戴上瞬间"主动压 70"使用（戴上立即生效，
-    // 不等系统设置）；摘下不记录（摘下媒体音量交给系统自动恢复）
-    if (sAirPodsConnected && cap < 1.0f && !isNotificationCategory(cat) && vol > cap)
-        sLastUncappedMediaVol = vol;
+    // 摘下时通知音强制 100%（静音跳过）；戴上时各类音量按 cap 封顶
+    // （媒体 70%/通知 40%——hook 层兜底，控制中心滑动条走 MediaRemote
+    // 路径不经此 hook，由 handleRouteEvent 戴上时读当前值主动压兜底）
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         vol = 1.0f;
     else if (cap < 1.0f)
@@ -523,8 +519,12 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            [avc getVolume:&cur forCategory:@"Audio/Video"]; // prime（仅用于 cap 判断）
-            if (sLastUncappedMediaVol > 0.7f)
+            // 戴上：媒体音量无条件压到 ≤70%——读当前值，>70 就压（v1.9.23）。
+            // 覆盖两类绕过/漏网：① 控制中心滑动条（走 MediaRemote 音量路径，
+            // 不经过 setVolumeTo hook 的 cap）；② 戴上前音量就是 93/100
+            // （旧 sLast 记录机制记录不到，不压）。
+            // 当前 ≤70（如 50）不碰，不会把低音量抬到 70。
+            if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur > 0.7f)
                 [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
@@ -535,7 +535,6 @@ static void handleRouteEvent(NSString *source) {
             // 摘下媒体音量：不碰——iOS 为每个输出设备独立记忆音量，
             // 输出切回喇叭时系统自动恢复喇叭记忆音量（老板实测手动点喇叭
             // 会自动回到戴前值 93）。之前主动 setVolumeTo 反而覆盖了系统恢复。
-            // sLastUncappedMediaVol 保留用于戴上时的 cap 判断（不用于恢复）。
         }
         enforceAirPodsRoute();
     } @catch (id e) {
