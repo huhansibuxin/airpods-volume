@@ -506,23 +506,29 @@ static void replCtrlActivateAnimated(id self, SEL _cmd, id alertItem, BOOL anima
 // -> initWithMessage: -> updateWithMessage: -> 展示。在此源头拦截最有效）
 // ⚠️ 签名坑（v1.9.38 崩因）：flags 是整数、replyPort 是 mach_port_t、auditToken
 // 是结构体——绝不能声明成 id，否则 ARC 转发时对整数做 retain/release 必崩。
+// ⚠️ v1.9.39 实测：userNotification 是 NSDictionary，权威特征 = 键
+//    AlertSource 值 "pasted"（不是 description 字符串匹配——那些 len 493/500
+//    的长 description 可能误伤）。L（updateWithMessage）SKIP 执行了横幅还弹，
+//    证明 updateWithMessage 不是展示必经——必须在此源头拦：不分发 = alert
+//    不创建 = 横幅必不显示。
 static void (*origUNCDispatch)(id, SEL, id, long, long, void *);
 static void replUNCDispatch(id self, SEL _cmd, id userNotification, long flags, long replyPort, void *auditToken) {
     @try {
-        NSString *desc = @"?";
-        @try { desc = [userNotification description]; } @catch (id e) {}
-        // 找 pasted 特征
-        BOOL isPasted = desc && ([desc containsString:@"pasted"] || [desc containsString:@"Pasted"]);
-        routeLog([NSString stringWithFormat:@"PROBE-K dispatchUserNotification pasted=%d len=%lu", isPasted, (unsigned long)desc.length]);
-        // ⚠️ 先只探针不拦截：这是所有系统用户通知的总入口，description 匹配
-        // "pasted" 可能误伤正常通知。等确认 pasted=1 的特征稳定存在再启用拦截。
-        if (desc.length < 400) routeLog([NSString stringWithFormat:@"PROBE-K other: %@", desc]);
+        if ([userNotification isKindOfClass:[NSDictionary class]]) {
+            NSString *src = userNotification[@"AlertSource"];
+            if ([src isEqualToString:@"pasted"]) {
+                routeLog(@"PROBE-K BLOCKED pasted (AlertSource=pasted)");
+                return; // 源头拦截：不分发，alert 不创建
+            }
+        }
     } @catch (id e) {}
     if (origUNCDispatch) origUNCDispatch(self, _cmd, userNotification, flags, replyPort, auditToken);
 }
 
 // 探针 L：-[SBUserNotificationAlert updateWithMessage:requestFlags:]（src 设置点）
 // ⚠️ requestFlags 是整数，不能声明成 id（同 K 的 ARC 崩溃坑）
+// v1.9.39 实测 SKIP 执行了横幅还弹 → 展示不走它，此 hook 已证实无效，
+// 但保留（防御：万一 K 没拦住，这里兜底）
 static void (*origUNAUpdate)(id, SEL, id, long long);
 static void replUNAUpdate(id self, SEL _cmd, id message, long long flags) {
     @try {
