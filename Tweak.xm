@@ -517,6 +517,14 @@ static void handleRouteEvent(NSString *source) {
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
 
+    // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
+    // availableRoutes 为空导致的 no-route-yet 半秒延迟（开盒即能直接切）
+    @try {
+        sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
+        [sMPARouter setDiscoveryMode:1];
+        [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}];
+    } @catch (id e) {}
+
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
     if (!sAirPodsConnected && !isRingerMuted()) {
         [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
