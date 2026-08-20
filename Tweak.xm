@@ -269,44 +269,55 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
-// 改用 AVOutputContext（AVFoundation 公开 API）：
-// MRAVOutputContext.setOutputDevices: 的 block 在 MediaRemote XPC
-// 回复回调里执行，SpringBoard 进程直接调必崩（实测 EXC_BAD_ACCESS
-// objc_storeStrong，两次确认）；AVOutputContext 的
-// setOutputDevice:options:completionHandler: 是同进程标准回调，安全。
+// 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
+// "音频输出"列表的底层实现）：
+//   - availableRoutes 列出所有可用设备（不依赖当前输出）→ 开盒未戴
+//     （输出还是喇叭）时列表里就有 AirPods（picked=N）——解决 AVOutputContext
+//     "只有当前输出、第一次连接拿不到设备对象"的死角
+//   - pickRoute: 直接切换（iOS16 实机验证 ret=true + 回读 picked=AirPods，
+//     不崩）
+// 历史踩坑记录（勿回退）：
+//   MRAVOutputContext.setOutputDevices: block 在 MediaRemote XPC 回复回调里
+//   执行，SpringBoard 进程直接调必崩（EXC_BAD_ACCESS objc_storeStrong，两次
+//   确认）；AVOutputContext.setOutputDevice: 是同进程安全，但 outputDevices
+//   只有当前输出，第一次连接切不了。
 // BluetoothManager connectedDevices 判断 AirPods 是否在场（不依赖当前路由）。
-// 戴上时缓存 AVOutputDevice 对象；输出被切走（如车载激活）而 AirPods
-// 仍在蓝牙连接时，用缓存对象强制切回（2s 冷却防反复抢占打架）。
 // ============================================================
 
-@interface AVOutputDevice : NSObject
-- (NSString *)name;
-- (NSString *)logicalDeviceID;
-@end
+// 路由切换核心（v1.9.14 重写）：
+// MPAVRoutingController = 控制中心"音频输出"列表的底层实现（MediaPlayer 私有类，
+// iOS16 实机验证：SpringBoard 进程内直接可用（不崩），availableRoutes 列出所有
+// 可用设备——开盒未戴（输出还是喇叭）时列表里就有 AirPods Pro（picked=N），
+// pickRoute: 可直接切换（验证 ret=true + 1.5s 后回读 picked=AirPods Pro）。
+// 这解决了 AVOutputContext 的死角：outputDevices 只返回"当前输出"，第一次连接
+// 时拿不到 AirPods 设备对象就切不了；MPAV 的 availableRoutes 任何时候都有。
+// AVOutputContext 仅保留只读 outputDevices 用于"当前输出是否 AirPods"判断。
+// ============================================================
 
 @interface AVOutputContext : NSObject
 + (id)sharedSystemAudioContext;
 - (NSArray *)outputDevices;
-- (void)setOutputDevice:(id)device options:(NSUInteger)options
-      completionHandler:(void (^)(NSError *))handler;
 @end
 
-static id sAirPodsOutputDevice = nil;      // 缓存的 AirPods 输出设备对象
+@interface MPAVRoute : NSObject
+- (NSString *)routeName;
+- (BOOL)isPicked;
+@end
+
+@interface MPAVRoutingController : NSObject
+- (id)init;
+- (NSArray *)availableRoutes;
+- (void)setDiscoveryMode:(NSInteger)mode;
+- (void)fetchAvailableRoutesWithCompletionHandler:(void (^)(void))handler;
+- (BOOL)pickRoute:(id)route;
+- (id)pickedRoute;
+@end
+
+static id sMPARouter = nil;              // 复用的 MPAVRoutingController 实例
 static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却（3s 逃生通道；戴上时重置）
 static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（戴上 0→1 重置冷却）
 
-// 缓存当前输出中的 AirPods 设备对象（AVOutputContext）
-static void cacheAirPodsDeviceIfPresent(void) {
-    @try {
-        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
-        NSArray *devs = [ctx outputDevices];
-        for (id d in devs) {
-            if (isAirPodsName([d name])) { sAirPodsOutputDevice = d; return; }
-        }
-    } @catch (id e) {}
-}
-
-// 当前输出路由是否全部为 AirPods
+// 当前输出路由是否全部为 AirPods（只读判断：AVOutputContext 当前输出）
 static BOOL currentOutputIsAirPods(void) {
     @try {
         id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
@@ -326,34 +337,52 @@ static void routeLog(NSString *msg) {
     (void)msg;
 }
 
-// 强制切到 AirPods
+// 强制切到 AirPods（MPAVRoutingController 版）
 // 冷却策略（重要）：只有 stolen（防抢/逃生通道）走 3s 冷却——
 // 想用车载时 3s 内连点车载 2 次，第二次在冷却期内不会被拉回；
-// attached（戴上即切）【不走冷却】：戴上必须切，否则"戴上不自动切"失效。
-// AVOutputContext 回调同进程，标准 block 语义；保守起见 completionHandler
-// 内不捕获外部 ObjC 对象，why 用 const char*。
+// attached（戴上即切）【不走冷却】：戴上必须切（enforceAirPodsRoute 里
+// 蓝牙 0→1 时重置 sLastRouteForce 实现）。
+// 切换机制：MPAVRoutingController availableRoutes 找 AirPods → pickRoute:。
+// availableRoutes 列出所有可用设备（不依赖当前输出），所以"第一次连接
+// （respring 后首次/输出未切）"也能拿到 AirPods 强制切换。
 static void forceRouteToAirPods(const char *why) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    // 统一 3s 冷却 = 逃生通道：3s 内连点喇叭/车载 2 次，第二次不被抢回。
-    // 戴上必切不受影响：蓝牙 0→1 时 enforceAirPodsRoute 会重置 sLastRouteForce。
     if (now - sLastRouteForce < 3.0) return;
     sLastRouteForce = now;
     // 幂等去重：输出已是 AirPods 就不再切（多通知源叠加时避免重复）
     if (currentOutputIsAirPods()) return;
-    if (!sAirPodsOutputDevice) cacheAirPodsDeviceIfPresent();
-    id dev = sAirPodsOutputDevice;
-    if (!dev) return;
     @try {
-        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
-        if (!ctx) return;
-        sLastRouteForce = now;
-        [ctx setOutputDevice:dev options:0 completionHandler:^(NSError *err) {
-            (void)err;
-            routeLog([NSString stringWithFormat:@"av-force(%s) done", why ? why : "?"]);
-        }];
-        routeLog([NSString stringWithFormat:@"av-force(%s) triggered id=%@", why ? why : "?", [dev logicalDeviceID]]);
+        if (!sMPARouter) {
+            sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
+            [sMPARouter setDiscoveryMode:1];
+            [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}]; // 触发刷新
+        }
+        NSArray *routes = [sMPARouter availableRoutes];
+        id airRoute = nil;
+        for (id r in routes) {
+            if (isAirPodsName([r routeName])) { airRoute = r; break; }
+        }
+        if (airRoute) {
+            BOOL ok = [sMPARouter pickRoute:airRoute];
+            routeLog([NSString stringWithFormat:@"mpav-force(%s) ok=%d", why ? why : "?", ok]);
+        } else {
+            // 列表还没刷新出来（实例刚建）：0.4s 后重试一次，再不行靠轮询兜底
+            routeLog([NSString stringWithFormat:@"mpav-force(%s) no-route-yet", why ? why : "?"]);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (currentOutputIsAirPods()) return;
+                NSArray *r2 = [sMPARouter availableRoutes];
+                for (id r in r2) {
+                    if (isAirPodsName([r routeName])) {
+                        BOOL ok2 = [sMPARouter pickRoute:r];
+                        routeLog([NSString stringWithFormat:@"mpav-force(%s) retry ok=%d", why ? why : "?", ok2]);
+                        break;
+                    }
+                }
+            });
+        }
     } @catch (id e) {
-        routeLog([NSString stringWithFormat:@"av-force(%s) EXC %@", why ? why : "?", e]);
+        routeLog([NSString stringWithFormat:@"mpav-force(%s) EXC %@", why ? why : "?", e]);
     }
 }
 
@@ -371,7 +400,6 @@ static void forceRouteToAirPods(const char *why) {
 // ============================================================
 
 static BOOL sOutputWasAirPods = NO; // 上次检查时输出是否 AirPods（判定 attached/stolen）
-static NSTimeInterval sLastReactivate = 0; // 会话重激活防抖（5s 内一次）
 
 // ============================================================
 // 轮询窗口化管理（老板要求：只在需要兜底时轮询 1 分钟，平时零轮询）
@@ -395,24 +423,6 @@ static void stopPoll(void) {
     if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
 }
 
-// 间接强制：重激活音频会话触发系统重新路由。
-// 仅当拿不到 AirPods 设备对象（缓存为空，如 respring 后首次戴上且系统没切，
-// AVOutputContext 只有当前输出）时兜底——系统重新路由时蓝牙连接中的 AirPods
-// 会被优先选中。5s 防抖防反复打断。
-static void reactivateAudioSession(const char *why) {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - sLastReactivate < 5.0) return;
-    sLastReactivate = now;
-    @try {
-        AVAudioSession *s = [AVAudioSession sharedInstance];
-        [s setActive:NO withOptions:0 error:nil];
-        [s setActive:YES withOptions:0 error:nil];
-        routeLog([NSString stringWithFormat:@"reactivate(%s) triggered", why ? why : "?"]);
-    } @catch (id e) {
-        routeLog([NSString stringWithFormat:@"reactivate(%s) EXC %@", why ? why : "?", e]);
-    }
-}
-
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
 // "不管系统切不切都保证切"：输出刚变成 AirPods（系统切的）时，我们也主动
 // attached 切一次（幂等无害）——确保切换由我们执行而非依赖系统。
@@ -429,7 +439,6 @@ static void enforceAirPodsRoute(void) {
             sOutputWasAirPods = NO; // 不在场，重置状态
             return;
         }
-        cacheAirPodsDeviceIfPresent();
         BOOL outIsAP = currentOutputIsAirPods();
         BOOL wasAP = sOutputWasAirPods;
         sOutputWasAirPods = outIsAP;
@@ -452,14 +461,6 @@ static void enforceAirPodsRoute(void) {
             // 被抢/戴上需要切 → 重启 1 分钟轮询窗口（车载再开、系统抖动都能兜底；
             // 系统稳定后窗口到期自动停，平时零轮询）
             startPollWindow();
-            // 缓存为空（拿不到设备对象，respring 后首次/系统没切）→ 间接强制：
-            // 重激活会话让系统重新路由到 AirPods（有缓存对象时不触发，不影响正常抢回）
-            if (!sAirPodsOutputDevice) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    reactivateAudioSession(why);
-                });
-            }
         }
     } @catch (id e) {}
 }
@@ -510,7 +511,6 @@ static void handleRouteEvent(NSString *source) {
 
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
-    cacheAirPodsDeviceIfPresent(); // 启动时若已连 AirPods 先缓存输出设备对象
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
     if (!sAirPodsConnected && !isRingerMuted()) {
