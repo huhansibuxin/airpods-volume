@@ -469,6 +469,38 @@ static id replApertureContentDef(id self, SEL _cmd) {
     return nil;
 }
 
+// 探针 J：SBAlertItemsController 展示入口
+// -_presentAlertItem:withPresenter:animated: = 真正展示方法
+// -activateAlertItem:animated: = 激活变体（系统可能走这个，之前 hook 无 animated 版没命中）
+static void (*origCtrlPresent)(id, SEL, id, id, BOOL);
+static void replCtrlPresent(id self, SEL _cmd, id alertItem, id presenter, BOOL animated) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
+        BOOL isUNA = alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")];
+        if (isUNA && [src isEqualToString:@"pasted"]) {
+            routeLog(@"PROBE-J _presentAlertItem src=pasted -> SKIP (no display)");
+            return; // 不展示
+        }
+        routeLog([NSString stringWithFormat:@"PROBE-J _presentAlertItem class=%@ src=%@", NSStringFromClass([alertItem class]), src]);
+    } @catch (id e) {}
+    if (origCtrlPresent) origCtrlPresent(self, _cmd, alertItem, presenter, animated);
+}
+
+static void (*origCtrlActivateAnimated)(id, SEL, id, BOOL);
+static void replCtrlActivateAnimated(id self, SEL _cmd, id alertItem, BOOL animated) {
+    @try {
+        NSString *src = @"?";
+        @try { src = [alertItem valueForKey:@"_alertSource"]; } @catch (id e) {}
+        BOOL isUNA = alertItem && [alertItem isKindOfClass:NSClassFromString(@"SBUserNotificationAlert")];
+        if (isUNA && [src isEqualToString:@"pasted"]) {
+            routeLog(@"PROBE-J activateAlertItem:animated: src=pasted -> SKIP");
+            return;
+        }
+    } @catch (id e) {}
+    if (origCtrlActivateAnimated) origCtrlActivateAnimated(self, _cmd, alertItem, animated);
+}
+
 // ============================================================
 // AirPods 路由强制：戴上即切 + 防车载抢路由
 // 切换引擎 = MPAVRoutingController（MediaPlayer 私有类，控制中心
@@ -893,6 +925,13 @@ static void handleRouteEvent(NSString *source) {
             if (mi) MSHookFunction(method_getImplementation(mi), (IMP)replCreateApertureElement, (IMP *)&origCreateApertureElement);
             Method mj = class_getInstanceMethod(unaCls, NSSelectorFromString(@"systemApertureContentDefinition"));
             if (mj) MSHookFunction(method_getImplementation(mj), (IMP)replApertureContentDef, (IMP *)&origApertureContentDef);
+        }
+        Class ctrlCls = NSClassFromString(@"SBAlertItemsController");
+        if (ctrlCls) {
+            Method mp = class_getInstanceMethod(ctrlCls, NSSelectorFromString(@"_presentAlertItem:withPresenter:animated:"));
+            if (mp) MSHookFunction(method_getImplementation(mp), (IMP)replCtrlPresent, (IMP *)&origCtrlPresent);
+            Method ma = class_getInstanceMethod(ctrlCls, NSSelectorFromString(@"activateAlertItem:animated:"));
+            if (ma) MSHookFunction(method_getImplementation(ma), (IMP)replCtrlActivateAnimated, (IMP *)&origCtrlActivateAnimated);
         }
     }
 }
