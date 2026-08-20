@@ -523,36 +523,31 @@ static void handleRouteEvent(NSString *source) {
                 [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
             if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                 [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            // 戴上：媒体音量无条件压到 ≤70%——读当前值，>70 就压（v1.9.23）。
-            // 覆盖两类绕过/漏网：① 控制中心滑动条（走 MediaRemote 音量路径，
-            // 不经过 setVolumeTo hook 的 cap）；② 戴上前音量就是 93/100
-            // （旧 sLast 记录机制记录不到，不压）。
-            // 当前 ≤70（如 50）不碰，不会把低音量抬到 70。
-            // v1.9.24 排查：记录 getVolume 返回值/压的结果/1.5s 后复查（验证
-            // 是否被系统后续设置覆盖）
-            float mvol = -1.0f;
-            if ([avc getVolume:&mvol forCategory:@"Audio/Video"]) {
-                routeLog([NSString stringWithFormat:@"attach(%@) media cur=%.2f", source, mvol]);
-                if (mvol > 0.7f) {
-                    BOOL pok = [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
-                    routeLog([NSString stringWithFormat:@"attach(%@) media press->70 ok=%d", source, pok]);
-                    // 1.5s 后复查：若被系统覆盖（又 >70）说明系统用 MediaRemote
-                    // 路径重设了音量，需要换时机/换机制
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                                   dispatch_get_main_queue(), ^{
-                        float re = -1.0f;
-                        id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                        if ([avc2 getVolume:&re forCategory:@"Audio/Video"])
-                            routeLog([NSString stringWithFormat:@"attach recheck media cur=%.2f (overwritten? %@)", re, re > 0.7f ? @"YES" : @"no"]);
-                        else
-                            routeLog(@"attach recheck media getVolume FAIL");
-                    });
+            // 戴上：媒体音量压到 ≤70%（v1.9.25）——压两次：
+            // ① 立即压（读当前值 >70 压）
+            // ② 延迟 1.2s 复查压（关键！日志实证：戴上瞬间 getVolume 返回
+            //    缓存假值 0.70（无播放会话时不可靠），判定 no-press 不压，
+            //    而系统随后经 MediaRemote 路径把音量设成 84——必须等系统
+            //    音量设置稳定后再读真实值压一次，覆盖缓存假值+系统延迟设置）
+            // 当前真实值 ≤70（如 50）两次都不碰（不抬音量）
+            void (^pressMediaIfNeeded)(NSString *) = ^(NSString *tag) {
+                float mv = -1.0f;
+                id avcX = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+                if ([avcX getVolume:&mv forCategory:@"Audio/Video"]) {
+                    routeLog([NSString stringWithFormat:@"attach(%@) %@ cur=%.2f", source, tag, mv]);
+                    if (mv > 0.7f) {
+                        BOOL pok = [avcX setVolumeTo:0.7f forCategory:@"Audio/Video"];
+                        routeLog([NSString stringWithFormat:@"attach(%@) %@ press->70 ok=%d", source, tag, pok]);
+                    }
                 } else {
-                    routeLog([NSString stringWithFormat:@"attach(%@) media no-press cur=%.2f (<=70)", source, mvol]);
+                    routeLog([NSString stringWithFormat:@"attach(%@) %@ getVolume FAIL", source, tag]);
                 }
-            } else {
-                routeLog([NSString stringWithFormat:@"attach(%@) media getVolume FAIL", source]);
-            }
+            };
+            pressMediaIfNeeded(@"immediate");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                pressMediaIfNeeded(@"delayed");
+            });
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
             if (!isRingerMuted()) {
