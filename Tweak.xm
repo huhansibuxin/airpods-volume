@@ -128,17 +128,19 @@ static float capForCategory(id cat) {
 %end
 
 // ============================================================
-// 音量 HUD 大条隐藏（方案 A，老板选择 2026-08-21）
-// iOS 16 按音量键：先弹传统大条（SBVolumeHUDViewController），几秒后
-// 系统自动切弹性小条（SBElasticHUD 体系）。老板要"永远直接小条，
-// 跳过大条过渡"——参考 VolVibes nukeHUD 模式：hook viewDidLoad 不调
-// %orig 隐藏大条，让系统自动降级显示弹性小条。
-// ⚠️ 风险：若 iOS 16 不自动降级，音量调节将无视觉反馈（先测再定）。
+// 音量 HUD 永远小条（方案 A 修正，2026-08-21）
+// iOS 16 音量 HUD = SBElasticVolumeViewController 状态机：
+// _updateSliderViewMetricsForState: 的 state 1=大条(large)、2=mini 小条、
+// 3=giant。按音量键先 state1 再转 state2 → 老板看到的"大的变小的"。
+// ⚠️ 修正：此前 hook SBVolumeHUDViewController（iOS15 老类）无效——
+// iOS16 大条就是这个弹性 VC 的 state1。参考 VolVibes mini 样式：
+// 强制 %orig(2, ...) 永远直接 mini 小条。
 // ============================================================
 
-%hook SBVolumeHUDViewController
-- (void)viewDidLoad {
-    // 不调 %orig：大条不显示，交给系统弹性小条
+%hook SBElasticVolumeViewController
+- (void)_updateSliderViewMetricsForState:(long long)state bounds:(CGRect)bounds integralized:(BOOL)integralized useSizeSpringData:(BOOL)useSizeSpringData useCenterSpringData:(BOOL)useCenterSpringData {
+    // 强制 state=2（mini 小条）：永远直接小条，跳过大条过渡
+    %orig(2, bounds, integralized, useSizeSpringData, useCenterSpringData);
 }
 %end
 
