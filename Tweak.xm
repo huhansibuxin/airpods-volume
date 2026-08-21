@@ -128,6 +128,21 @@ static float capForCategory(id cat) {
 %end
 
 // ============================================================
+// 音量 HUD 大条隐藏（方案 A，老板选择 2026-08-21）
+// iOS 16 按音量键：先弹传统大条（SBVolumeHUDViewController），几秒后
+// 系统自动切弹性小条（SBElasticHUD 体系）。老板要"永远直接小条，
+// 跳过大条过渡"——参考 VolVibes nukeHUD 模式：hook viewDidLoad 不调
+// %orig 隐藏大条，让系统自动降级显示弹性小条。
+// ⚠️ 风险：若 iOS 16 不自动降级，音量调节将无视觉反馈（先测再定）。
+// ============================================================
+
+%hook SBVolumeHUDViewController
+- (void)viewDidLoad {
+    // 不调 %orig：大条不显示，交给系统弹性小条
+}
+%end
+
+// ============================================================
 // AVSystemController: catch CC slider + all volume paths
 // ============================================================
 
