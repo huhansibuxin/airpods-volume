@@ -113,16 +113,16 @@ static float capForCategory(id cat) {
 
 %hook SBVolumeControl
 - (BOOL)increaseVolume {
-    if (sAirPodsConnected) {
-        // read current volume via AVSystemController (any non-ringer cat)
-        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        float cur;
-        // try media categories that might give us actual media volume
-        if ([avc getVolume:&cur forCategory:@"Audio/Video"] ||
-            [avc getVolume:&cur forCategory:AVAudioSessionCategoryPlayback]) {
-            if (cur >= 0.7f) return NO;
-        }
-    }
+    // 戴上 AirPods：物理音量键+ 禁用（老板要求：戴上时按钮不生效，只能控制中心调）。
+    // 原实现读 getVolume("Audio/Video") >= 0.7 吞掉音量+——但视频通话（HFP）时
+    // getVolume 返回通话音量（常 >=0.7）→ 音量+永远按不动（实测 bug）；且老板
+    // 要的是戴上时 +/- 全禁，故直接 return NO，不做任何读取判断。
+    if (sAirPodsConnected) return NO;
+    return %orig;
+}
+- (BOOL)decreaseVolume {
+    // 戴上 AirPods：物理音量键- 禁用（与 + 对称，老板要求按钮整体不生效）
+    if (sAirPodsConnected) return NO;
     return %orig;
 }
 %end
@@ -274,22 +274,6 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
     if (origPerformPresentationRequest)
         return origPerformPresentationRequest(self, _cmd, session, request);
     return YES;
-
-}
-
-// ============================================================
-// 剪贴板"粘贴自"提示拦截（druid 进程）
-// "XX pasted from YY" 横幅由 DragUI 框架的 DRPasteAnnouncer 显示
-//（druid 进程 = /System/Library/PrivateFrameworks/DragUI.framework/Support/druid，
-//  NOT SpringBoard 主进程——此前在 SB 里 hook 各种类全抓不到的原因）。
-// 社区验证方案（brendonjkding/NoPastedFrom，iOS 16）：hook
-// -announcePaste: 置空即可，App 读剪贴板功能不受影响。
-// 依赖 plist Filter 的 Executables=(druid) 注入 druid 进程。
-// ============================================================
-static void (*origAnnouncePaste)(id, SEL, id) = NULL;
-static void replAnnouncePaste(id self, SEL _cmd, id arg1) {
-    // 置空：不显示"粘贴自"提示（NoPastedFrom 方案，不调用原方法）
-    (void)self; (void)_cmd; (void)arg1;
 }
 
 // ============================================================
@@ -359,10 +343,14 @@ static BOOL currentOutputIsAirPods(void) {
 // 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
 // 需要排查时把本函数体恢复即可）
 // 路由事件日志（写文件，oslog 捕获不到注入 dylib 的 NSLog）
-// 路由事件日志（生产版已禁用：不写文件，避免 IO 与日志膨胀；
-// 需要排查时把本函数体恢复即可——2026-08-20 老板要求静默，v1.9.28）
+// 路由事件日志（排查模式：写文件，oslog 捕获不到注入 dylib 的 NSLog；
+// 生产静默时把函数体清空即可）
 static void routeLog(NSString *msg) {
-    (void)msg;
+    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
@@ -437,10 +425,10 @@ static void enforceAirPodsRoute(void);
 static void startPollWindow(void);
 
 // ============================================================
-// 轮询窗口化管理（老板要求：只在需要兜底时轮询 1 分钟，平时零轮询）
-// 触发：戴上（btconnect）、被抢（输出切走）→ 启动/重置 1 分钟窗口；
-// 窗口到期自动停；AirPods 断开立即停。系统稳定（输出已是 AirPods
-// 超过 1 分钟）后完全不轮询。
+// 轮询窗口化管理（老板要求：只在需要兜底时轮询，平时零轮询）
+// 触发：戴上（btconnect）、被抢（输出切走）→ 启动/重置 1 分钟窗口
+//（抢车载场景窗口要久一点）；窗口到期自动停；AirPods 断开立即停。
+// 通话挂断后的媒体音量复查是独立 5 秒 dispatch_after（见 handleRouteEvent）。
 // ============================================================
 
 static dispatch_source_t sPollTimer = NULL;
@@ -449,7 +437,7 @@ static NSTimeInterval sPollWindowEnd = 0;
 
 static void startPollWindow(void) {
     if (!sPollTimer) return;
-    sPollWindowEnd = [[NSDate date] timeIntervalSince1970] + 60.0; // 1 分钟窗口
+    sPollWindowEnd = [[NSDate date] timeIntervalSince1970] + 60.0; // 1 分钟窗口（抢车载）
     if (!sPollRunning) { dispatch_resume(sPollTimer); sPollRunning = YES; }
 }
 
@@ -565,6 +553,24 @@ static void handleRouteEvent(NSString *source) {
                 pressWhenAirPods(2.0, @"t2.0");
                 pressWhenAirPods(3.2, @"t3.2");
             }
+            // 通话挂断后的媒体复查（老板需求）：微信视频/语音拨出未接通→挂断时，
+            // 系统把路由从 HFP 通话通道切回 A2DP，并恢复"媒体音量记忆值"——若
+            // 记忆值是 100（实测弹回 100），且恢复走 MediaRemote 路径绕过
+            // setVolumeTo cap，我们就拦不住。每次路由事件安排一次 5 秒后复查：
+            // 挂断 5 秒内发现媒体 >70% → 压回 70%（AirPods 记忆值随之变 70，
+            // 下次挂断系统恢复 70，不再弹 100）。getVolume 无播放会话时返回
+            // 缓存假值 0.70，>0.7 判断不会误压；真 100 能读到并压回。
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (sAirPodsConnected && currentOutputIsAirPods()) {
+                    id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+                    float mv = -1.0f;
+                    if ([avc2 getVolume:&mv forCategory:@"Audio/Video"] && mv > 0.7f) {
+                        [avc2 setVolumeTo:0.7f forCategory:@"Audio/Video"];
+                        routeLog([NSString stringWithFormat:@"recheck(%@) media %.2f ->70 (post-call restore)", source, mv]);
+                    }
+                }
+            });
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
             if (!isRingerMuted()) {
@@ -583,34 +589,7 @@ static void handleRouteEvent(NSString *source) {
 }
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
-    NSString *procName = [[NSProcessInfo processInfo] processName];
-    BOOL isSB = [bid isEqualToString:@"com.apple.springboard"];
-    BOOL isDruid = [procName isEqualToString:@"druid"]; // DragUI 进程："粘贴自"横幅宿主
-    if (!isSB && !isDruid) return;
-
-    // druid 进程：只挂剪贴板"粘贴自"提示拦截（DRPasteAnnouncer -announcePaste: 置空）
-    if (isDruid) {
-        Class dpa = NSClassFromString(@"DRPasteAnnouncer");
-        BOOL hookOK = NO;
-        if (dpa && [dpa instancesRespondToSelector:@selector(announcePaste:)]) {
-            MSHookMessageEx(dpa, @selector(announcePaste:),
-                            (IMP)replAnnouncePaste, (IMP *)&origAnnouncePaste);
-            hookOK = YES;
-        }
-        // 诊断标记：确认 druid 进程是否真的注入了 dylib（横幅弹瞬间 druid 启动几秒）
-        FILE *f = fopen("/var/jb/tmp/druid_diag.txt", "w");
-        if (f) {
-            pid_t pid = getpid();
-            NSString *cls = dpa ? @"YES" : @"NO";
-            NSString *sel = (dpa && [dpa instancesRespondToSelector:@selector(announcePaste:)]) ? @"YES" : @"NO";
-            NSString *hook = hookOK ? @"YES" : @"NO";
-            NSString *ver = @"1.9.43-diag";
-            fprintf(f, "pid=%d proc=%@ DRPasteAnnouncer=%@ announcePasteSel=%@ hooked=%@ ver=%@ dylib=INJECTED\n",
-                    pid, procName, cls, sel, hook, ver);
-            fclose(f);
-        }
-        return;
-    }
+    if (![bid isEqualToString:@"com.apple.springboard"]) return;
 
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
@@ -662,12 +641,15 @@ static void handleRouteEvent(NSString *source) {
     // 2 次走 outputdev 通知（不重置冷却），逃生通道保留。
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceConnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        if (airPodsInBluetoothDevices()) {
-            sLastRouteForce = 0;    // 车载/设备连接：重置冷却，确保开盒必切/抢回
-            sLastDisconnect = 0;    // 清除断开保护期：重新开盒必切（不被摘盒保护挡）
-            startPollWindow();
-            handleRouteEvent(@"btconnect");
-        }
+        // 任何蓝牙设备连接（车载/开盒）→ 无条件兜底：重置冷却 + 清断开保护 +
+        // 开窗口 + 检查路由。⚠️ 不能依赖 airPodsInBluetoothDevices()——车载连接
+        // 瞬间蓝牙列表可能滞后（AirPods 未出现在列表），旧代码整个分支被跳过
+        // → 冷却没重置 + 窗口没开 → 漏抢（实测"有一次没抢回来"）。在场判断
+        // 交给 handleRouteEvent/enforce 内部，这里无条件执行保证保底。
+        sLastRouteForce = 0;    // 车载/设备连接：重置冷却，确保开盒必切/抢回
+        sLastDisconnect = 0;    // 清除断开保护期：重新开盒必切（不被摘盒保护挡）
+        startPollWindow();
+        handleRouteEvent(@"btconnect");
     }];
     // AirPods 蓝牙断开 → 立即停止轮询（不等窗口到期）
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceDisconnectSuccessNotification"
