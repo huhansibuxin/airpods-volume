@@ -344,6 +344,9 @@ static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却（3s 逃生通�
 static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（戴上 0→1 重置冷却）
 
 // 当前输出路由是否全部为 AirPods（只读判断：AVOutputContext 当前输出）
+// ⚠️ 只反映 A2DP 媒体输出——蓝牙耳机同时有 A2DP(媒体)+HFP(通话)两个端口，
+// 视频通话时系统可能把 HFP 单独切到车载（A2DP 还在 AirPods）→ 此函数会
+// 误判"输出是 AirPods"而不抢。必须配合 carHFPActive() 一起判断。
 static BOOL currentOutputIsAirPods(void) {
     @try {
         id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
@@ -357,10 +360,42 @@ static BOOL currentOutputIsAirPods(void) {
     return NO;
 }
 
-// 路由事件日志（v1.9.47 生产静默：不写文件，零 IO；排查时恢复函数体）
-// ⚠️ 调试基准 = v1.9.46（19dd6db，日志开启）——下次改/排查时基于它
+// 检测 HFP 通话路由是否被车载占用（视频/语音通话场景，2026-08-23 老板实测）：
+// 抖音 A2DP 还在 AirPods 放，打微信视频时系统把 HFP 通话路由单独切到车载
+//（车载免提优先级）→ currentRoute.outputs 出现"非 AirPods 的 BluetoothHFP 端口"。
+// 这是 currentOutputIsAirPods() 看不到的盲区，必须单独检测。
+static BOOL carHFPActive(void) {
+    @try {
+        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        for (AVAudioSessionPortDescription *p in route.outputs) {
+            if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) {
+                if (!isAirPodsName(p.portName)) return YES; // HFP 输出不是 AirPods = 车载
+            }
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// 诊断：打印当前音频路由全部输出端口（定位 HFP 变化是否触发监听）
+static void logCurrentRoute(NSString *tag) {
+    @try {
+        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        NSMutableString *ms = [NSMutableString stringWithFormat:@"route(%@)", tag];
+        for (AVAudioSessionPortDescription *p in route.outputs) {
+            [ms appendFormat:@" [%@:%@]", p.portType, p.portName];
+        }
+        routeLog(ms);
+    } @catch (id e) {}
+}
+
+// 路由事件日志（v1.9.48 诊断模式：写文件；排查完静默）
+// ⚠️ 调试基准 = v1.9.46（19dd6db，日志开启）
 static void routeLog(NSString *msg) {
-    (void)msg;
+    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
@@ -390,7 +425,12 @@ static void forceRouteToAirPods(const char *why) {
         }
         if (airRoute) {
             BOOL ok = [sMPARouter pickRoute:airRoute];
-            routeLog([NSString stringWithFormat:@"mpav-force(%s) ok=%d", why ? why : "?", ok]);
+            routeLog([NSString stringWithFormat:@"mpav-force(%s) ok=%d hfpBefore=%d", why ? why : "?", ok, carHFPActive()]);
+            // 诊断：pickRoute 后 0.6s 复查 HFP 是否跟着切（验证 MediaRemote 能否控制 HFP 通话路由）
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                routeLog([NSString stringWithFormat:@"mpav-force(%s) hfpAfter0.6=%d", why ? why : "?", carHFPActive()]);
+            });
         } else {
             // 列表还没刷新出来（实例刚建）：0.4s 后重试一次，再不行靠轮询兜底
             routeLog([NSString stringWithFormat:@"mpav-force(%s) no-route-yet", why ? why : "?"]);
@@ -509,6 +549,19 @@ static void enforceAirPodsRoute(void) {
             // 系统稳定后窗口到期自动停，平时零轮询）
             startPollWindow();
         }
+        // ⚠️ HFP 通话路由盲区（2026-08-23 老板实测）：视频/语音通话时系统把
+        // HFP 通话路由单独切到车载（车载免提优先），而 A2DP 媒体输出可能还在
+        // AirPods（抖音在放）→ 上面 outIsAP=YES 误判"输出是 AirPods"不抢。
+        // 必须单独查 HFP 端口：currentRoute.outputs 出现非 AirPods 的
+        // BluetoothHFP → 车载在通话 → 强制切回。
+        if (carHFPActive()) {
+            routeLog(@"enforce carHFP=1 -> force call-hfp");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                forceRouteToAirPods("call-hfp");
+            });
+            startPollWindow();
+        }
     } @catch (id e) {}
 }
 
@@ -529,6 +582,8 @@ static void handleRouteEvent(NSString *source) {
             routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
                       source, airInRoute, airInBT, sAirPodsConnected]);
         }
+        // 诊断：每次事件打印实际输出端口（HFP 变化时看是否触发 + 端口是谁）
+        logCurrentRoute(source);
         if (sAirPodsConnected) {
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
