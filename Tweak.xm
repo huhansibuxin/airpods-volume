@@ -53,6 +53,9 @@ static BOOL sAirPodsConnected = NO;
 - (void)setDevice:(id)arg1 wantsToBeActivated:(BOOL)arg2;
 @end
 
+// 前向声明：路由日志函数（定义在下方），避免被插在它前面的函数调用时报未声明
+static void routeLog(NSString *msg);
+
 static BOOL isAirPodsName(NSString *name) {
     return name && [name containsString:@"AirPods"];
 }
@@ -398,18 +401,24 @@ static BOOL otherBTDeviceConnected(void) {
     return NO;
 }
 
-// 系统输出设备列表里是否有"非 AirPods 的蓝牙设备"成为当前输出（车载 HFP 通话输出）
+// 系统输出设备列表里是否有"已连的非 AirPods 蓝牙设备"成为当前输出（车载 HFP 通话输出）
+// 交叉比对蓝牙列表里的非 AirPods 已连设备名与系统当前输出设备名——避免误判内置喇叭
 static BOOL carInSystemOutput(void) {
     @try {
+        NSMutableSet *carNames = [NSMutableSet set];
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        if (bm && [bm respondsToSelector:@selector(connectedDevices)]) {
+            for (id d in [bm connectedDevices]) {
+                NSString *nm = [d name];
+                if (nm && !isAirPodsName(nm)) [carNames addObject:nm];
+            }
+        }
+        if (carNames.count == 0) return NO; // 没有非 AirPods 蓝牙设备 → 不可能被车载抢
         id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
         NSArray *devs = [ctx outputDevices];
         for (id d in devs) {
             NSString *nm = [d name];
-            if (!nm) continue;
-            BOOL bt = NO;
-            if ([d respondsToSelector:@selector(isBluetooth)]) bt = [d isBluetooth];
-            else bt = ([nm length] > 0); // 兜底启发式：有名字即视为蓝牙候选
-            if (bt && !isAirPodsName(nm)) return YES;
+            if (nm && [carNames containsObject:nm]) return YES; // 车载设备已成为当前系统输出
         }
     } @catch (id e) {}
     return NO;
