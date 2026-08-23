@@ -42,11 +42,15 @@ static BOOL sAirPodsConnected = NO;
 // 入耳检测状态（iOS16 实机验证）：unsigned char 输出参数，bitmask——
 // 0=未戴, 1=左耳, 2=右耳, 3=双耳（frida 实测摘戴实时跳变 0↔3）
 - (void)inEarStatusPrimary:(unsigned char *)primary secondary:(unsigned char *)secondary;
+// HFP 激活（强制把通话路由钉到该蓝牙设备）：车载抢通话时我们反向激活 AirPods HFP
+- (void)setWantsToBeActivated:(BOOL)arg1;
 @end
 
 @interface BluetoothManager : NSObject
 + (id)sharedInstance;
 - (NSArray *)connectedDevices;
+- (NSArray *)connectedHFPDevices;
+- (void)setDevice:(id)arg1 wantsToBeActivated:(BOOL)arg2;
 @end
 
 static BOOL isAirPodsName(NSString *name) {
@@ -376,6 +380,71 @@ static BOOL carHFPActive(void) {
     return NO;
 }
 
+// ---- HFP 通话路由综合检测（车载抢通话，2026-08-23 老板实测）----
+// 蓝牙耳机同时有 A2DP(媒体)+HFP(通话)两个端口；视频/语音通话时系统把 HFP
+// 单独切到车载（车载免提优先），而 A2DP 媒体可能还在 AirPods（抖音在放）。
+// 以下多个角度判断是否"车载正占用通话路由"，任一为真即视为车载抢了通话。
+
+// 是否有"非 AirPods 的蓝牙设备"已连接（车载/其他蓝牙）→ 车模式判定用
+static BOOL otherBTDeviceConnected(void) {
+    @try {
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        NSArray *devs = [bm connectedDevices];
+        for (id d in devs) {
+            NSString *nm = [d name];
+            if (nm && !isAirPodsName(nm)) return YES;
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// 系统输出设备列表里是否有"非 AirPods 的蓝牙设备"成为当前输出（车载 HFP 通话输出）
+static BOOL carInSystemOutput(void) {
+    @try {
+        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
+        NSArray *devs = [ctx outputDevices];
+        for (id d in devs) {
+            NSString *nm = [d name];
+            if (!nm) continue;
+            BOOL bt = NO;
+            if ([d respondsToSelector:@selector(isBluetooth)]) bt = [d isBluetooth];
+            else bt = ([nm length] > 0); // 兜底启发式：有名字即视为蓝牙候选
+            if (bt && !isAirPodsName(nm)) return YES;
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// 通话输入是否被车载占用（currentRoute.inputs 出现非 AirPods 的 BluetoothHFP）
+static BOOL carHFPInputActive(void) {
+    @try {
+        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        for (AVAudioSessionPortDescription *p in route.inputs) {
+            if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) {
+                if (!isAirPodsName(p.portName)) return YES;
+            }
+        }
+    } @catch (id e) {}
+    return NO;
+}
+
+// 找到 AirPods 的 HFP 输入端口（setPreferredInput: 用）
+static id airPodsHFPPort(void) {
+    @try {
+        NSArray *inputs = [AVAudioSession sharedInstance].availableInputs;
+        for (AVAudioSessionPortDescription *p in inputs) {
+            if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP] && isAirPodsName(p.portName))
+                return p;
+        }
+    } @catch (id e) {}
+    return nil;
+}
+
+// 综合：车载是否正占用通话路由（任一检测为真）
+static BOOL carOwnsCall(void) {
+    return carHFPActive() || carHFPInputActive() || carInSystemOutput();
+}
+
 // 诊断：打印当前音频路由全部输出端口（定位 HFP 变化是否触发监听）
 static void logCurrentRoute(NSString *tag) {
     @try {
@@ -452,6 +521,72 @@ static void forceRouteToAirPods(const char *why) {
     }
 }
 
+// 强制把通话路由抢回 AirPods（多策略一次性尝试，全程日志便于一次车测定位）
+//  S1: MediaRemote pickRoute:（已知对 A2DP 有效，验证对 HFP 是否也有效）
+//  S2: AVAudioSession setPreferredInput: AirPods HFP（HFP 通话设备官方 API；
+//      SpringBoard 进程可能不作用于微信会话，仍尝试并记录）
+//  S3: BluetoothManager 激活 AirPods HFP（setWantsToBeActivated:YES），逼系统
+//      把通话 HFP 切到 AirPods
+// 短冷却 0.8s：允许轮询每次尝试重抢，但不被通知风暴刷爆
+static NSTimeInterval sLastCallForce = 0;
+static void forceCallToAirPods(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - sLastCallForce < 0.8) return;
+    sLastCallForce = now;
+    @try {
+        if (!carOwnsCall()) { routeLog(@"callforce skip carOwns=0"); return; }
+        routeLog([NSString stringWithFormat:@"callforce carOwns=1 hfp=%d inHfp=%d sysOut=%d",
+                  carHFPActive(), carHFPInputActive(), carInSystemOutput()]);
+        // S1: MediaRemote pickRoute
+        if (!sMPARouter) {
+            sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
+            [sMPARouter setDiscoveryMode:1];
+            [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}];
+        }
+        NSArray *routes = [sMPARouter availableRoutes];
+        id airRoute = nil;
+        for (id r in routes) { if (isAirPodsName([r routeName])) { airRoute = r; break; } }
+        if (airRoute) {
+            BOOL ok = [sMPARouter pickRoute:airRoute];
+            routeLog([NSString stringWithFormat:@"callforce S1(pickRoute) ok=%d", ok]);
+        } else {
+            routeLog(@"callforce S1 no-route-yet");
+        }
+        // S2: setPreferredInput AirPods HFP
+        id apPort = airPodsHFPPort();
+        if (apPort) {
+            NSError *err = nil;
+            BOOL ok2 = [[AVAudioSession sharedInstance] setPreferredInput:apPort error:&err];
+            routeLog([NSString stringWithFormat:@"callforce S2(setPreferredInput) ok=%d err=%@", ok2, err]);
+        } else {
+            routeLog(@"callforce S2 no-HFP-port");
+        }
+        // S3: BluetoothManager 激活 AirPods HFP
+        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+        if (bm && [bm respondsToSelector:@selector(connectedDevices)]) {
+            for (id d in [bm connectedDevices]) {
+                NSString *nm = [d name];
+                if (nm && isAirPodsName(nm) && [d respondsToSelector:@selector(setWantsToBeActivated:)]) {
+                    [d setWantsToBeActivated:YES];
+                    routeLog(@"callforce S3 activate AirPods HFP");
+                    break;
+                }
+            }
+        }
+        // 复查：0.6s / 1.5s 看是否抢回（carOwns 是否变 0）
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            routeLog([NSString stringWithFormat:@"callforce AFTER0.6 carOwns=%d", carOwnsCall()]);
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            routeLog([NSString stringWithFormat:@"callforce AFTER1.5 carOwns=%d", carOwnsCall()]);
+        });
+    } @catch (id e) {
+        routeLog([NSString stringWithFormat:@"callforce EXC %@", e]);
+    }
+}
+
 // ============================================================
 // 统一路由事件处理器
 // 触发源：
@@ -473,6 +608,8 @@ static NSTimeInterval sLastDisconnect = 0; // 最近一次"AirPods 不在场"时
 // 前向声明（定义在下方）
 static void enforceAirPodsRoute(void);
 static void startPollWindow(void);
+static void forceCallToAirPods(void);
+static BOOL carOwnsCall(void);
 
 // ============================================================
 // 轮询窗口化管理（老板要求：只在需要兜底时轮询，平时零轮询）
@@ -552,13 +689,12 @@ static void enforceAirPodsRoute(void) {
         // ⚠️ HFP 通话路由盲区（2026-08-23 老板实测）：视频/语音通话时系统把
         // HFP 通话路由单独切到车载（车载免提优先），而 A2DP 媒体输出可能还在
         // AirPods（抖音在放）→ 上面 outIsAP=YES 误判"输出是 AirPods"不抢。
-        // 必须单独查 HFP 端口：currentRoute.outputs 出现非 AirPods 的
-        // BluetoothHFP → 车载在通话 → 强制切回。
-        if (carHFPActive()) {
-            routeLog(@"enforce carHFP=1 -> force call-hfp");
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+        // 综合检测 carOwnsCall（HFP 输出/输入/系统输出任一为车载）→ 多策略抢回。
+        if (carOwnsCall()) {
+            routeLog(@"enforce carOwnsCall=1 -> forceCallToAirPods");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
-                forceRouteToAirPods("call-hfp");
+                forceCallToAirPods();
             });
             startPollWindow();
         }
@@ -690,8 +826,12 @@ static void handleRouteEvent(NSString *source) {
     dispatch_source_set_timer(sPollTimer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(sPollTimer, ^{
-        // 窗口到期自动停止（零轮询）
-        if ([[NSDate date] timeIntervalSince1970] > sPollWindowEnd) {
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        // 车模式（车载+AirPods 同时在场）：持续监控，窗口续期不断，
+        // 保证"车载连接状态下打微信视频被切车载"能在 1.5s 内被抢回
+        if (sAirPodsConnected && otherBTDeviceConnected()) {
+            sPollWindowEnd = now + 60.0;
+        } else if (now > sPollWindowEnd) {
             if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
             return;
         }
