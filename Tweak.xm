@@ -437,43 +437,15 @@ static BOOL carHFPInputActive(void) {
     return NO;
 }
 
-// 找到 AirPods 的 HFP 输入端口（setPreferredInput: 用）
-static id airPodsHFPPort(void) {
-    @try {
-        NSArray *inputs = [AVAudioSession sharedInstance].availableInputs;
-        for (AVAudioSessionPortDescription *p in inputs) {
-            if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP] && isAirPodsName(p.portName))
-                return p;
-        }
-    } @catch (id e) {}
-    return nil;
-}
-
 // 综合：车载是否正占用通话路由（任一检测为真）
 static BOOL carOwnsCall(void) {
     return carHFPActive() || carHFPInputActive() || carInSystemOutput();
 }
 
-// 诊断：打印当前音频路由全部输出端口（定位 HFP 变化是否触发监听）
-static void logCurrentRoute(NSString *tag) {
-    @try {
-        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
-        NSMutableString *ms = [NSMutableString stringWithFormat:@"route(%@)", tag];
-        for (AVAudioSessionPortDescription *p in route.outputs) {
-            [ms appendFormat:@" [%@:%@]", p.portType, p.portName];
-        }
-        routeLog(ms);
-    } @catch (id e) {}
-}
-
-// 路由事件日志（v1.9.48 诊断模式：写文件；排查完静默）
+// 路由事件日志（v1.9.50 生产静默：不写文件，零 IO；排查时恢复函数体）
 // ⚠️ 调试基准 = v1.9.46（19dd6db，日志开启）
 static void routeLog(NSString *msg) {
-    FILE *f = fopen("/var/jb/tmp/airpods_route.log", "a");
-    if (f) {
-        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    }
+    (void)msg;
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
@@ -530,12 +502,12 @@ static void forceRouteToAirPods(const char *why) {
     }
 }
 
-// 强制把通话路由抢回 AirPods（多策略一次性尝试，全程日志便于一次车测定位）
-//  S1: MediaRemote pickRoute:（已知对 A2DP 有效，验证对 HFP 是否也有效）
-//  S2: AVAudioSession setPreferredInput: AirPods HFP（HFP 通话设备官方 API；
-//      SpringBoard 进程可能不作用于微信会话，仍尝试并记录）
-//  S3: BluetoothManager 激活 AirPods HFP（setWantsToBeActivated:YES），逼系统
-//      把通话 HFP 切到 AirPods
+// 强制把通话路由抢回 AirPods（v1.9.50 定型）
+// 实机验证（2026-08-25 车在，7+ 次全成功）：S1 MPAVRoutingController pickRoute:
+// 是唯一生效策略——MediaRemote 不仅能切 A2DP 媒体，也能切 HFP 通话路由
+//（route 行实测 BluetoothHFP:Honda HFT -> BluetoothHFP:AirPods Pro）。
+// S2 setPreferredInput:（车载占 HFP 时 AirPods HFP 端口不在 availableInputs，
+// 永远 no-HFP-port）与 S3 setWantsToBeActivated:（从不触发）实测无效已删。
 // 短冷却 0.8s：允许轮询每次尝试重抢，但不被通知风暴刷爆
 static NSTimeInterval sLastCallForce = 0;
 static void forceCallToAirPods(void) {
@@ -543,10 +515,7 @@ static void forceCallToAirPods(void) {
     if (now - sLastCallForce < 0.8) return;
     sLastCallForce = now;
     @try {
-        if (!carOwnsCall()) { routeLog(@"callforce skip carOwns=0"); return; }
-        routeLog([NSString stringWithFormat:@"callforce carOwns=1 hfp=%d inHfp=%d sysOut=%d",
-                  carHFPActive(), carHFPInputActive(), carInSystemOutput()]);
-        // S1: MediaRemote pickRoute
+        if (!carOwnsCall()) return;
         if (!sMPARouter) {
             sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
             [sMPARouter setDiscoveryMode:1];
@@ -556,44 +525,20 @@ static void forceCallToAirPods(void) {
         id airRoute = nil;
         for (id r in routes) { if (isAirPodsName([r routeName])) { airRoute = r; break; } }
         if (airRoute) {
-            BOOL ok = [sMPARouter pickRoute:airRoute];
-            routeLog([NSString stringWithFormat:@"callforce S1(pickRoute) ok=%d", ok]);
+            [sMPARouter pickRoute:airRoute];
         } else {
-            routeLog(@"callforce S1 no-route-yet");
-        }
-        // S2: setPreferredInput AirPods HFP
-        id apPort = airPodsHFPPort();
-        if (apPort) {
-            NSError *err = nil;
-            BOOL ok2 = [[AVAudioSession sharedInstance] setPreferredInput:apPort error:&err];
-            routeLog([NSString stringWithFormat:@"callforce S2(setPreferredInput) ok=%d err=%@", ok2, err]);
-        } else {
-            routeLog(@"callforce S2 no-HFP-port");
-        }
-        // S3: BluetoothManager 激活 AirPods HFP
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        if (bm && [bm respondsToSelector:@selector(connectedDevices)]) {
-            for (id d in [bm connectedDevices]) {
-                NSString *nm = [d name];
-                if (nm && isAirPodsName(nm) && [d respondsToSelector:@selector(setWantsToBeActivated:)]) {
-                    [d setWantsToBeActivated:YES];
-                    routeLog(@"callforce S3 activate AirPods HFP");
-                    break;
+            // 列表还没刷新出来（实例刚建）：0.4s 后重试一次，再不行靠车模式轮询兜底
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (carOwnsCall()) {
+                    NSArray *r2 = [sMPARouter availableRoutes];
+                    for (id r in r2) {
+                        if (isAirPodsName([r routeName])) { [sMPARouter pickRoute:r]; break; }
+                    }
                 }
-            }
+            });
         }
-        // 复查：0.6s / 1.5s 看是否抢回（carOwns 是否变 0）
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            routeLog([NSString stringWithFormat:@"callforce AFTER0.6 carOwns=%d", carOwnsCall()]);
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            routeLog([NSString stringWithFormat:@"callforce AFTER1.5 carOwns=%d", carOwnsCall()]);
-        });
-    } @catch (id e) {
-        routeLog([NSString stringWithFormat:@"callforce EXC %@", e]);
-    }
+    } @catch (id e) {}
 }
 
 // ============================================================
@@ -727,8 +672,6 @@ static void handleRouteEvent(NSString *source) {
             routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
                       source, airInRoute, airInBT, sAirPodsConnected]);
         }
-        // 诊断：每次事件打印实际输出端口（HFP 变化时看是否触发 + 端口是谁）
-        logCurrentRoute(source);
         if (sAirPodsConnected) {
             float cur;
             if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
