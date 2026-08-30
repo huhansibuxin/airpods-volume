@@ -621,6 +621,31 @@ static void installNowPlayingLayoutTweaks(void) {
 
 @end
 
+// 创建系统原生 MediaControlsVolumeRingerSliderView 作为铃声音量滑块。
+// Ring.dylib 反编译证实：ringerSlider 类就是系统自带的 MediaControlsVolumeRingerSliderView，
+// 自带原生毛玻璃背景/白色填充/圆角/触摸交互。我们之前用 APVRingerSliderView 自绘，所以
+// 右边是纯白方块。这里优先用原生类；取不到或初始化失败再降级到自绘。
+static UIView *apv_createNativeRingerSlider(CGRect frame, float value) {
+    Class c = NSClassFromString(@"MediaControlsVolumeRingerSliderView");
+    if (!c) return nil;
+    id raw = [c alloc];
+    UIView *slider = nil;
+    SEL initSel = NSSelectorFromString(@"initWithFrame:minimumValue:cornerRadius:");
+    if ([raw respondsToSelector:initSel]) {
+        // cornerRadius=0 时该类内部默认 42；minimumValue=0 即可（Ring 用 0/0.0625 两种，看偏好）
+        slider = ((id (*)(id, SEL, CGRect, double, double))objc_msgSend)(raw, initSel, frame, 0.0, 0.0);
+    } else if ([raw respondsToSelector:@selector(initWithFrame:)]) {
+        slider = ((id (*)(id, SEL, CGRect))objc_msgSend)(raw, @selector(initWithFrame:), frame);
+    }
+    if (!slider) return nil;
+    SEL curSel = NSSelectorFromString(@"setCurrentValue:");
+    if ([slider respondsToSelector:curSel]) {
+        ((void (*)(id, SEL, double))objc_msgSend)(slider, curSel, (double)value);
+    }
+    slider.tag = 0xA9B0;
+    return slider;
+}
+
 static const void *kRingerSliderKey = &kRingerSliderKey;
 static const void *kRingerBellKey   = &kRingerBellKey;
 
@@ -698,7 +723,7 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
                 expanded, [slider class], [moduleView class]]);
         }
 
-        APVRingerSliderView *ringer = objc_getAssociatedObject(self, kRingerSliderKey);
+        UIView *ringer = objc_getAssociatedObject(self, kRingerSliderKey);
         UIImageView *bell = objc_getAssociatedObject(self, kRingerBellKey);
 
         if (!expanded) {
@@ -707,14 +732,45 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
             return;
         }
 
+        CGRect b = moduleView.bounds;
+        CGRect sf = primarySlider.frame;
+        CGFloat sliderW = sf.size.width;
+        CGFloat sliderH = sf.size.height;
+        CGFloat sliderY = sf.origin.y;
+
+        // 按 Ring 反编译 layout：两个滑块等宽，左/右/中三段间距相等。
+        // gap = (总宽 - 2*sliderW) / 3，左滑块 x=gap，右滑块 x=总宽-gap-sliderW。
+        CGFloat gap = (b.size.width - sliderW * 2.0f) / 3.0f;
+        if (gap < 4.0f) gap = 4.0f;
+        CGFloat leftX  = gap;
+        CGFloat rightX = b.size.width - gap - sliderW;
+
+        primarySlider.frame = CGRectMake(leftX, sliderY, sliderW, sliderH);
+
         if (!ringer) {
-            ringer = [[APVRingerSliderView alloc] initWithFrame:CGRectZero];
-            ringer.tag = 0xA9B0;
+            CGRect rFrame = CGRectMake(rightX, sliderY, sliderW, sliderH);
+            // 优先使用系统原生 MediaControlsVolumeRingerSliderView（Ring 同款）
+            ringer = apv_createNativeRingerSlider(rFrame, apv_ringerVolume());
+            if (!ringer) {
+                // 降级：自己画一个（样式不如原生，但能工作）
+                APVRingerSliderView *custom = [[APVRingerSliderView alloc] initWithFrame:rFrame];
+                custom.valueChanged = ^(float value) { apv_setRingerVolume(value); };
+                ringer = custom;
+            }
             objc_setAssociatedObject(self, kRingerSliderKey, ringer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [moduleView addSubview:ringer];
-            ringer.valueChanged = ^(float value) { apv_setRingerVolume(value); };
         }
         ringer.hidden = NO;
+        ringer.frame = CGRectMake(rightX, sliderY, sliderW, sliderH);
+
+        // 同步铃声音量：原生类走 setCurrentValue:；自定义类走 .value
+        float rv = apv_ringerVolume();
+        SEL setCurSel = NSSelectorFromString(@"setCurrentValue:");
+        if ([ringer respondsToSelector:setCurSel]) {
+            ((void (*)(id, SEL, double))objc_msgSend)(ringer, setCurSel, (double)rv);
+        } else if ([ringer isKindOfClass:[APVRingerSliderView class]]) {
+            ((APVRingerSliderView *)ringer).value = rv;
+        }
 
         if (!bell) {
             UIImage *img = [UIImage systemImageNamed:@"bell.fill"];
@@ -739,18 +795,6 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         }
         bell.hidden = NO;
 
-        CGRect b = moduleView.bounds;
-        CGRect sf = primarySlider.frame;
-        CGFloat sliderW = sf.size.width;
-        CGFloat sliderH = sf.size.height;
-        CGFloat sliderY = sf.origin.y;
-
-        // 把媒体音量滑块移到左 30%，铃声音量滑块放右 70%，保持系统宽高
-        CGFloat leftX  = roundf(b.size.width * 0.30f - sliderW * 0.5f);
-        CGFloat rightX = roundf(b.size.width * 0.70f - sliderW * 0.5f);
-        primarySlider.frame = CGRectMake(leftX, sliderY, sliderW, sliderH);
-        ringer.frame = CGRectMake(rightX, sliderY, sliderW, sliderH);
-
         // 铃铛图标居中于铃声音量滑块上方
         CGFloat bellSize = 22.0f;
         CGFloat bellY = sliderY - bellSize - 6.0f;
@@ -758,7 +802,7 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         bell.frame = CGRectMake(roundf(rightX + sliderW * 0.5f - bellSize * 0.5f),
                                 bellY, bellSize, bellSize);
 
-        // 尝试把顶部 AirPods 图标也移到左侧滑块上方（如果 view 上有 primaryAssetView）
+        // 尝试把顶部 AirPods/扬声器图标也移到左侧滑块上方（如果 view 上有 primaryAssetView）
         SEL assetSel = NSSelectorFromString(@"primaryAssetView");
         if ([moduleView respondsToSelector:assetSel]) {
             id asset = ((id (*)(id, SEL))objc_msgSend)(moduleView, assetSel);
@@ -769,8 +813,6 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
                                       af.origin.y, af.size.width, af.size.height);
             }
         }
-
-        ringer.value = apv_ringerVolume();
     } @catch (id e) {
         apvBootLog([NSString stringWithFormat:@"replMRUVolumeLayout 异常: %@", e]);
     }
@@ -1229,9 +1271,22 @@ static void callVolumeGuardTick(void) {
         }
         if (!currentOutputIsAirPods()) return; // 通话走听筒/车载时不碰音量
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
-        [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
-        [avc setVolumeTo:0.4f forCategory:@"Alert"];
+        // v1.9.62：不再每 2s 无条件 setVolumeTo（可能干扰微信视频音频流），
+        // 只在当前值确实高于 cap 时才写。getVolume 无播放会话时返回假值 0.70，
+        // 此时 (cur > cap) 为假，不会触发多余写入。
+        float cur = 0.0f;
+        if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur > 0.70f) {
+            [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
+            if (gVolDiag) volLog(@"callGuard press Audio/Video >70");
+        }
+        if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.40f) {
+            [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
+            if (gVolDiag) volLog(@"callGuard press Ringtone >40");
+        }
+        if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.40f) {
+            [avc setVolumeTo:0.4f forCategory:@"Alert"];
+            if (gVolDiag) volLog(@"callGuard press Alert >40");
+        }
     } @catch (id e) {}
 }
 
@@ -1268,6 +1323,24 @@ static void enforceAirPodsRoute(void) {
             sOutputWasAirPods = NO;
             return;
         }
+
+        // v1.9.62：HFP 通话（微信视频/语音）期间，只处理 HFP 路由抢回，
+        // 不碰 A2DP 媒体路由，避免 pickRoute/MPAV 操作干扰通话音频。
+        BOOL hfpNow = hfpCallActive();
+        if (hfpNow) {
+            if (gStealHFP && carOwnsCall()) {
+                routeLog(@"enforce carOwnsCall=1 (HFP call active) -> forceCallToAirPods");
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    forceCallToAirPods();
+                });
+                startPollWindow();
+            }
+            // 仍更新输出状态，避免挂断后状态机依据过时的 wasAP 做错误判定
+            sOutputWasAirPods = currentOutputIsAirPods();
+            return;
+        }
+
         BOOL outIsAP = currentOutputIsAirPods();
         BOOL wasAP = sOutputWasAirPods;
         sOutputWasAirPods = outIsAP;
@@ -1299,17 +1372,6 @@ static void enforceAirPodsRoute(void) {
         // ⚠️ HFP 通话路由盲区（2026-08-23 老板实测）：视频/语音通话时系统把
         // HFP 通话路由单独切到车载（车载免提优先），而 A2DP 媒体输出可能还在
         // AirPods（抖音在放）→ 上面 outIsAP=YES 误判"输出是 AirPods"不抢。
-        // 综合检测 carOwnsCall（HFP 输出/输入/系统输出任一为车载）→ 多策略抢回。
-        // ⚠️ 顺序有讲究：gStealHFP 是内存里的 BOOL（零成本），carOwnsCall()
-        // 要遍历 蓝牙设备 + 路由 + 输出端三组列表。开关关掉时短路掉整个检测。
-        if (gStealHFP && carOwnsCall()) {
-            routeLog(@"enforce carOwnsCall=1 -> forceCallToAirPods");
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                forceCallToAirPods();
-            });
-            startPollWindow();
-        }
     } @catch (id e) {}
 }
 
