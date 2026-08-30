@@ -289,13 +289,24 @@ static id replModuleSettingsForModule(id self, SEL _cmd, NSString *identifier, C
     id origSettings = origModuleSettingsForModule ? origModuleSettingsForModule(self, _cmd, identifier, proto) : nil;
     @try {
         CCUILayoutSize one = { 1, 1 };
-        CCUIModuleSettings *mini = [[CCUIModuleSettings alloc] initWithPortraitLayoutSize:one
-                                                                    landscapeLayoutSize:one];
-        if (mini) {
-            ccLog(@"nowplaying -> 1x1 (新建 CCUIModuleSettings 替换)");
-            return mini;
+        // ⚠️ 不能写 [[CCUIModuleSettings alloc] init...]：直接引用类名会生成
+        // _OBJC_CLASS_$_CCUIModuleSettings 符号，而 theos SDK 里没有
+        // ControlCenterUI 框架可链接（ld: framework 'ControlCenterUI' not found）。
+        // 用 Class 变量发消息 → 运行时查找、不产生类符号，同时保留 ARC 内存管理
+        // （比 objc_msgSend 强转安全）。
+        Class settingsCls = NSClassFromString(@"CCUIModuleSettings");
+        SEL initSel = NSSelectorFromString(@"initWithPortraitLayoutSize:landscapeLayoutSize:");
+        if (settingsCls && [settingsCls instancesRespondToSelector:initSel]) {
+            id raw = [settingsCls alloc];
+            id mini = [raw initWithPortraitLayoutSize:one landscapeLayoutSize:one];
+            if (mini) {
+                ccLog(@"nowplaying -> 1x1 (新建 CCUIModuleSettings 替换)");
+                return mini;
+            }
+            ccLog(@"nowplaying -> 新建 CCUIModuleSettings 返回 nil，退回原 settings");
+        } else {
+            ccLog(@"nowplaying -> CCUIModuleSettings 类/初始化方法不可用，退回原 settings");
         }
-        ccLog(@"nowplaying -> 新建 CCUIModuleSettings 返回 nil，退回原 settings");
     } @catch (id e) {
         ccLog([NSString stringWithFormat:@"nowplaying EXC %@", e]);
     }
