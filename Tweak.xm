@@ -204,7 +204,12 @@ static float capForCategory(id cat) {
 %hook SBElasticVolumeViewController
 - (void)_updateSliderViewMetricsForState:(long long)state bounds:(CGRect)bounds integralized:(BOOL)integralized useSizeSpringData:(BOOL)useSizeSpringData useCenterSpringData:(BOOL)useCenterSpringData {
     // 开关：设置里"音量条永远小条"；关掉就完全走系统（先大条再转小条）
-    if (!gMiniVolumeHUD) { %orig; return; }
+    // ⚠️ 多参数方法里不能写无参 `%orig;`（Logos 展开会失败，后面全乱套），
+    // 必须把参数全部显式写出来。
+    if (!gMiniVolumeHUD) {
+        %orig(state, bounds, integralized, useSizeSpringData, useCenterSpringData);
+        return;
+    }
     // 强制 state=2（mini 小条）：永远直接小条，跳过大条过渡
     %orig(2, bounds, integralized, useSizeSpringData, useCenterSpringData);
 }
