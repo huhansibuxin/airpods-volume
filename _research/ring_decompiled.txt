@@ -1,0 +1,5645 @@
+========== _libroot_get_root_prefix_fallback  @ 00005050 ==========
+
+char * _libroot_get_root_prefix_fallback(void)
+
+{
+  return "";
+}
+
+
+========== _libroot_get_jbroot_prefix_fallback  @ 0000505c ==========
+
+char * _libroot_get_jbroot_prefix_fallback(void)
+
+{
+  return "/var/jb";
+}
+
+
+========== _libroot_get_boot_uuid_fallback  @ 00005068 ==========
+
+char * _libroot_get_boot_uuid_fallback(void)
+
+{
+  return "00000000-0000-0000-0000-000000000000";
+}
+
+
+========== _libroot_rootfspath_fallback  @ 00005074 ==========
+
+char * _libroot_rootfspath_fallback(char *param_1,char *param_2)
+
+{
+  int iVar1;
+  char *pcVar2;
+  char *pcVar3;
+  size_t sVar4;
+  
+  if (param_1 == (char *)0x0) {
+    param_2 = (char *)0x0;
+  }
+  else {
+    if (param_2 == (char *)0x0) {
+      param_2 = _malloc(0x400);
+    }
+    if (DAT_00010920 != -1) {
+      _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+    }
+    pcVar2 = (char *)(*DAT_00010928)();
+    if (DAT_00010920 != -1) {
+      _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+    }
+    pcVar3 = (char *)(*DAT_00010930)();
+    sVar4 = _strlen(pcVar3);
+    if (*param_1 == '/') {
+      iVar1 = _strncmp(param_1,pcVar3,sVar4);
+      if (iVar1 != 0) {
+        _strlcpy(param_2,pcVar2,0x400);
+        _strlcat(param_2,param_1,0x400);
+        return param_2;
+      }
+      param_1 = param_1 + sVar4;
+    }
+    _strlcpy(param_2,param_1,0x400);
+  }
+  return param_2;
+}
+
+
+========== _libroot_dyn_get_root_prefix  @ 0000519c ==========
+
+void _libroot_dyn_get_root_prefix(void)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (DAT_00010920 != -1) {
+    _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x51d4);
+    (*pcVar1)();
+  }
+                    /* WARNING: Could not recover jumptable at 0x000051d4. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00010928)();
+  return;
+}
+
+
+========== _libroot_dyn_get_jbroot_prefix  @ 000051f0 ==========
+
+void _libroot_dyn_get_jbroot_prefix(void)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (DAT_00010920 != -1) {
+    _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x5228);
+    (*pcVar1)();
+  }
+                    /* WARNING: Could not recover jumptable at 0x00005228. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00010930)();
+  return;
+}
+
+
+========== _libroot_jbrootpath_fallback  @ 00005244 ==========
+
+char * _libroot_jbrootpath_fallback(char *param_1,char *param_2)
+
+{
+  char *pcVar1;
+  
+  if (param_1 == (char *)0x0) {
+    param_2 = (char *)0x0;
+  }
+  else {
+    if (param_2 == (char *)0x0) {
+      param_2 = _malloc(0x400);
+    }
+    if (DAT_00010920 != -1) {
+      _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+    }
+    pcVar1 = (char *)(*DAT_00010930)();
+    if (*param_1 == '/') {
+      _strlcpy(param_2,pcVar1,0x400);
+      _strlcat(param_2,param_1,0x400);
+    }
+    else {
+      _strlcpy(param_2,param_1,0x400);
+    }
+  }
+  return param_2;
+}
+
+
+========== _libroot_load  @ 000052fc ==========
+
+void _libroot_load(void)
+
+{
+  if (DAT_00010920 == -1) {
+    return;
+  }
+  _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+  return;
+}
+
+
+========== FUN_00005324  @ 00005324 ==========
+
+void FUN_00005324(void)
+
+{
+  long lVar1;
+  
+  lVar1 = _dlopen("@rpath/libroot.dylib",2);
+  if (lVar1 != 0) {
+    DAT_00010928 = (code *)_dlsym(lVar1,"libroot_get_root_prefix");
+    DAT_00010930 = (code *)_dlsym(lVar1,"libroot_get_jbroot_prefix");
+    DAT_00010938 = (code *)_dlsym(lVar1,"libroot_get_boot_uuid");
+    DAT_00010940 = (code *)_dlsym(lVar1,"libroot_jbrootpath");
+    DAT_00010948 = (code *)_dlsym(lVar1,"libroot_rootfspath");
+  }
+  if (DAT_00010928 == (code *)0x0) {
+    DAT_00010928 = _libroot_get_root_prefix_fallback;
+  }
+  if (DAT_00010930 == (code *)0x0) {
+    DAT_00010930 = _libroot_get_jbroot_prefix_fallback;
+  }
+  if (DAT_00010938 == (code *)0x0) {
+    DAT_00010938 = _libroot_get_boot_uuid_fallback;
+  }
+  if (DAT_00010940 == (code *)0x0) {
+    DAT_00010940 = _libroot_jbrootpath_fallback;
+  }
+  if (DAT_00010948 == (code *)0x0) {
+    DAT_00010948 = _libroot_rootfspath_fallback;
+  }
+  DAT_00010928 = DAT_00010928;
+  DAT_00010930 = DAT_00010930;
+  DAT_00010938 = DAT_00010938;
+  return;
+}
+
+
+========== _libroot_dyn_get_boot_uuid  @ 00005478 ==========
+
+void _libroot_dyn_get_boot_uuid(void)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (DAT_00010920 != -1) {
+    _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x54b0);
+    (*pcVar1)();
+  }
+                    /* WARNING: Could not recover jumptable at 0x000054b0. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00010938)();
+  return;
+}
+
+
+========== _libroot_dyn_rootfspath  @ 000054cc ==========
+
+void _libroot_dyn_rootfspath(undefined8 param_1,undefined8 param_2)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (DAT_00010920 != -1) {
+    _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x551c);
+    (*pcVar1)();
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000551c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00010948)(param_1,param_2);
+  return;
+}
+
+
+========== _libroot_dyn_jbrootpath  @ 00005538 ==========
+
+void _libroot_dyn_jbrootpath(undefined8 param_1,undefined8 param_2)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (DAT_00010920 != -1) {
+    _dispatch_once(&DAT_00010920,&PTR___NSConcreteGlobalBlock_0000c1c0);
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x5588);
+    (*pcVar1)();
+  }
+                    /* WARNING: Could not recover jumptable at 0x00005588. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00010940)(param_1,param_2);
+  return;
+}
+
+
+========== FUN_000055a4  @ 000055a4 ==========
+
+void FUN_000055a4(undefined8 param_1)
+
+{
+  _objc_getAssociatedObject(param_1,FUN_000055a4);
+  return;
+}
+
+
+========== FUN_000055b8  @ 000055b8 ==========
+
+void FUN_000055b8(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  _objc_setAssociatedObject(param_1,FUN_000055a4,param_3,1);
+  return;
+}
+
+
+========== FUN_000055d0  @ 000055d0 ==========
+
+void FUN_000055d0(undefined8 param_1)
+
+{
+  _objc_getAssociatedObject(param_1,FUN_000055d0);
+  return;
+}
+
+
+========== FUN_000055e4  @ 000055e4 ==========
+
+void FUN_000055e4(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  _objc_setAssociatedObject(param_1,FUN_000055d0,param_3,1);
+  return;
+}
+
+
+========== FUN_000055fc  @ 000055fc ==========
+
+void FUN_000055fc(undefined8 param_1)
+
+{
+  _objc_getAssociatedObject(param_1,FUN_000055fc);
+  return;
+}
+
+
+========== FUN_00005610  @ 00005610 ==========
+
+void FUN_00005610(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  _objc_setAssociatedObject(param_1,FUN_000055fc,param_3,1);
+  return;
+}
+
+
+========== FUN_00005628  @ 00005628 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_00005628(void)
+
+{
+  undefined *puVar1;
+  undefined *self;
+  ID IVar2;
+  ID IVar3;
+  undefined8 uVar4;
+  char acStack_880 [1032];
+  undefined *local_478;
+  char *local_470;
+  char *pcStack_468;
+  char *local_460;
+  char *pcStack_458;
+  char *local_450;
+  char *pcStack_448;
+  long local_70;
+  
+  local_70 = *(long *)PTR____stack_chk_guard_0000c180;
+  IVar2 = NSFileManager::defaultManager((ID)PTR__OBJC_CLASS___NSFileManager_00010770);
+  puVar1 = PTR__OBJC_CLASS___NSString_00010778;
+  IVar3 = objc_stub::fileSystemRepresentation(0xc3b0);
+  uVar4 = _libroot_dyn_jbrootpath(IVar3,&local_470);
+  IVar3 = NSString::stringWithUTF8String_((ID)puVar1,uVar4);
+  IVar2 = NSFileManager::fileExistsAtPath_(IVar2,IVar3);
+  self = PTR__OBJC_CLASS___NSDictionary_00010780;
+  puVar1 = PTR__OBJC_CLASS___NSString_00010778;
+  if ((int)IVar2 != 0) {
+    IVar2 = objc_stub::fileSystemRepresentation(0xc3b0);
+    uVar4 = _libroot_dyn_jbrootpath(IVar2,&local_470);
+    IVar2 = NSString::stringWithUTF8String_((ID)puVar1,uVar4);
+    IVar2 = NSDictionary::dictionaryWithContentsOfFile_((ID)self,IVar2);
+    IVar3 = NSDictionary::objectForKey_(IVar2,&cf_enabled);
+    if (IVar3 == 0) {
+      DAT_00010918 = '\x01';
+    }
+    else {
+      IVar3 = NSDictionary::objectForKey_(IVar2,&cf_enabled);
+      IVar3 = NSDictionary::boolValue(IVar3);
+      DAT_00010918 = (char)IVar3;
+    }
+    IVar3 = NSDictionary::objectForKey_(IVar2,&cf_muteWithSlider);
+    if (IVar3 == 0) {
+      DAT_00010919 = '\x01';
+    }
+    else {
+      IVar3 = NSDictionary::objectForKey_(IVar2,&cf_muteWithSlider);
+      IVar3 = NSDictionary::boolValue(IVar3);
+      DAT_00010919 = (char)IVar3;
+    }
+    IVar3 = NSDictionary::objectForKey_(IVar2,&cf_audioPercentage);
+    if (IVar3 == 0) {
+      DAT_00010990 = 0;
+    }
+    else {
+      IVar3 = NSDictionary::objectForKey_(IVar2,&cf_audioPercentage);
+      IVar3 = NSDictionary::boolValue(IVar3);
+      DAT_00010990 = (undefined1)IVar3;
+    }
+    IVar3 = NSDictionary::objectForKey_(IVar2,&cf_ringerPercentage);
+    if (IVar3 == 0) {
+      DAT_00010991 = 0;
+    }
+    else {
+      IVar2 = NSDictionary::objectForKey_(IVar2,&cf_ringerPercentage);
+      IVar2 = NSDictionary::boolValue(IVar2);
+      DAT_00010991 = (undefined1)IVar2;
+    }
+  }
+  uVar4 = 0;
+  if (DAT_00010918 != '\0') {
+    if (DAT_00010919 != '\0') {
+      uVar4 = _objc_getClass("SBRingerControl");
+      _MSHookMessageEx(uVar4,PTR_s_initWithHUDController_soundContr_00010500,FUN_00005d6c,
+                       &DAT_00010950);
+      _MSHookMessageEx(uVar4,PTR_s_initWithBannerManager_soundContr_000104e8,FUN_00005eac,
+                       &DAT_00010958);
+    }
+    uVar4 = _objc_getClass("MRUVolumeBackgroundViewController");
+    local_470 = "T";
+    pcStack_468 = "@\"SliderGlyphView\"";
+    local_460 = "&";
+    pcStack_458 = "";
+    local_450 = "N";
+    pcStack_448 = "";
+    _class_addProperty(uVar4,"bellGlyphView",&local_470,3);
+    (*(code *)PTR____chkstk_darwin_0000c198)();
+    _snprintf(acStack_880,0x400,"%s@:");
+    _class_addMethod(uVar4,PTR_s_bellGlyphView_000103d0,FUN_000055a4,acStack_880);
+    _snprintf(acStack_880,0x400,"v@:%s");
+    _class_addMethod(uVar4,PTR_s_setBellGlyphView__000105e8,FUN_000055b8,acStack_880);
+    local_478 = PTR_s_viewDidLayoutSubviews_00010748;
+    _MSHookMessageEx(uVar4,PTR_s_viewDidLayoutSubviews_00010748,FUN_00005fec,&DAT_00010960);
+    uVar4 = _objc_getClass("MRUVolumeViewController");
+    local_470 = "T";
+    pcStack_468 = "@\"MediaControlsVolumeRingerSliderView\"";
+    local_460 = "&";
+    pcStack_458 = "";
+    local_450 = "N";
+    pcStack_448 = "";
+    _class_addProperty(uVar4,"ringerSlider",&local_470,3);
+    (*(code *)PTR____chkstk_darwin_0000c198)();
+    _snprintf(acStack_880,0x400,"%s@:");
+    _class_addMethod(uVar4,PTR_s_ringerSlider_000105c0,FUN_000055d0,acStack_880);
+    _snprintf(acStack_880,0x400,"v@:%s");
+    _class_addMethod(uVar4,PTR_s_setRingerSlider__00010678,FUN_000055e4,acStack_880);
+    local_470 = "T";
+    pcStack_468 = "@\"VolumeLabel\"";
+    local_460 = "&";
+    pcStack_458 = "";
+    local_450 = "N";
+    pcStack_448 = "";
+    _class_addProperty(uVar4,"volumeLabel",&local_470,3);
+    (*(code *)PTR____chkstk_darwin_0000c198)();
+    _snprintf(acStack_880,0x400,"%s@:");
+    _class_addMethod(uVar4,PTR_s_volumeLabel_00010758,FUN_000055fc,acStack_880);
+    _snprintf(acStack_880,0x400,"v@:%s");
+    _class_addMethod(uVar4,PTR_s_setVolumeLabel__000106b0,FUN_00005610,acStack_880);
+    _MSHookMessageEx(uVar4,PTR_s_viewDidLoad_00010750,FUN_0000651c,&DAT_00010968);
+    _MSHookMessageEx(uVar4,local_478,FUN_00006590,&DAT_00010970);
+    _MSHookMessageEx(uVar4,PTR_s_gestureRecognizer_shouldReceiveT_000104a8,FUN_00007110,
+                     &DAT_00010978);
+    _MSHookMessageEx(uVar4,PTR_s_primarySliderValueDidChange__000105b0,FUN_000071d0,&DAT_00010980);
+    local_470._0_4_ = 0x3a4076;
+    _class_addMethod(uVar4,PTR_s_updateVolumeLabel_00010738,FUN_00007228,&local_470);
+    local_470 = (char *)CONCAT44(local_470._4_4_,0x3a4076);
+    _class_addMethod(uVar4,PTR_s_muteStateChanged_00010570,FUN_00007304,&local_470);
+    uVar4 = _objc_getClass("SBRingerControl");
+    uVar4 = _MSHookMessageEx(uVar4,PTR_s_setRingerMuted__00010670,FUN_000074e0,&DAT_00010988);
+  }
+  if (*(long *)PTR____stack_chk_guard_0000c180 != local_70) {
+                    /* WARNING: Subroutine does not return */
+    ___stack_chk_fail(uVar4);
+  }
+  return;
+}
+
+
+========== FUN_00005d6c  @ 00005d6c ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_unsafeClaimAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00005d6c(undefined8 param_1,undefined8 param_2,undefined8 param_3,undefined8 param_4)
+
+{
+  ID self;
+  undefined8 uVar1;
+  undefined *local_68;
+  undefined8 local_60;
+  code *local_58;
+  undefined *puStack_50;
+  undefined8 local_48;
+  
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  local_68 = PTR___NSConcreteStackBlock_0000c168;
+  local_60 = DAT_0000ad58;
+  local_58 = FUN_00007558;
+  puStack_50 = &DAT_0000c1e0;
+  local_48 = param_1;
+  NSNotificationCenter::addObserverForName_object_queue_usingBlock_
+            (self,&cf_com_yan_ring_mute,0,0,&local_68);
+  uVar1 = (*DAT_00010950)(param_1,param_2,param_3,param_4);
+  return uVar1;
+}
+
+
+========== FUN_00005eac  @ 00005eac ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_unsafeClaimAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00005eac(undefined8 param_1,undefined8 param_2,undefined8 param_3,undefined8 param_4)
+
+{
+  ID self;
+  undefined8 uVar1;
+  undefined *local_68;
+  undefined8 local_60;
+  code *local_58;
+  undefined *puStack_50;
+  undefined8 local_48;
+  
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  local_68 = PTR___NSConcreteStackBlock_0000c168;
+  local_60 = DAT_0000ad58;
+  local_58 = FUN_000075f8;
+  puStack_50 = &DAT_0000c1e0;
+  local_48 = param_1;
+  NSNotificationCenter::addObserverForName_object_queue_usingBlock_
+            (self,&cf_com_yan_ring_mute,0,0,&local_68);
+  uVar1 = (*DAT_00010958)(param_1,param_2,param_3,param_4);
+  return uVar1;
+}
+
+
+========== FUN_00005fec  @ 00005fec ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_00005fec(undefined1 param_1 [16],undefined8 param_2,double param_3,double param_4,
+                 ID param_5)
+
+{
+  undefined *self;
+  ID IVar1;
+  ID IVar2;
+  undefined8 uVar3;
+  undefined8 extraout_d0;
+  double dVar4;
+  double dVar5;
+  double dVar6;
+  ID local_b0;
+  ID local_a8;
+  ID local_a0;
+  ID local_98;
+  long local_90;
+  
+  local_90 = *(long *)PTR____stack_chk_guard_0000c180;
+  (*DAT_00010960)();
+  IVar1 = objc_stub::view(param_5);
+  IVar1 = objc_stub::primaryAssetView(IVar1);
+  uVar3 = _primaryAssetView;
+  _primaryAssetView = IVar1;
+  objc_stub::frame(IVar1,uVar3);
+  dVar6 = _middleXForNormalVolume;
+  dVar4 = param_3;
+  objc_stub::frame(_primaryAssetView);
+  dVar6 = dVar6 + dVar4 * -0.5;
+  uVar3 = param_2;
+  dVar4 = param_3;
+  dVar5 = param_4;
+  objc_stub::setFrame_(_primaryAssetView,dVar6,param_2,param_3);
+  if (_outputDeviceAssetView == 0) {
+    if (DAT_00010998 == 0) {
+      DAT_00010998 = _objc_getClass("MRUOutputDeviceAssetView");
+    }
+    _objc_retainAutorelease();
+    IVar1 = _objc_alloc();
+    IVar2 = objc_stub::initWithFrame_(IVar1,dVar6,param_2,param_3,param_4);
+    IVar1 = _outputDeviceAssetView;
+    _outputDeviceAssetView = IVar2;
+    IVar1 = objc_stub::view(param_5,IVar1);
+    objc_stub::addSubview_(IVar1,_outputDeviceAssetView);
+    objc_stub::frame(_outputDeviceAssetView);
+    dVar6 = _middleXForRingerVolume;
+    dVar4 = param_3;
+    objc_stub::frame(_outputDeviceAssetView);
+    objc_stub::setFrame_(_outputDeviceAssetView,dVar6 + dVar4 * -0.5,param_2,param_3,param_4);
+    uVar3 = _objc_alloc_init(PTR_SliderGlyphView_00010790);
+    objc_stub::setBellGlyphView_(param_5,uVar3);
+    IVar1 = objc_stub::bellGlyphView(param_5);
+    objc_stub::setTranslatesAutoresizingMaskIntoConstraints_(IVar1,0);
+    IVar1 = _outputDeviceAssetView;
+    IVar2 = objc_stub::bellGlyphView(param_5);
+    objc_stub::addSubview_(IVar1,IVar2);
+    self = PTR__OBJC_CLASS___NSLayoutConstraint_00010798;
+    IVar1 = objc_stub::bellGlyphView(param_5);
+    IVar1 = objc_stub::centerXAnchor(IVar1);
+    IVar2 = objc_stub::centerXAnchor(_outputDeviceAssetView);
+    local_b0 = objc_stub::constraintEqualToAnchor_(IVar1,IVar2);
+    IVar1 = objc_stub::bellGlyphView(param_5);
+    IVar1 = objc_stub::centerYAnchor(IVar1);
+    IVar2 = objc_stub::centerYAnchor(_outputDeviceAssetView);
+    local_a8 = objc_stub::constraintEqualToAnchor_(IVar1,IVar2);
+    IVar1 = objc_stub::bellGlyphView(param_5);
+    IVar1 = objc_stub::widthAnchor(IVar1);
+    IVar2 = objc_stub::widthAnchor(_outputDeviceAssetView);
+    local_a0 = objc_stub::constraintEqualToAnchor_(IVar1,IVar2);
+    IVar1 = objc_stub::bellGlyphView(param_5);
+    IVar1 = objc_stub::heightAnchor(IVar1);
+    IVar2 = objc_stub::widthAnchor(_outputDeviceAssetView);
+    local_98 = objc_stub::constraintEqualToAnchor_(IVar1,IVar2);
+    IVar1 = NSArray::arrayWithObjects_count_((ID)PTR__OBJC_CLASS___NSArray_000107a0,&local_b0,4);
+    NSLayoutConstraint::activateConstraints_((ID)self,IVar1);
+    IVar1 = objc_stub::view(param_5);
+    objc_stub::addSubview_(IVar1,_outputDeviceAssetView);
+  }
+  else {
+    IVar1 = UIDevice::currentDevice((ID)PTR__OBJC_CLASS___UIDevice_000107a8);
+    IVar1 = UIDevice::orientation(IVar1);
+    if (IVar1 == 1) {
+      objc_stub::frame(_outputDeviceAssetView);
+      dVar6 = dVar5;
+      objc_stub::frame(_primaryAssetView);
+      if (dVar5 != dVar6) {
+        objc_stub::frame(_outputDeviceAssetView);
+        objc_stub::frame(_primaryAssetView);
+        objc_stub::setFrame_(_outputDeviceAssetView,extraout_d0,uVar3,dVar4);
+      }
+    }
+  }
+  if (*(long *)PTR____stack_chk_guard_0000c180 == local_90) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail(0);
+}
+
+
+========== FUN_0000651c  @ 0000651c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_0000651c(undefined8 param_1)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  
+  (*DAT_00010968)();
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  NSNotificationCenter::addObserver_selector_name_object_
+            (self,param_1,PTR_s_muteStateChanged_00010570,&cf_com_yan_ring_muteStateChanged,0);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x658c);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== FUN_00006590  @ 00006590 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8
+FUN_00006590(undefined1 param_1 [16],undefined8 param_2,double param_3,double param_4,ID param_5)
+
+{
+  undefined1 auVar1 [32];
+  char cVar2;
+  ID IVar3;
+  ID IVar4;
+  ID IVar5;
+  undefined8 extraout_d0;
+  double dVar6;
+  double extraout_d0_00;
+  double extraout_d0_01;
+  double extraout_d0_02;
+  undefined8 extraout_d0_03;
+  double extraout_d0_04;
+  double extraout_d0_05;
+  undefined8 extraout_d0_06;
+  undefined8 extraout_d0_07;
+  double dVar7;
+  undefined8 extraout_d0_08;
+  double dVar8;
+  undefined8 extraout_d0_09;
+  double dVar9;
+  double extraout_d0_10;
+  double dVar10;
+  double dVar11;
+  double dVar12;
+  double dVar13;
+  double dVar14;
+  CGRect CVar15;
+  undefined *local_128;
+  undefined8 local_120;
+  code *local_118;
+  undefined *puStack_110;
+  ID local_108;
+  float local_fc;
+  undefined *local_f8;
+  undefined8 local_f0;
+  code *local_e8;
+  undefined *puStack_e0;
+  ID local_d8;
+  undefined *local_d0;
+  undefined8 local_c8;
+  code *local_c0;
+  undefined *puStack_b8;
+  ID local_b0;
+  
+  (*DAT_00010970)();
+  IVar3 = objc_stub::view(param_5);
+  IVar4 = objc_stub::isExpanded(IVar3);
+  if ((IVar4 & 1) == 0) {
+    local_d0 = PTR___NSConcreteStackBlock_0000c168;
+    local_c8 = DAT_0000ad60;
+    local_c0 = FUN_00007688;
+    puStack_b8 = &DAT_0000c210;
+    local_b0 = param_5;
+    UIView::animateWithDuration_animations_
+              ((ID)PTR__OBJC_CLASS___UIView_000107b0,DAT_0000ad68,&local_d0);
+    return 0;
+  }
+  local_f8 = PTR___NSConcreteStackBlock_0000c168;
+  local_f0 = DAT_0000ad58;
+  local_e8 = FUN_000076fc;
+  puStack_e0 = &DAT_0000c230;
+  local_d8 = IVar3;
+  if (DAT_000109a0 != -1) {
+    _dispatch_once(&DAT_000109a0,&local_f8);
+  }
+  objc_stub::frame(IVar3);
+  dVar12 = param_4;
+  IVar4 = objc_stub::primarySlider(IVar3);
+  objc_stub::frame(IVar4);
+  dVar11 = DAT_000109b8;
+  IVar4 = objc_stub::primarySlider(IVar3);
+  objc_stub::setFrame_(IVar4,dVar11,param_2,param_3,dVar12);
+  IVar4 = objc_stub::secondarySlider(IVar3);
+  dVar6 = param_3;
+  dVar10 = dVar12;
+  objc_stub::setFrame_(IVar4,dVar11,param_2,param_3,dVar12);
+  IVar4 = objc_stub::primarySlider(IVar3);
+  IVar5 = objc_stub::primarySlider(IVar3);
+  objc_stub::bounds(IVar5);
+  IVar5 = objc_stub::view(param_5);
+  IVar5 = objc_stub::superview(IVar5);
+  IVar5 = objc_stub::superview(IVar5);
+  objc_stub::convertRect_toView_(IVar4,extraout_d0,param_2,dVar6,dVar10,IVar5);
+  dVar6 = (double)_CGRectGetMinX();
+  dVar11 = 0.5;
+  dVar10 = DAT_000109b0 * 0.5;
+  _middleXForNormalVolume = dVar6 + dVar10;
+  if (DAT_00010990 != '\0') {
+    IVar4 = objc_stub::volumeLabel(param_5);
+    if (IVar4 == 0) {
+      IVar4 = _objc_alloc(PTR_VolumeLabel_000107b8);
+      dVar10 = dVar12 * 0.5;
+      auVar1._16_8_ = dVar10;
+      auVar1._8_8_ = param_3;
+      auVar1._0_8_ = dVar10;
+      auVar1._24_8_ = 0;
+      IVar4 = VolumeLabel::initWithFrame_(IVar4,(CGRect)(auVar1 << 0x40));
+      objc_stub::setVolumeLabel_(param_5,IVar4);
+      objc_stub::updateVolumeLabel(param_5);
+      IVar4 = objc_stub::primarySlider(IVar3);
+      IVar5 = objc_stub::volumeLabel(param_5);
+      objc_stub::addSubview_(IVar4,IVar5);
+      dVar11 = param_3;
+    }
+    IVar4 = objc_stub::volumeLabel(param_5);
+    objc_stub::setAlpha_(IVar4,0x3ff0000000000000);
+  }
+  IVar4 = objc_stub::ringerSlider(param_5);
+  if (IVar4 == 0) {
+    IVar3 = objc_stub::primarySlider(IVar3);
+    objc_stub::continuousSliderCornerRadius(IVar3);
+    cVar2 = DAT_00010919;
+    IVar3 = _objc_alloc(PTR_MediaControlsVolumeRingerSliderView_000107c0);
+    CVar15.field0_0x0.field0_0x0 = DAT_000109b8 + DAT_000109b8 + DAT_000109b0;
+    dVar6 = 0.0625;
+    if (cVar2 != '\0') {
+      dVar6 = 0.0;
+    }
+    CVar15.field0_0x0.field1_0x8 = 0.0;
+    CVar15.field1_0x10.field1_0x8 = param_4;
+    CVar15.field1_0x10.field0_0x0 = DAT_000109b0;
+    dVar10 = 0.0;
+    dVar11 = DAT_000109b0;
+    IVar3 = MediaControlsVolumeRingerSliderView::initWithFrame_minimumValue_cornerRadius_
+                      (IVar3,CVar15,dVar6,extraout_d0_00);
+    objc_stub::setRingerSlider_(param_5,IVar3);
+    if (DAT_00010991 != '\0') {
+      IVar3 = objc_stub::ringerSlider(param_5);
+      objc_stub::setupPercentageLabel(IVar3);
+    }
+    IVar3 = objc_stub::view(param_5);
+    IVar4 = objc_stub::ringerSlider(param_5);
+    objc_stub::addSubview_(IVar3,IVar4);
+  }
+  cVar2 = _isMuted;
+  if (DAT_00010919 == '\0') {
+    IVar3 = objc_stub::ringerSlider(param_5);
+    if (cVar2 == '\0') {
+      objc_stub::alpha(IVar3);
+      if (extraout_d0_05 != 1.0) {
+        IVar3 = objc_stub::ringerSlider(param_5);
+        objc_stub::setEnabled(IVar3);
+      }
+    }
+    else {
+      objc_stub::setDisabled(IVar3);
+    }
+    if (DAT_000109c0 == 0) {
+      DAT_000109c0 = _objc_getClass("AVSystemController");
+    }
+    IVar3 = _objc_retainAutorelease();
+    IVar3 = objc_stub::sharedAVSystemController(IVar3);
+    objc_stub::getVolume_forCategory_(IVar3,&local_fc,&cf_Ringtone);
+LAB_00006c50:
+    dVar6 = (double)local_fc;
+    IVar3 = objc_stub::ringerSlider(param_5);
+LAB_00006c78:
+    objc_stub::setCurrentValue_(IVar3,dVar6);
+  }
+  else if (_isMuted == '\0') {
+LAB_00006a9c:
+    IVar3 = objc_stub::ringerSlider(param_5);
+    objc_stub::currentValue(IVar3);
+    if (extraout_d0_02 == 0.0) {
+      IVar3 = objc_stub::ringerSlider(param_5);
+      objc_stub::fallbackValue(IVar3);
+      IVar3 = objc_stub::ringerSlider(param_5);
+      objc_stub::setCurrentValue_(IVar3,extraout_d0_03);
+    }
+    else {
+LAB_00006b0c:
+      if (DAT_000109c0 == 0) {
+        DAT_000109c0 = _objc_getClass("AVSystemController");
+      }
+      IVar3 = _objc_retainAutorelease();
+      IVar3 = objc_stub::sharedAVSystemController(IVar3);
+      objc_stub::getVolume_forCategory_(IVar3,&local_fc,&cf_Ringtone);
+      dVar10 = 5.09776332595173e-315;
+      if (local_fc <= 0.0625) {
+        IVar3 = objc_stub::ringerSlider(param_5);
+        objc_stub::currentValue(IVar3);
+        if (extraout_d0_04 == 0.0) goto LAB_000070cc;
+        IVar3 = objc_stub::ringerSlider(param_5);
+        objc_stub::setIsMuted_(IVar3,1);
+        IVar3 = objc_stub::ringerSlider(param_5);
+        dVar6 = 0.0;
+        goto LAB_00006c78;
+      }
+LAB_000070cc:
+      dVar10 = 5.09776332595173e-315;
+      if (0.0625 < local_fc) {
+        IVar3 = objc_stub::ringerSlider(param_5);
+        objc_stub::setIsMuted_(IVar3,0);
+        goto LAB_00006c50;
+      }
+    }
+  }
+  else {
+    IVar3 = objc_stub::ringerSlider(param_5);
+    objc_stub::currentValue(IVar3);
+    if (extraout_d0_01 == 0.0) {
+      if (_isMuted == '\0') goto LAB_00006a9c;
+      goto LAB_00006b0c;
+    }
+    IVar3 = objc_stub::ringerSlider(param_5);
+    objc_stub::setMuted(IVar3);
+  }
+  IVar3 = objc_stub::ringerSlider(param_5);
+  objc_stub::frame(IVar3);
+  IVar3 = objc_stub::ringerSlider(param_5);
+  objc_stub::setFrame_(IVar3,extraout_d0_06,dVar10,dVar11,param_4);
+  IVar3 = objc_stub::ringerSlider(param_5);
+  IVar4 = objc_stub::ringerSlider(param_5);
+  objc_stub::bounds(IVar4);
+  IVar4 = objc_stub::view(param_5);
+  IVar4 = objc_stub::superview(IVar4);
+  IVar4 = objc_stub::superview(IVar4);
+  objc_stub::convertRect_toView_(IVar3,extraout_d0_07,dVar10,dVar11,param_4,IVar4);
+  dVar6 = (double)_CGRectGetMinX();
+  _middleXForRingerVolume = dVar6 + DAT_000109b0 * 0.5;
+  objc_stub::frame(_outputDeviceAssetView);
+  dVar6 = _middleXForRingerVolume;
+  dVar12 = dVar11;
+  dVar13 = param_4;
+  objc_stub::frame(_outputDeviceAssetView);
+  dVar7 = dVar12 * 0.5;
+  IVar3 = UIDevice::currentDevice((ID)PTR__OBJC_CLASS___UIDevice_000107a8);
+  IVar3 = UIDevice::orientation(IVar3);
+  if (IVar3 != 3) {
+    IVar3 = UIDevice::currentDevice((ID)PTR__OBJC_CLASS___UIDevice_000107a8);
+    IVar3 = UIDevice::orientation(IVar3);
+    if (IVar3 != 4) {
+      objc_stub::frame(_primaryAssetView);
+      goto LAB_00006fe0;
+    }
+  }
+  IVar3 = objc_stub::ringerSlider(param_5);
+  IVar4 = objc_stub::ringerSlider(param_5);
+  objc_stub::bounds(IVar4);
+  IVar4 = objc_stub::view(param_5);
+  IVar4 = objc_stub::superview(IVar4);
+  IVar4 = objc_stub::superview(IVar4);
+  objc_stub::convertRect_toView_(IVar3,extraout_d0_08,dVar10,dVar12,dVar13,IVar4);
+  dVar8 = (double)_CGRectGetMinY();
+  IVar3 = objc_stub::ringerSlider(param_5);
+  objc_stub::frame(IVar3);
+  dVar10 = dVar13 * 0.5;
+  objc_stub::frame(_outputDeviceAssetView);
+  dVar10 = (dVar8 + dVar10) - dVar13 * 0.5;
+  objc_stub::frame(_primaryAssetView);
+  dVar14 = dVar13;
+  IVar3 = objc_stub::ringerSlider(param_5);
+  objc_stub::frame(IVar3);
+  dVar9 = dVar14 * 0.5;
+  objc_stub::frame(_primaryAssetView);
+  objc_stub::setFrame_
+            (_primaryAssetView,extraout_d0_09,dVar8 + dVar9 + dVar14 * -0.25,dVar12,dVar13);
+LAB_00006fe0:
+  objc_stub::setFrame_(_outputDeviceAssetView,dVar6 - dVar7,dVar10,dVar11,param_4);
+  IVar3 = objc_stub::ringerSlider(param_5);
+  objc_stub::alpha(IVar3);
+  if (extraout_d0_10 != 1.0) {
+    local_128 = PTR___NSConcreteStackBlock_0000c168;
+    local_120 = DAT_0000ad60;
+    local_118 = FUN_00007780;
+    puStack_110 = &DAT_0000c210;
+    local_108 = param_5;
+    UIView::animateWithDuration_animations_
+              ((ID)PTR__OBJC_CLASS___UIView_000107b0,DAT_0000ad68,&local_128);
+  }
+  return 0;
+}
+
+
+========== FUN_00007110  @ 00007110 ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00007110(undefined8 param_1,undefined8 param_2,undefined8 param_3,ID param_4)
+
+{
+  code *pcVar1;
+  ID IVar2;
+  undefined8 uVar3;
+  ulong uVar4;
+  ulong unaff_x30;
+  
+  IVar2 = objc_stub::view(param_4);
+  uVar3 = _objc_opt_class(PTR_MediaControlsVolumeRingerSliderView_000107c0);
+  uVar4 = _objc_opt_isKindOfClass(IVar2,uVar3);
+  if ((uVar4 & 1) == 0) {
+    (*DAT_00010978)(param_1,param_2,param_3,param_4);
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x71cc);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== FUN_000071d0  @ 000071d0 ==========
+
+void FUN_000071d0(ID param_1)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  (*DAT_00010980)();
+  if (DAT_00010990 == '\0') {
+    return;
+  }
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7218);
+    (*pcVar1)();
+  }
+  objc_stub::updateVolumeLabel(param_1);
+  return;
+}
+
+
+========== FUN_00007228  @ 00007228 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_00007228(undefined8 param_1)
+
+{
+  undefined *puVar1;
+  ID IVar2;
+  undefined *local_50;
+  undefined8 local_48;
+  code *local_40;
+  undefined *puStack_38;
+  undefined8 local_30;
+  undefined4 local_28;
+  undefined4 local_24;
+  
+  if (DAT_000109c0 == 0) {
+    DAT_000109c0 = _objc_getClass("AVSystemController");
+  }
+  IVar2 = _objc_retainAutorelease();
+  IVar2 = objc_stub::sharedAVSystemController(IVar2);
+  objc_stub::getVolume_forCategory_(IVar2,&local_24,&cf_Audio_Video);
+  puVar1 = PTR___dispatch_main_q_0000c188;
+  _objc_retainAutorelease(PTR___dispatch_main_q_0000c188);
+  local_50 = PTR___NSConcreteStackBlock_0000c168;
+  local_48 = DAT_0000ad60;
+  local_40 = FUN_000077cc;
+  puStack_38 = &DAT_0000c260;
+  local_28 = local_24;
+  local_30 = param_1;
+  _dispatch_async(puVar1,&local_50);
+  return;
+}
+
+
+========== FUN_00007304  @ 00007304 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00007304(ID param_1)
+
+{
+  char cVar1;
+  code *pcVar2;
+  ID IVar3;
+  ulong unaff_x30;
+  double extraout_d0;
+  double extraout_d0_00;
+  double extraout_d0_01;
+  undefined8 extraout_d0_02;
+  double extraout_d0_03;
+  
+  cVar1 = _isMuted;
+  if (DAT_00010919 == '\0') {
+    IVar3 = objc_stub::ringerSlider(param_1);
+    if (cVar1 == '\0') {
+      objc_stub::alpha(IVar3);
+      if (extraout_d0_03 == 1.0) {
+        return 0;
+      }
+      IVar3 = objc_stub::ringerSlider(param_1);
+      objc_stub::setEnabled(IVar3);
+    }
+    else {
+      objc_stub::setDisabled(IVar3);
+    }
+  }
+  else {
+    if (_isMuted != '\0') {
+      IVar3 = objc_stub::ringerSlider(param_1);
+      objc_stub::currentValue(IVar3);
+      if (extraout_d0 != 0.0) {
+        IVar3 = objc_stub::ringerSlider(param_1);
+        objc_stub::setMuted(IVar3);
+        goto LAB_000074a4;
+      }
+      if (_isMuted != '\0') {
+        return 0;
+      }
+    }
+    IVar3 = objc_stub::ringerSlider(param_1);
+    objc_stub::currentValue(IVar3);
+    if (extraout_d0_00 != 0.0) {
+      return 0;
+    }
+    IVar3 = objc_stub::ringerSlider(param_1);
+    objc_stub::fallbackValue(IVar3);
+    if (extraout_d0_01 == 0.0) {
+      IVar3 = objc_stub::ringerSlider(param_1);
+      objc_stub::setFallbackValue_(IVar3,0x3fb0000000000000);
+    }
+    IVar3 = objc_stub::ringerSlider(param_1);
+    objc_stub::fallbackValue(IVar3);
+    IVar3 = objc_stub::ringerSlider(param_1);
+    objc_stub::setCurrentValue_(IVar3,extraout_d0_02);
+  }
+LAB_000074a4:
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) == 0) {
+    return 0;
+  }
+                    /* WARNING: Does not return */
+  pcVar2 = (code *)SoftwareBreakpoint(0xc471,0x74c8);
+  (*pcVar2)();
+}
+
+
+========== FUN_000074e0  @ 000074e0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000074e0(undefined8 param_1,undefined8 param_2,undefined1 param_3)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  
+  (*DAT_00010988)();
+  _isMuted = param_3;
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  NSNotificationCenter::postNotificationName_object_(self,&cf_com_yan_ring_muteStateChanged,0);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7554);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== FUN_00007558  @ 00007558 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_00007558(long param_1,ID param_2)
+
+{
+  code *pcVar1;
+  ID IVar2;
+  ID IVar3;
+  ulong unaff_x30;
+  
+  IVar2 = objc_stub::object(param_2);
+  IVar2 = objc_stub::boolValue(IVar2);
+  IVar3 = objc_stub::isRingerMuted(*(ID *)(param_1 + 0x20));
+  if ((uint)IVar2 == (uint)IVar3) {
+    return;
+  }
+  objc_stub::setRingerMuted_(*(ID *)(param_1 + 0x20),IVar2);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x75d4);
+    (*pcVar1)();
+  }
+  objc_stub::activateRingerHUDFromMuteSwitch_(*(ID *)(param_1 + 0x20),(ulong)((uint)IVar2 ^ 1));
+  return;
+}
+
+
+========== FUN_000075e8  @ 000075e8 ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+
+undefined8 FUN_000075e8(undefined8 param_1,long param_2)
+
+{
+  return *(undefined8 *)(param_2 + 0x20);
+}
+
+
+========== FUN_000075f0  @ 000075f0 ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000075f0(void)
+
+{
+  return 0;
+}
+
+
+========== FUN_000075f8  @ 000075f8 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_000075f8(long param_1,ID param_2)
+
+{
+  code *pcVar1;
+  ID IVar2;
+  ID IVar3;
+  ulong unaff_x30;
+  
+  IVar2 = objc_stub::object(param_2);
+  IVar2 = objc_stub::boolValue(IVar2);
+  IVar3 = objc_stub::isRingerMuted(*(ID *)(param_1 + 0x20));
+  if ((uint)IVar2 == (uint)IVar3) {
+    return;
+  }
+  objc_stub::setRingerMuted_(*(ID *)(param_1 + 0x20),IVar2);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7674);
+    (*pcVar1)();
+  }
+  objc_stub::activateRingerHUDFromMuteSwitch_(*(ID *)(param_1 + 0x20),(ulong)((uint)IVar2 ^ 1));
+  return;
+}
+
+
+========== FUN_00007688  @ 00007688 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00007688(long param_1)
+
+{
+  code *pcVar1;
+  ID IVar2;
+  ulong unaff_x30;
+  
+  IVar2 = objc_stub::ringerSlider(*(ID *)(param_1 + 0x20));
+  objc_stub::setAlpha_(IVar2,0);
+  IVar2 = objc_stub::volumeLabel(*(ID *)(param_1 + 0x20));
+  objc_stub::setAlpha_(IVar2,0);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x76f8);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== FUN_000076fc  @ 000076fc ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000076fc(undefined1 param_1 [16],undefined1 param_2 [16],double param_3,long param_4)
+
+{
+  ID self;
+  
+  objc_stub::bounds(*(ID *)(param_4 + 0x20));
+  DAT_000109a8 = (double)_CGRectGetWidth();
+  self = objc_stub::primarySlider(*(ID *)(param_4 + 0x20));
+  objc_stub::frame(self);
+  DAT_000109b0 = param_3;
+  DAT_000109b8 = (DAT_000109a8 - (param_3 + param_3)) / 3.0;
+  return 0;
+}
+
+
+========== FUN_00007780  @ 00007780 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00007780(long param_1)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  
+  self = objc_stub::ringerSlider(*(ID *)(param_1 + 0x20));
+  objc_stub::setAlpha_(self,0x3ff0000000000000);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x77c8);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== FUN_000077cc  @ 000077cc ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000077cc(long param_1)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  
+  self = objc_stub::volumeLabel(*(ID *)(param_1 + 0x20));
+  objc_stub::updateLabelWithVolume_(self,*(undefined4 *)(param_1 + 0x28));
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7818);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== initWithFrame:minimumValue:cornerRadius:  @ 0000781c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x40 bytes */
+
+ID MediaControlsVolumeRingerSliderView::initWithFrame_minimumValue_cornerRadius_
+             (ID param_1,SEL param_2,CGRect param_3,double param_4,double param_5)
+
+{
+  ID self;
+  ID IVar1;
+  undefined8 uVar2;
+  ID local_50;
+  undefined *puStack_48;
+  
+  puStack_48 = PTR_MediaControlsVolumeRingerSliderView_000107e8;
+  local_50 = param_1;
+  self = UIView::initWithFrame_
+                   ((ID)&local_50,PTR_s_initWithFrame__000104f0,param_3.field0_0x0.field0_0x0,
+                    param_3.field0_0x0.field1_0x8,param_3.field1_0x10.field0_0x0,
+                    param_3.field1_0x10.field1_0x8);
+  if (self != 0) {
+    IVar1 = UIColor::clearColor((ID)PTR__OBJC_CLASS___UIColor_000107c8);
+    UIView::setBackgroundColor_(self,IVar1);
+    uVar2 = *(undefined8 *)PTR__kCACornerCurveContinuous_0000c190;
+    IVar1 = UIView::layer(self);
+    UIView::setCornerCurve_(IVar1,uVar2);
+    if (param_5 == 0.0) {
+      param_5 = 42.0;
+    }
+    IVar1 = UIView::layer(self);
+    UIView::setCornerRadius_(IVar1,param_5);
+    UIView::setClipsToBounds_(self,1);
+    UIView::setMaximumValue_(self,0x3ff0000000000000);
+    UIView::setMinimumValue_(self,param_4);
+    UIView::createFillLayer(self);
+    UIView::createBackgroundView(self);
+    UIView::getVolumeFromController(self);
+  }
+  return self;
+}
+
+
+========== setupPercentageLabel  @ 0000794c ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::setupPercentageLabel(ID param_1,SEL param_2)
+
+{
+  undefined1 auVar1 [32];
+  code *pcVar2;
+  ID IVar3;
+  ulong unaff_x30;
+  undefined8 in_d2;
+  double in_d3;
+  double dVar4;
+  
+  IVar3 = _objc_alloc(PTR_VolumeLabel_000107b8);
+  objc_stub::bounds(param_1);
+  dVar4 = in_d3 * 0.5;
+  objc_stub::bounds(param_1);
+  objc_stub::bounds(param_1);
+  auVar1._16_8_ = in_d3 * 0.5;
+  auVar1._8_8_ = in_d2;
+  auVar1._0_8_ = dVar4;
+  auVar1._24_8_ = 0;
+  IVar3 = VolumeLabel::initWithFrame_(IVar3,(CGRect)(auVar1 << 0x40));
+  setVolumeLabel_(param_1,IVar3);
+  IVar3 = volumeLabel(param_1);
+  objc_stub::addSubview_(param_1,IVar3);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar2 = (code *)SoftwareBreakpoint(0xc471,0x7a10);
+    (*pcVar2)();
+  }
+  return;
+}
+
+
+========== updateLabel  @ 00007a14 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::updateLabel(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *local_48;
+  undefined8 local_40;
+  code *local_38;
+  undefined *puStack_30;
+  ID local_28;
+  
+  puVar1 = PTR___dispatch_main_q_0000c188;
+  _objc_retainAutorelease(PTR___dispatch_main_q_0000c188);
+  local_48 = PTR___NSConcreteStackBlock_0000c168;
+  local_40 = DAT_0000ad58;
+  local_38 = FUN_00007aa0;
+  puStack_30 = &DAT_0000c230;
+  local_28 = param_1;
+  _dispatch_async(puVar1,&local_48);
+  return;
+}
+
+
+========== FUN_00007aa0  @ 00007aa0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00007aa0(long param_1)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  undefined4 extraout_s0;
+  undefined4 extraout_var;
+  
+  self = objc_stub::volumeLabel(*(ID *)(param_1 + 0x20));
+  objc_stub::currentValue(*(ID *)(param_1 + 0x20));
+  objc_stub::updateLabelWithVolume_(self,(float)(double)CONCAT44(extraout_var,extraout_s0));
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7af8);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== createFillLayer  @ 00007afc ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::createFillLayer(ID param_1,SEL param_2)
+
+{
+  code *pcVar1;
+  int iVar2;
+  ID IVar3;
+  ID self;
+  ulong unaff_x30;
+  undefined8 extraout_d0;
+  undefined8 in_d1;
+  undefined8 in_d2;
+  undefined8 in_d3;
+  
+  iVar2 = FUN_000095c8(2,0x10,0,0);
+  if (iVar2 == 0) {
+    if (DAT_000109c8 == 0) {
+      DAT_000109c8 = _objc_getClass("MTMaterialView");
+    }
+    IVar3 = _objc_retainAutorelease();
+    IVar3 = objc_stub::materialViewWithRecipe_options_(IVar3,0,0);
+    setFillLayer_(param_1,IVar3);
+    in_d1 = DAT_0000ad70;
+    IVar3 = UIColor::colorWithWhite_alpha_
+                      ((ID)PTR__OBJC_CLASS___UIColor_000107c8,0x3ff0000000000000,DAT_0000ad70);
+    self = fillLayer(param_1);
+    objc_stub::setBackgroundColor_(self,IVar3);
+  }
+  else {
+    if (DAT_000109c8 == 0) {
+      DAT_000109c8 = _objc_getClass("MTMaterialView");
+    }
+    IVar3 = _objc_retainAutorelease();
+    IVar3 = objc_stub::materialViewWithRecipeNamed_(IVar3,&cf_moduleFill_highlight_generatedRecipe);
+    setFillLayer_(param_1,IVar3);
+  }
+  IVar3 = fillLayer(param_1);
+  objc_stub::setAutoresizingMask_(IVar3,0x12);
+  objc_stub::bounds(param_1);
+  IVar3 = fillLayer(param_1);
+  objc_stub::setFrame_(IVar3,extraout_d0,in_d1,in_d2,in_d3);
+  IVar3 = fillLayer(param_1);
+  objc_stub::addSubview_(param_1,IVar3);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7cd0);
+    (*pcVar1)();
+  }
+  updateFillLayer(param_1);
+  return;
+}
+
+
+========== createBackgroundView  @ 00007cd4 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::createBackgroundView(ID param_1,SEL param_2)
+
+{
+  code *pcVar1;
+  ID IVar2;
+  ulong unaff_x30;
+  undefined1 auVar3 [16];
+  
+  auVar3._8_8_ = param_2;
+  auVar3._0_8_ = DAT_000109c8;
+  if (DAT_000109c8 == 0) {
+    auVar3 = _objc_getClass("MTMaterialView");
+  }
+  DAT_000109c8 = auVar3._0_8_;
+  IVar2 = _objc_retainAutorelease(DAT_000109c8,auVar3._8_8_);
+  IVar2 = objc_stub::materialViewWithRecipe_options_(IVar2,4,0);
+  objc_stub::setAutoresizingMask_(IVar2,0x12);
+  objc_stub::bounds(param_1);
+  objc_stub::setFrame_(IVar2);
+  objc_stub::insertSubview_atIndex_(param_1,IVar2,0);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7d64);
+    (*pcVar1)();
+  }
+  return;
+}
+
+
+========== updateFillLayer  @ 00007d68 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::updateFillLayer(ID param_1,SEL param_2)
+
+{
+  double dVar1;
+  double in_d3;
+  undefined *local_78;
+  undefined8 local_70;
+  code *local_68;
+  undefined *puStack_60;
+  ID local_58;
+  undefined8 uStack_50;
+  double local_48;
+  double local_38;
+  
+  dVar1 = currentValue(param_1);
+  objc_stub::bounds(param_1);
+  dVar1 = dVar1 * in_d3;
+  objc_stub::bounds(param_1);
+  objc_stub::bounds(param_1);
+  local_78 = PTR___NSConcreteStackBlock_0000c168;
+  local_70 = DAT_0000ad58;
+  local_68 = FUN_00007e30;
+  puStack_60 = &DAT_0000c280;
+  uStack_50 = 0;
+  local_58 = param_1;
+  local_48 = in_d3 - dVar1;
+  local_38 = dVar1;
+  UIView::animateWithDuration_animations_
+            ((ID)PTR__OBJC_CLASS___UIView_000107b0,DAT_0000ad68,&local_78);
+  updateLabel(param_1);
+  return;
+}
+
+
+========== FUN_00007e30  @ 00007e30 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00007e30(long param_1)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  undefined8 uVar2;
+  undefined8 uVar3;
+  undefined8 uVar4;
+  undefined8 uVar5;
+  
+  uVar2 = *(undefined8 *)(param_1 + 0x28);
+  uVar3 = *(undefined8 *)(param_1 + 0x30);
+  uVar4 = *(undefined8 *)(param_1 + 0x38);
+  uVar5 = *(undefined8 *)(param_1 + 0x40);
+  self = objc_stub::fillLayer(*(ID *)(param_1 + 0x20));
+  objc_stub::setFrame_(self,uVar2,uVar3,uVar4,uVar5);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x7e9c);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== setCurrentValue:  @ 00007ea0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::setCurrentValue_(ID param_1,SEL param_2,double param_3)
+
+{
+  code *pcVar1;
+  bool bVar2;
+  bool bVar3;
+  ID IVar4;
+  cfstringStruct *pcVar5;
+  undefined **ppuVar6;
+  long lVar7;
+  ulong unaff_x30;
+  double dVar8;
+  double dVar9;
+  
+  lVar7 = (long)_currentValue;
+  dVar9 = *(double *)(param_1 + lVar7);
+  bVar2 = true;
+  if ((param_3 == 1.0) && (bVar2 = false, !NAN(dVar9) && !NAN(param_3))) {
+    bVar2 = dVar9 == param_3;
+  }
+  if (!bVar2) {
+    IVar4 = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788)
+    ;
+    NSNotificationCenter::postNotificationName_object_(IVar4,&cf_com_yan_ring_animate,0);
+  }
+  *(double *)(param_1 + lVar7) = param_3;
+  dVar8 = minimumValue(param_1);
+  if ((dVar8 == 0.0625) && (bVar3 = isMuted(param_1), (bVar3 & 1) == 0)) {
+    if (DAT_0000ad78 <= ABS(param_3 + -0.0625)) {
+      if ((param_3 <= 0.0625) || (0.0625 < dVar9)) goto LAB_000080a0;
+      IVar4 = NSNotificationCenter::defaultCenter
+                        ((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+      pcVar5 = &cf_com_yan_ring_toggle;
+      ppuVar6 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c608;
+      goto override_prt_8094_6e7d234f;
+    }
+code_r0x00008070:
+    IVar4 = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788)
+    ;
+    pcVar5 = &cf_com_yan_ring_toggle;
+    ppuVar6 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c5f0;
+  }
+  else {
+    dVar8 = minimumValue(param_1);
+    if (dVar8 != 0.0) goto LAB_000080a0;
+    if (ABS(param_3 + -0.0625) < DAT_0000ad78) goto code_r0x00008070;
+    if ((param_3 <= 0.0625) || (0.0625 < dVar9)) {
+      if ((param_3 < 0.0625) && (0.0625 <= dVar9)) goto code_r0x00008070;
+      if (param_3 != 0.0) goto LAB_000080a0;
+      IVar4 = NSNotificationCenter::defaultCenter
+                        ((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+      NSNotificationCenter::postNotificationName_object_
+                (IVar4,&cf_com_yan_ring_mute,PTR____kCFBooleanTrue_0000c178);
+      IVar4 = NSNotificationCenter::defaultCenter
+                        ((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+      pcVar5 = &cf_com_yan_ring_toggle;
+      ppuVar6 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c620;
+    }
+    else {
+      IVar4 = NSNotificationCenter::defaultCenter
+                        ((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+      NSNotificationCenter::postNotificationName_object_
+                (IVar4,&cf_com_yan_ring_toggle,&PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c608);
+      IVar4 = NSNotificationCenter::defaultCenter
+                        ((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+      pcVar5 = &cf_com_yan_ring_mute;
+      ppuVar6 = (undefined **)PTR____kCFBooleanFalse_0000c170;
+    }
+  }
+override_prt_8094_6e7d234f:
+  NSNotificationCenter::postNotificationName_object_(IVar4,pcVar5,ppuVar6);
+LAB_000080a0:
+  if (DAT_000109d0 == 0) {
+    DAT_000109d0 = _objc_getClass("AVSystemController");
+  }
+  IVar4 = _objc_retainAutorelease();
+  IVar4 = objc_stub::sharedAVSystemController(IVar4);
+  objc_stub::setVolumeTo_forCategory_(IVar4,(ulong)(uint)(float)param_3,&cf_Ringtone);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x8110);
+    (*pcVar1)();
+  }
+  updateFillLayer(param_1);
+  return;
+}
+
+
+========== touchesBegan:withEvent:  @ 00008178 ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void MediaControlsVolumeRingerSliderView::touchesBegan_withEvent_
+               (ID param_1,SEL param_2,ID param_3,ID param_4)
+
+{
+  ID self;
+  long lVar1;
+  undefined8 extraout_d0;
+  undefined8 in_d1;
+  ID local_40;
+  undefined *puStack_38;
+  
+  puStack_38 = PTR_MediaControlsVolumeRingerSliderView_000107e8;
+  local_40 = param_1;
+  UIView::touchesBegan_withEvent_
+            ((ID)&local_40,PTR_s_touchesBegan_withEvent__000106f8,param_3,param_4);
+  lVar1 = (long)startTouchLocation;
+  self = objc_stub::anyObject(param_3);
+  objc_stub::locationInView_(self,param_1);
+  *(undefined8 *)(param_1 + lVar1) = extraout_d0;
+  ((undefined8 *)(param_1 + lVar1))[1] = in_d1;
+  return;
+}
+
+
+========== touchesMoved:withEvent:  @ 00008220 ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x20 bytes */
+
+void MediaControlsVolumeRingerSliderView::touchesMoved_withEvent_
+               (ID param_1,SEL param_2,ID param_3,ID param_4)
+
+{
+  ID self;
+  double in_d1;
+  double dVar1;
+  ID local_50;
+  undefined *puStack_48;
+  
+  puStack_48 = PTR_MediaControlsVolumeRingerSliderView_000107e8;
+  local_50 = param_1;
+  UIView::touchesMoved_withEvent_
+            ((ID)&local_50,PTR_s_touchesMoved_withEvent__00010708,param_3,param_4);
+  self = objc_stub::anyObject(param_3);
+  objc_stub::locationInView_(self,param_1);
+  dVar1 = in_d1;
+  objc_stub::previousLocationInView_(self,param_1);
+  if (2.0 < ABS(in_d1 - dVar1)) {
+    updateCurrentValueWithDelta_(param_1,in_d1 - dVar1);
+  }
+  return;
+}
+
+
+========== touchesEnded:withEvent:  @ 000082ec ==========
+
+/* Function Stack Size: 0x20 bytes */
+
+void MediaControlsVolumeRingerSliderView::touchesEnded_withEvent_
+               (ID param_1,SEL param_2,ID param_3,ID param_4)
+
+{
+  double dVar1;
+  ID local_30;
+  undefined *puStack_28;
+  
+  puStack_28 = PTR_MediaControlsVolumeRingerSliderView_000107e8;
+  local_30 = param_1;
+  UIView::touchesEnded_withEvent_((ID)&local_30,PTR_s_touchesEnded_withEvent__00010700);
+  dVar1 = currentValue(param_1);
+  if (0.0625 < dVar1) {
+    dVar1 = currentValue(param_1);
+    setFallbackValue_(param_1,dVar1);
+  }
+  return;
+}
+
+
+========== updateCurrentValueWithDelta:  @ 00008358 ==========
+
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::updateCurrentValueWithDelta_
+               (ID param_1,SEL param_2,double param_3)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  double dVar2;
+  double dVar3;
+  double dVar4;
+  double in_d3;
+  
+  dVar2 = currentValue(param_1);
+  objc_stub::bounds(param_1);
+  dVar3 = minimumValue(param_1);
+  dVar4 = maximumValue(param_1);
+  dVar2 = clampedValue_withMinimum_andMaximum_(param_1,dVar2 - param_3 / in_d3,dVar3,dVar4);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x83d4);
+    (*pcVar1)();
+  }
+  setCurrentValue_(param_1,dVar2);
+  return;
+}
+
+
+========== clampedValue:withMinimum:andMaximum:  @ 000083d8 ==========
+
+/* Function Stack Size: 0x28 bytes */
+
+double MediaControlsVolumeRingerSliderView::clampedValue_withMinimum_andMaximum_
+                 (ID param_1,SEL param_2,double param_3,double param_4,double param_5)
+
+{
+  if (param_3 <= param_5) {
+    param_5 = param_3;
+  }
+  if (param_4 <= param_3) {
+    param_4 = param_5;
+  }
+  return param_4;
+}
+
+
+========== getVolumeFromController  @ 000083ec ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::getVolumeFromController(ID param_1,SEL param_2)
+
+{
+  ID IVar1;
+  undefined1 auVar2 [16];
+  float local_24;
+  
+  auVar2._8_8_ = param_2;
+  auVar2._0_8_ = DAT_000109d0;
+  if (DAT_000109d0 == 0) {
+    auVar2 = _objc_getClass("AVSystemController");
+  }
+  DAT_000109d0 = auVar2._0_8_;
+  IVar1 = _objc_retainAutorelease(DAT_000109d0,auVar2._8_8_);
+  IVar1 = objc_stub::sharedAVSystemController(IVar1);
+  objc_stub::getVolume_forCategory_(IVar1,&local_24,&cf_Ringtone);
+  setCurrentValue_(param_1,(double)local_24);
+  return;
+}
+
+
+========== setMuted  @ 0000846c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::setMuted(ID param_1,SEL param_2)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  double dVar2;
+  
+  dVar2 = currentValue(param_1);
+  if (dVar2 == 0.0) {
+    return;
+  }
+  dVar2 = currentValue(param_1);
+  setFallbackValue_(param_1,dVar2);
+  setCurrentValue_(param_1,0.0);
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  NSNotificationCenter::postNotificationName_object_
+            (self,&cf_com_yan_ring_toggle,&PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c620);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x84fc);
+    (*pcVar1)();
+  }
+  return;
+}
+
+
+========== setDisabled  @ 00008500 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::setDisabled(ID param_1,SEL param_2)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  
+  objc_stub::setAlpha_(param_1,DAT_0000ad80);
+  setIsMuted_(param_1,1);
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  NSNotificationCenter::postNotificationName_object_
+            (self,&cf_com_yan_ring_toggle,&PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c620);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x8574);
+    (*pcVar1)();
+  }
+  return;
+}
+
+
+========== setEnabled  @ 00008578 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::setEnabled(ID param_1,SEL param_2)
+
+{
+  code *pcVar1;
+  ID self;
+  ulong unaff_x30;
+  
+  objc_stub::setAlpha_(param_1,0x3ff0000000000000);
+  setIsMuted_(param_1,0);
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  NSNotificationCenter::postNotificationName_object_
+            (self,&cf_com_yan_ring_toggle,&PTR__OBJC_CLASS___NSConstantIntegerNumber_0000c608);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x85e8);
+    (*pcVar1)();
+  }
+  return;
+}
+
+
+========== fillLayer  @ 000085ec ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+ID MediaControlsVolumeRingerSliderView::fillLayer(ID param_1,SEL param_2)
+
+{
+  return *(ID *)(param_1 + (long)_fillLayer);
+}
+
+
+========== setFillLayer:  @ 000085fc ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::setFillLayer_(ID param_1,SEL param_2,ID param_3)
+
+{
+  *(ID *)(param_1 + (long)_fillLayer) = param_3;
+  return;
+}
+
+
+========== minimumValue  @ 00008610 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+double MediaControlsVolumeRingerSliderView::minimumValue(ID param_1,SEL param_2)
+
+{
+  return *(double *)(param_1 + (long)_minimumValue);
+}
+
+
+========== setMinimumValue:  @ 00008620 ==========
+
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::setMinimumValue_(ID param_1,SEL param_2,double param_3)
+
+{
+  *(double *)(param_1 + (long)_minimumValue) = param_3;
+  return;
+}
+
+
+========== maximumValue  @ 00008630 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+double MediaControlsVolumeRingerSliderView::maximumValue(ID param_1,SEL param_2)
+
+{
+  return *(double *)(param_1 + (long)_maximumValue);
+}
+
+
+========== setMaximumValue:  @ 00008640 ==========
+
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::setMaximumValue_(ID param_1,SEL param_2,double param_3)
+
+{
+  *(double *)(param_1 + (long)_maximumValue) = param_3;
+  return;
+}
+
+
+========== currentValue  @ 00008650 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+double MediaControlsVolumeRingerSliderView::currentValue(ID param_1,SEL param_2)
+
+{
+  return *(double *)(param_1 + (long)_currentValue);
+}
+
+
+========== fallbackValue  @ 00008660 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+double MediaControlsVolumeRingerSliderView::fallbackValue(ID param_1,SEL param_2)
+
+{
+  return *(double *)(param_1 + (long)_fallbackValue);
+}
+
+
+========== setFallbackValue:  @ 00008670 ==========
+
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::setFallbackValue_(ID param_1,SEL param_2,double param_3)
+
+{
+  *(double *)(param_1 + (long)_fallbackValue) = param_3;
+  return;
+}
+
+
+========== isMuted  @ 00008680 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+bool MediaControlsVolumeRingerSliderView::isMuted(ID param_1,SEL param_2)
+
+{
+  return (bool)*(byte *)(param_1 + (long)_isMuted);
+}
+
+
+========== setIsMuted:  @ 00008690 ==========
+
+/* Function Stack Size: 0x14 bytes */
+
+void MediaControlsVolumeRingerSliderView::setIsMuted_(ID param_1,SEL param_2,bool param_3)
+
+{
+  *(char *)(param_1 + (long)_isMuted) = (char)param_3;
+  return;
+}
+
+
+========== volumeLabel  @ 000086a0 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+ID MediaControlsVolumeRingerSliderView::volumeLabel(ID param_1,SEL param_2)
+
+{
+  return *(ID *)(param_1 + (long)_volumeLabel);
+}
+
+
+========== setVolumeLabel:  @ 000086b0 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void MediaControlsVolumeRingerSliderView::setVolumeLabel_(ID param_1,SEL param_2,ID param_3)
+
+{
+  *(ID *)(param_1 + (long)_volumeLabel) = param_3;
+  return;
+}
+
+
+========== .cxx_destruct  @ 000086c4 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void MediaControlsVolumeRingerSliderView::_cxx_destruct(ID param_1,SEL param_2)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  *(undefined8 *)(param_1 + (long)_volumeLabel) = 0;
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x8714);
+    (*pcVar1)();
+  }
+  *(undefined8 *)(param_1 + (long)_fillLayer) = 0;
+  return;
+}
+
+
+========== initWithFrame:  @ 00008718 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x30 bytes */
+
+ID VolumeLabel::initWithFrame_(ID param_1,SEL param_2,CGRect param_3)
+
+{
+  ID self;
+  ID IVar1;
+  ID local_30;
+  undefined *puStack_28;
+  
+  puStack_28 = PTR_VolumeLabel_000107f0;
+  local_30 = param_1;
+  self = UILabel::initWithFrame_
+                   ((ID)&local_30,PTR_s_initWithFrame__000104f0,param_3.field0_0x0.field0_0x0,
+                    param_3.field0_0x0.field1_0x8,param_3.field1_0x10.field0_0x0,
+                    param_3.field1_0x10.field1_0x8);
+  if (self != 0) {
+    IVar1 = UIFont::systemFontOfSize_weight_
+                      ((ID)PTR__OBJC_CLASS___UIFont_000107d0,0x4038000000000000,
+                       *(undefined8 *)PTR__UIFontWeightMedium_0000c160);
+    UILabel::setFont_(self,IVar1);
+    IVar1 = UIColor::whiteColor((ID)PTR__OBJC_CLASS___UIColor_000107c8);
+    UILabel::setTextColor_(self,IVar1);
+    UILabel::setTextAlignment_(self,1);
+    UILabel::setText_(self,&cf_0_);
+  }
+  return self;
+}
+
+
+========== updateLabelWithVolume:  @ 000087e8 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x14 bytes */
+
+void VolumeLabel::updateLabelWithVolume_(ID param_1,SEL param_2,float param_3)
+
+{
+  code *pcVar1;
+  ID IVar2;
+  ulong unaff_x30;
+  
+  IVar2 = NSString::stringWithFormat_((ID)PTR__OBJC_CLASS___NSString_00010778,&cf__d__);
+  objc_stub::setText_(param_1,IVar2);
+  if ((double)param_3 <= DAT_0000ad88) {
+    IVar2 = UIColor::whiteColor((ID)PTR__OBJC_CLASS___UIColor_000107c8);
+  }
+  else {
+    IVar2 = UIColor::blackColor((ID)PTR__OBJC_CLASS___UIColor_000107c8);
+  }
+  objc_stub::setTextColor_(param_1,IVar2);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x88bc);
+    (*pcVar1)();
+  }
+  return;
+}
+
+
+========== init  @ 000088c0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID SliderGlyphView::init(ID param_1,SEL param_2)
+
+{
+  undefined *self;
+  ID self_00;
+  ID IVar1;
+  ID IVar2;
+  ID local_a8;
+  undefined *puStack_a0;
+  ID local_98;
+  ID local_90;
+  ID local_88;
+  ID local_80;
+  long local_78;
+  
+  local_78 = *(long *)PTR____stack_chk_guard_0000c180;
+  puStack_a0 = PTR_SliderGlyphView_000107f8;
+  local_a8 = param_1;
+  self_00 = UIView::init((ID)&local_a8,PTR_s_init_000104e0);
+  if (self_00 != 0) {
+    IVar1 = UIColor::clearColor((ID)PTR__OBJC_CLASS___UIColor_000107c8);
+    UIView::setBackgroundColor_(self_00,IVar1);
+    IVar1 = UIImage::systemImageNamed_((ID)PTR__OBJC_CLASS___UIImage_000107d8,&cf_bell_fill);
+    IVar1 = UIImage::imageWithRenderingMode_(IVar1,2);
+    IVar2 = _objc_alloc(PTR__OBJC_CLASS___UIImageView_000107e0);
+    IVar1 = UIImageView::initWithImage_(IVar2,IVar1);
+    UIView::setGlyphImageView_(self_00,IVar1);
+    IVar1 = UIColor::whiteColor((ID)PTR__OBJC_CLASS___UIColor_000107c8);
+    IVar2 = UIView::glyphImageView(self_00);
+    UIView::setTintColor_(IVar2,IVar1);
+    IVar1 = UIView::glyphImageView(self_00);
+    UIView::setTranslatesAutoresizingMaskIntoConstraints_(IVar1,0);
+    IVar1 = UIView::glyphImageView(self_00);
+    UIView::addSubview_(self_00,IVar1);
+    self = PTR__OBJC_CLASS___NSLayoutConstraint_00010798;
+    IVar1 = UIView::glyphImageView(self_00);
+    IVar1 = UIView::widthAnchor(IVar1);
+    local_98 = UIView::constraintEqualToConstant_(IVar1,0x4041000000000000);
+    IVar1 = UIView::glyphImageView(self_00);
+    IVar1 = UIView::heightAnchor(IVar1);
+    local_90 = UIView::constraintEqualToConstant_(IVar1,0x4041000000000000);
+    IVar1 = UIView::glyphImageView(self_00);
+    IVar1 = UIView::centerXAnchor(IVar1);
+    IVar2 = UIView::centerXAnchor(self_00);
+    local_88 = UIView::constraintEqualToAnchor_(IVar1,IVar2);
+    IVar1 = UIView::glyphImageView(self_00);
+    IVar1 = UIView::centerYAnchor(IVar1);
+    IVar2 = UIView::centerYAnchor(self_00);
+    local_80 = UIView::constraintEqualToAnchor_(IVar1,IVar2);
+    IVar1 = NSArray::arrayWithObjects_count_((ID)PTR__OBJC_CLASS___NSArray_000107a0,&local_98,4);
+    NSLayoutConstraint::activateConstraints_((ID)self,IVar1);
+    IVar1 = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788)
+    ;
+    NSNotificationCenter::addObserver_selector_name_object_
+              (IVar1,self_00,PTR_s_changeBellIcon__00010400,&cf_com_yan_ring_toggle,0);
+    IVar1 = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788)
+    ;
+    NSNotificationCenter::addObserver_selector_name_object_
+              (IVar1,self_00,PTR_s_animateBellIcon_000103a8,&cf_com_yan_ring_animate,0);
+  }
+  if (*(long *)PTR____stack_chk_guard_0000c180 == local_78) {
+    return self_00;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail(0);
+}
+
+
+========== changeBellIcon:  @ 00008cd8 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void SliderGlyphView::changeBellIcon_(ID param_1,SEL param_2,ID param_3)
+
+{
+  undefined8 *puVar1;
+  undefined8 *puVar2;
+  undefined *puVar3;
+  ID IVar4;
+  undefined8 uVar5;
+  ID IVar6;
+  undefined *local_70;
+  undefined8 local_68;
+  code *local_60;
+  undefined *puStack_58;
+  ID local_50;
+  undefined8 local_48;
+  
+  IVar4 = objc_stub::object(param_3);
+  IVar4 = objc_stub::integerValue(IVar4);
+  if (DAT_000109f0 != -1) {
+    _dispatch_once(&DAT_000109f0,&PTR___NSConcreteGlobalBlock_0000c2d0);
+  }
+  puVar1 = &DAT_000109e0;
+  if (IVar4 != 1) {
+    puVar1 = &DAT_000109e8;
+  }
+  puVar2 = &DAT_000109d8;
+  if (IVar4 != 0) {
+    puVar2 = puVar1;
+  }
+  uVar5 = *puVar2;
+  IVar6 = glyphImageView(param_1);
+  IVar6 = objc_stub::image(IVar6);
+  IVar6 = objc_stub::isEqual_(IVar6,uVar5);
+  puVar3 = PTR___dispatch_main_q_0000c188;
+  if ((IVar6 & 1) == 0) {
+    _objc_retainAutorelease(PTR___dispatch_main_q_0000c188);
+    local_70 = PTR___NSConcreteStackBlock_0000c168;
+    local_68 = DAT_0000ad58;
+    local_60 = FUN_00008f14;
+    puStack_58 = &DAT_0000c2f0;
+    local_50 = param_1;
+    local_48 = uVar5;
+    _dispatch_async(puVar3,&local_70);
+    if ((IVar4 & 0xfffffffffffffffd) == 0) {
+      _AudioServicesPlaySystemSound(0x5ef);
+    }
+  }
+  return;
+}
+
+
+========== FUN_00008e64  @ 00008e64 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00008e64(void)
+
+{
+  undefined8 uVar1;
+  code *pcVar2;
+  ID IVar3;
+  ulong unaff_x30;
+  
+  IVar3 = UIImage::systemImageNamed_((ID)PTR__OBJC_CLASS___UIImage_000107d8,&cf_bell_fill);
+  uVar1 = DAT_000109d8;
+  DAT_000109d8 = IVar3;
+  IVar3 = UIImage::systemImageNamed_
+                    ((ID)PTR__OBJC_CLASS___UIImage_000107d8,uVar1,&cf_bell_badge_fill);
+  uVar1 = DAT_000109e0;
+  DAT_000109e0 = IVar3;
+  DAT_000109e8 = UIImage::systemImageNamed_
+                           ((ID)PTR__OBJC_CLASS___UIImage_000107d8,uVar1,&cf_bell_slash_fill);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar2 = (code *)SoftwareBreakpoint(0xc471,0x8f10);
+    (*pcVar2)();
+  }
+  return 0;
+}
+
+
+========== FUN_00008f14  @ 00008f14 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00008f14(long param_1)
+
+{
+  undefined *self;
+  ID IVar1;
+  undefined *local_60;
+  undefined8 local_58;
+  code *local_50;
+  undefined *puStack_48;
+  undefined8 local_40;
+  undefined8 local_38;
+  
+  self = PTR__OBJC_CLASS___UIView_000107b0;
+  IVar1 = objc_stub::glyphImageView(*(ID *)(param_1 + 0x20));
+  local_60 = PTR___NSConcreteStackBlock_0000c168;
+  local_58 = DAT_0000ad58;
+  local_50 = FUN_00008fe0;
+  puStack_48 = &DAT_0000c2f0;
+  local_40 = *(undefined8 *)(param_1 + 0x20);
+  local_38 = *(undefined8 *)(param_1 + 0x28);
+  UIView::transitionWithView_duration_options_animations_completion_
+            ((ID)self,0x3fe0000000000000,IVar1,0x500000,&local_60,0);
+  return 0;
+}
+
+
+========== FUN_00008fe0  @ 00008fe0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00008fe0(long param_1)
+
+{
+  undefined8 uVar1;
+  code *pcVar2;
+  ID self;
+  ulong unaff_x30;
+  
+  uVar1 = *(undefined8 *)(param_1 + 0x28);
+  self = objc_stub::glyphImageView(*(ID *)(param_1 + 0x20));
+  objc_stub::setImage_(self,uVar1);
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar2 = (code *)SoftwareBreakpoint(0xc471,0x9028);
+    (*pcVar2)();
+  }
+  return 0;
+}
+
+
+========== FUN_0000902c  @ 0000902c ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+
+undefined8 FUN_0000902c(undefined8 param_1,long param_2)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x9064);
+    (*pcVar1)();
+  }
+  return *(undefined8 *)(param_2 + 0x28);
+}
+
+
+========== FUN_00009068  @ 00009068 ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00009068(void)
+
+{
+  code *pcVar1;
+  ulong unaff_x30;
+  
+  if (((unaff_x30 ^ unaff_x30 << 1) >> 0x3e & 1) != 0) {
+                    /* WARNING: Does not return */
+    pcVar1 = (code *)SoftwareBreakpoint(0xc471,0x90a0);
+    (*pcVar1)();
+  }
+  return 0;
+}
+
+
+========== animateBellIcon  @ 000090a4 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void SliderGlyphView::animateBellIcon(ID param_1,SEL param_2)
+
+{
+  ID IVar1;
+  undefined *local_80;
+  undefined8 local_78;
+  code *local_70;
+  undefined *puStack_68;
+  ID local_60;
+  undefined8 uStack_58;
+  undefined *local_50;
+  undefined8 local_48;
+  code *local_40;
+  undefined *puStack_38;
+  ID local_30;
+  undefined8 uStack_28;
+  
+  IVar1 = glyphImageView(param_1);
+  if (IVar1 != 0) {
+    local_50 = PTR___NSConcreteStackBlock_0000c168;
+    local_48 = DAT_0000ad58;
+    local_40 = FUN_000091a0;
+    puStack_38 = &DAT_0000c320;
+    uStack_28 = 0x3fd921fb54442d18;
+    local_80 = PTR___NSConcreteStackBlock_0000c168;
+    local_78 = DAT_0000ad58;
+    local_70 = FUN_00009208;
+    puStack_68 = &DAT_0000c380;
+    uStack_58 = 0x3fd921fb54442d18;
+    local_60 = param_1;
+    local_30 = param_1;
+    UIView::animateWithDuration_animations_completion_
+              ((ID)PTR__OBJC_CLASS___UIView_000107b0,DAT_0000ad90,&local_50,&local_80);
+    _AudioServicesPlaySystemSound(0x5ef);
+  }
+  return;
+}
+
+
+========== FUN_000091a0  @ 000091a0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000091a0(long param_1)
+
+{
+  ID self;
+  undefined8 local_80;
+  undefined8 uStack_78;
+  undefined8 uStack_70;
+  undefined8 uStack_68;
+  undefined8 local_60;
+  undefined8 uStack_58;
+  undefined8 local_50;
+  undefined8 uStack_48;
+  undefined8 uStack_40;
+  undefined8 uStack_38;
+  undefined8 local_30;
+  undefined8 uStack_28;
+  
+  _CGAffineTransformMakeRotation(&local_50,*(undefined8 *)(param_1 + 0x28));
+  self = objc_stub::glyphImageView(*(ID *)(param_1 + 0x20));
+  uStack_78 = uStack_48;
+  local_80 = local_50;
+  uStack_68 = uStack_38;
+  uStack_70 = uStack_40;
+  uStack_58 = uStack_28;
+  local_60 = local_30;
+  objc_stub::setTransform_(self,&local_80);
+  return 0;
+}
+
+
+========== FUN_00009208  @ 00009208 ==========
+
+void FUN_00009208(long param_1)
+
+{
+  undefined *local_68;
+  undefined8 local_60;
+  code *local_58;
+  undefined *puStack_50;
+  undefined8 local_48;
+  undefined *local_40;
+  undefined8 local_38;
+  code *local_30;
+  undefined *puStack_28;
+  undefined8 local_20;
+  undefined8 local_18;
+  
+  local_40 = PTR___NSConcreteStackBlock_0000c168;
+  local_38 = DAT_0000ad58;
+  local_30 = FUN_000092d8;
+  puStack_28 = &DAT_0000c320;
+  local_48 = *(undefined8 *)(param_1 + 0x20);
+  local_18 = *(undefined8 *)(param_1 + 0x28);
+  local_68 = PTR___NSConcreteStackBlock_0000c168;
+  local_60 = DAT_0000ad58;
+  local_58 = FUN_00009344;
+  puStack_50 = &DAT_0000c350;
+  local_20 = local_48;
+  UIView::animateWithDuration_animations_completion_
+            ((ID)PTR__OBJC_CLASS___UIView_000107b0,DAT_0000ad90,&local_40,&local_68);
+  return;
+}
+
+
+========== FUN_000092d8  @ 000092d8 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000092d8(long param_1)
+
+{
+  ID self;
+  undefined8 local_80;
+  undefined8 uStack_78;
+  undefined8 uStack_70;
+  undefined8 uStack_68;
+  undefined8 local_60;
+  undefined8 uStack_58;
+  undefined8 local_50;
+  undefined8 uStack_48;
+  undefined8 uStack_40;
+  undefined8 uStack_38;
+  undefined8 local_30;
+  undefined8 uStack_28;
+  
+  _CGAffineTransformMakeRotation(&local_50,-*(double *)(param_1 + 0x28));
+  self = objc_stub::glyphImageView(*(ID *)(param_1 + 0x20));
+  uStack_78 = uStack_48;
+  local_80 = local_50;
+  uStack_68 = uStack_38;
+  uStack_70 = uStack_40;
+  uStack_58 = uStack_28;
+  local_60 = local_30;
+  objc_stub::setTransform_(self,&local_80);
+  return 0;
+}
+
+
+========== FUN_00009344  @ 00009344 ==========
+
+void FUN_00009344(long param_1)
+
+{
+  undefined *local_38;
+  undefined8 local_30;
+  code *local_28;
+  undefined *puStack_20;
+  undefined8 local_18;
+  
+  local_38 = PTR___NSConcreteStackBlock_0000c168;
+  local_30 = DAT_0000ad58;
+  local_28 = FUN_000093c8;
+  puStack_20 = &DAT_0000c230;
+  local_18 = *(undefined8 *)(param_1 + 0x20);
+  UIView::animateWithDuration_animations_
+            ((ID)PTR__OBJC_CLASS___UIView_000107b0,DAT_0000ad90,&local_38);
+  return;
+}
+
+
+========== FUN_000093c8  @ 000093c8 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000093c8(long param_1)
+
+{
+  ID self;
+  undefined8 local_50;
+  undefined8 uStack_48;
+  undefined8 uStack_40;
+  undefined8 uStack_38;
+  undefined8 local_30;
+  undefined8 uStack_28;
+  
+  self = objc_stub::glyphImageView(*(ID *)(param_1 + 0x20));
+  uStack_48 = *(undefined8 *)(PTR__CGAffineTransformIdentity_0000c158 + 8);
+  local_50 = *(undefined8 *)PTR__CGAffineTransformIdentity_0000c158;
+  uStack_38 = *(undefined8 *)(PTR__CGAffineTransformIdentity_0000c158 + 0x18);
+  uStack_40 = *(undefined8 *)(PTR__CGAffineTransformIdentity_0000c158 + 0x10);
+  uStack_28 = *(undefined8 *)(PTR__CGAffineTransformIdentity_0000c158 + 0x28);
+  local_30 = *(undefined8 *)(PTR__CGAffineTransformIdentity_0000c158 + 0x20);
+  objc_stub::setTransform_(self,&local_50);
+  return 0;
+}
+
+
+========== dealloc  @ 00009428 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void SliderGlyphView::dealloc(ID param_1,SEL param_2)
+
+{
+  ID self;
+  ID local_30;
+  undefined *puStack_28;
+  
+  self = NSNotificationCenter::defaultCenter((ID)PTR__OBJC_CLASS___NSNotificationCenter_00010788);
+  NSNotificationCenter::removeObserver_(self,param_1);
+  puStack_28 = PTR_SliderGlyphView_000107f8;
+  local_30 = param_1;
+  UIView::dealloc((ID)&local_30,PTR_s_dealloc_00010460);
+  return;
+}
+
+
+========== glyphImageView  @ 00009494 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+ID SliderGlyphView::glyphImageView(ID param_1,SEL param_2)
+
+{
+  return *(ID *)(param_1 + (long)_glyphImageView);
+}
+
+
+========== setGlyphImageView:  @ 000094a4 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void SliderGlyphView::setGlyphImageView_(ID param_1,SEL param_2,ID param_3)
+
+{
+  *(ID *)(param_1 + (long)_glyphImageView) = param_3;
+  return;
+}
+
+
+========== .cxx_destruct  @ 000094b8 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void SliderGlyphView::_cxx_destruct(ID param_1,SEL param_2)
+
+{
+  *(undefined8 *)(param_1 + (long)_glyphImageView) = 0;
+  return;
+}
+
+
+========== FUN_000094cc  @ 000094cc ==========
+
+bool FUN_000094cc(int param_1,int param_2,int param_3)
+
+{
+  int iVar1;
+  
+  if (DAT_00010a08 == -1) {
+    iVar1 = DAT_000109f8 - param_1;
+  }
+  else {
+    _dispatch_once_f(&DAT_00010a08,(void *)0x0,FUN_000095c0);
+    iVar1 = DAT_000109f8 - param_1;
+  }
+  if (param_1 < DAT_000109f8) {
+    return true;
+  }
+  if (iVar1 < 0 != SBORROW4(DAT_000109f8,param_1)) {
+    return false;
+  }
+  if (DAT_000109fc <= param_2) {
+    if (param_2 <= DAT_000109fc) {
+      return param_3 <= DAT_00010a00;
+    }
+    return false;
+  }
+  return true;
+}
+
+
+========== FUN_000095c0  @ 000095c0 ==========
+
+void FUN_000095c0(void)
+
+{
+  FUN_0000976c(1);
+  return;
+}
+
+
+========== FUN_000095c8  @ 000095c8 ==========
+
+void FUN_000095c8(undefined4 param_1,int param_2,uint param_3,uint param_4)
+
+{
+  int iVar1;
+  ulong uVar2;
+  long lVar3;
+  undefined4 local_40;
+  uint uStack_3c;
+  long local_38;
+  
+  local_38 = *(long *)PTR____stack_chk_guard_0000c180;
+  if (DAT_00010a10 != -1) {
+    _dispatch_once_f(&DAT_00010a10,(void *)0x0,FUN_00009764);
+  }
+  if (DAT_00010a18 != (code *)0x0) {
+    uStack_3c = param_2 << 0x10 | (param_3 & 0xff) << 8 | param_4 & 0xff;
+    local_40 = param_1;
+    uVar2 = (*DAT_00010a18)(1,&local_40);
+    if (*(long *)PTR____stack_chk_guard_0000c180 == local_38) {
+      return;
+    }
+    goto LAB_0000972c;
+  }
+  if (DAT_00010a08 == -1) {
+    iVar1 = DAT_000109f8 - param_2;
+  }
+  else {
+    _dispatch_once_f(&DAT_00010a08,(void *)0x0,FUN_000095c0);
+    iVar1 = DAT_000109f8 - param_2;
+  }
+  if (param_2 < DAT_000109f8) {
+LAB_000096b0:
+    uVar2 = 1;
+    lVar3 = *(long *)PTR____stack_chk_guard_0000c180;
+  }
+  else if (iVar1 < 0 == SBORROW4(DAT_000109f8,param_2)) {
+    if ((int)param_3 < DAT_000109fc) goto LAB_000096b0;
+    if (DAT_000109fc < (int)param_3) goto LAB_000096d4;
+    uVar2 = (ulong)((int)param_4 <= DAT_00010a00);
+    lVar3 = *(long *)PTR____stack_chk_guard_0000c180;
+  }
+  else {
+LAB_000096d4:
+    uVar2 = 0;
+    lVar3 = *(long *)PTR____stack_chk_guard_0000c180;
+  }
+  if (lVar3 == local_38) {
+    return;
+  }
+LAB_0000972c:
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail(uVar2);
+}
+
+
+========== FUN_00009764  @ 00009764 ==========
+
+void FUN_00009764(void)
+
+{
+  FUN_0000976c(0);
+  return;
+}
+
+
+========== FUN_0000976c  @ 0000976c ==========
+
+void FUN_0000976c(code *param_1)
+
+{
+  int iVar1;
+  uint uVar2;
+  undefined8 *puVar3;
+  code *pcVar4;
+  code *pcVar5;
+  code *pcVar6;
+  code *pcVar7;
+  code *pcVar8;
+  code *pcVar9;
+  code *pcVar10;
+  code *pcVar11;
+  code *pcVar12;
+  FILE *pFVar13;
+  size_t sVar14;
+  void *pvVar15;
+  size_t sVar16;
+  long lVar17;
+  long lVar18;
+  long lVar19;
+  long lVar20;
+  long lVar21;
+  undefined8 uVar23;
+  char acStack_88 [32];
+  long local_68;
+  code *pcVar22;
+  
+  local_68 = *(long *)PTR____stack_chk_guard_0000c180;
+  pcVar22 = param_1;
+  if ((DAT_00010a18 == (code *)0x0 || (int)param_1 != 0) &&
+     ((DAT_00010a18 = (code *)_dlsym(0xfffffffffffffffe,"_availability_version_check"),
+      DAT_00010a18 == (code *)0x0 || (pcVar22 = DAT_00010a18, (int)param_1 != 0)))) {
+    puVar3 = (undefined8 *)_dlsym(0xfffffffffffffffe,"kCFAllocatorNull");
+    pcVar22 = (code *)0x0;
+    if (puVar3 != (undefined8 *)0x0) {
+      uVar23 = *puVar3;
+      pcVar4 = (code *)_dlsym(0xfffffffffffffffe,"CFDataCreateWithBytesNoCopy");
+      pcVar22 = (code *)0x0;
+      if (pcVar4 != (code *)0x0) {
+        pcVar5 = (code *)_dlsym(0xfffffffffffffffe,"CFPropertyListCreateWithData");
+        pcVar6 = (code *)_dlsym(0xfffffffffffffffe,"CFPropertyListCreateFromXMLData");
+        pcVar22 = pcVar6;
+        if (pcVar5 != (code *)0x0 || pcVar6 != (code *)0x0) {
+          pcVar7 = (code *)_dlsym(0xfffffffffffffffe,"CFStringCreateWithCStringNoCopy");
+          pcVar22 = (code *)0x0;
+          if (pcVar7 != (code *)0x0) {
+            pcVar8 = (code *)_dlsym(0xfffffffffffffffe,"CFDictionaryGetValue");
+            pcVar22 = (code *)0x0;
+            if (pcVar8 != (code *)0x0) {
+              pcVar9 = (code *)_dlsym(0xfffffffffffffffe,"CFGetTypeID");
+              pcVar22 = (code *)0x0;
+              if (pcVar9 != (code *)0x0) {
+                pcVar10 = (code *)_dlsym(0xfffffffffffffffe,"CFStringGetTypeID");
+                pcVar22 = (code *)0x0;
+                if (pcVar10 != (code *)0x0) {
+                  pcVar11 = (code *)_dlsym(0xfffffffffffffffe,"CFStringGetCString");
+                  pcVar22 = (code *)0x0;
+                  if (pcVar11 != (code *)0x0) {
+                    pcVar12 = (code *)_dlsym(0xfffffffffffffffe,"CFRelease");
+                    pcVar22 = (code *)0x0;
+                    if (pcVar12 != (code *)0x0) {
+                      pFVar13 = _fopen("/System/Library/CoreServices/SystemVersion.plist","r");
+                      pcVar22 = (code *)0x0;
+                      if (pFVar13 != (FILE *)0x0) {
+                        _fseek(pFVar13,0,2);
+                        sVar14 = _ftell(pFVar13);
+                        if ((long)sVar14 < 0) {
+                          pvVar15 = (void *)0x0;
+                        }
+                        else {
+                          _rewind(pFVar13);
+                          pvVar15 = _malloc(sVar14);
+                          if (((pvVar15 != (void *)0x0) &&
+                              (sVar16 = _fread(pvVar15,1,sVar14,pFVar13), sVar16 == sVar14)) &&
+                             (lVar17 = (*pcVar4)(0,pvVar15,sVar14,uVar23), lVar17 != 0)) {
+                            if (pcVar5 == (code *)0x0) {
+                              lVar18 = (*pcVar6)(0,lVar17,0,0);
+                            }
+                            else {
+                              lVar18 = (*pcVar5)();
+                            }
+                            if (lVar18 != 0) {
+                              lVar19 = (*pcVar7)(0,"ProductVersion",0x600,uVar23);
+                              if (lVar19 != 0) {
+                                lVar20 = (*pcVar8)(lVar18,lVar19);
+                                (*pcVar12)(lVar19);
+                                if (lVar20 != 0) {
+                                  lVar19 = (*pcVar9)(lVar20);
+                                  lVar21 = (*pcVar10)();
+                                  if ((lVar19 == lVar21) &&
+                                     (iVar1 = (*pcVar11)(lVar20,acStack_88,0x20,0x8000100),
+                                     iVar1 != 0)) {
+                                    _sscanf(acStack_88,"%d.%d.%d");
+                                  }
+                                }
+                              }
+                              (*pcVar12)(lVar18);
+                            }
+                            (*pcVar12)(lVar17);
+                          }
+                        }
+                        _free(pvVar15);
+                        uVar2 = _fclose(pFVar13);
+                        pcVar22 = (code *)(ulong)uVar2;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (*(long *)PTR____stack_chk_guard_0000c180 == local_68) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail(pcVar22);
+}
+
+
+========== _AudioServicesPlaySystemSound  @ 00009aa0 ==========
+
+void _AudioServicesPlaySystemSound(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009aac. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__AudioServicesPlaySystemSound_0000c000)();
+  return;
+}
+
+
+========== _CGAffineTransformMakeRotation  @ 00009ab0 ==========
+
+void _CGAffineTransformMakeRotation(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009abc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__CGAffineTransformMakeRotation_0000c008)();
+  return;
+}
+
+
+========== _CGRectGetMinX  @ 00009ac0 ==========
+
+void _CGRectGetMinX(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009acc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__CGRectGetMinX_0000c010)();
+  return;
+}
+
+
+========== _CGRectGetMinY  @ 00009ad0 ==========
+
+void _CGRectGetMinY(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009adc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__CGRectGetMinY_0000c018)();
+  return;
+}
+
+
+========== _CGRectGetWidth  @ 00009ae0 ==========
+
+void _CGRectGetWidth(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009aec. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__CGRectGetWidth_0000c020)();
+  return;
+}
+
+
+========== _MSHookMessageEx  @ 00009af0 ==========
+
+void _MSHookMessageEx(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009afc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__MSHookMessageEx_0000c028)();
+  return;
+}
+
+
+========== ___stack_chk_fail  @ 00009b00 ==========
+
+void ___stack_chk_fail(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b0c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR____stack_chk_fail_0000c030)();
+  return;
+}
+
+
+========== _class_addMethod  @ 00009b10 ==========
+
+void _class_addMethod(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b1c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__class_addMethod_0000c038)();
+  return;
+}
+
+
+========== _class_addProperty  @ 00009b20 ==========
+
+void _class_addProperty(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b2c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__class_addProperty_0000c040)();
+  return;
+}
+
+
+========== _dispatch_async  @ 00009b30 ==========
+
+void _dispatch_async(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b3c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__dispatch_async_0000c048)();
+  return;
+}
+
+
+========== _dispatch_once  @ 00009b40 ==========
+
+void _dispatch_once(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b4c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__dispatch_once_0000c050)();
+  return;
+}
+
+
+========== _dispatch_once_f  @ 00009b50 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+void _dispatch_once_f(dispatch_once_t *predicate,void *context,dispatch_function_t function)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b5c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__dispatch_once_f_0000c058)();
+  return;
+}
+
+
+========== _dlopen  @ 00009b60 ==========
+
+void _dlopen(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b6c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__dlopen_0000c060)();
+  return;
+}
+
+
+========== _dlsym  @ 00009b70 ==========
+
+void _dlsym(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009b7c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__dlsym_0000c068)();
+  return;
+}
+
+
+========== _fclose  @ 00009b80 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+int _fclose(FILE *param_1)
+
+{
+  int iVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009b8c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  iVar1 = (*(code *)PTR__fclose_0000c070)((int)param_1);
+  return iVar1;
+}
+
+
+========== _fopen  @ 00009b90 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+FILE * _fopen(char *param_1,char *param_2)
+
+{
+  FILE *pFVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009b9c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  pFVar1 = (FILE *)(*(code *)PTR__fopen_0000c078)();
+  return pFVar1;
+}
+
+
+========== _fread  @ 00009ba0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+size_t _fread(void *param_1,size_t param_2,size_t param_3,FILE *param_4)
+
+{
+  size_t sVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009bac. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  sVar1 = (*(code *)PTR__fread_0000c080)();
+  return sVar1;
+}
+
+
+========== _free  @ 00009bb0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+void _free(void *param_1)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009bbc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__free_0000c088)();
+  return;
+}
+
+
+========== _fseek  @ 00009bc0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+int _fseek(FILE *param_1,long param_2,int param_3)
+
+{
+  int iVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009bcc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  iVar1 = (*(code *)PTR__fseek_0000c090)((int)param_1,param_2,param_3);
+  return iVar1;
+}
+
+
+========== _ftell  @ 00009bd0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+long _ftell(FILE *param_1)
+
+{
+  long lVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009bdc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  lVar1 = (*(code *)PTR__ftell_0000c098)();
+  return lVar1;
+}
+
+
+========== _malloc  @ 00009be0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+void * _malloc(size_t param_1)
+
+{
+  void *pvVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009bec. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  pvVar1 = (void *)(*(code *)PTR__malloc_0000c0a0)();
+  return pvVar1;
+}
+
+
+========== _objc_alloc  @ 00009bf0 ==========
+
+void _objc_alloc(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009bfc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_alloc_0000c0a8)();
+  return;
+}
+
+
+========== _objc_alloc_init  @ 00009c00 ==========
+
+void _objc_alloc_init(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c0c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_alloc_init_0000c0b0)();
+  return;
+}
+
+
+========== _objc_getAssociatedObject  @ 00009c10 ==========
+
+void _objc_getAssociatedObject(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c1c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_getAssociatedObject_0000c0b8)();
+  return;
+}
+
+
+========== _objc_getClass  @ 00009c20 ==========
+
+void _objc_getClass(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c2c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_getClass_0000c0c0)();
+  return;
+}
+
+
+========== _objc_msgSendSuper2  @ 00009c30 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+ID _objc_msgSendSuper2(objc_super *super,SEL op,...)
+
+{
+  ID IVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009c3c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  IVar1 = (*(code *)PTR__objc_msgSendSuper2_0000c0d0)();
+  return IVar1;
+}
+
+
+========== _objc_opt_class  @ 00009c40 ==========
+
+void _objc_opt_class(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c4c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_opt_class_0000c0d8)();
+  return;
+}
+
+
+========== _objc_opt_isKindOfClass  @ 00009c50 ==========
+
+void _objc_opt_isKindOfClass(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c5c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_opt_isKindOfClass_0000c0e0)();
+  return;
+}
+
+
+========== _objc_release  @ 00009c60 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_release(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c6c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_release_0000c0e8)();
+  return;
+}
+
+
+========== _objc_retain  @ 00009c70 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_retain(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c7c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retain_0000c0f0)();
+  return;
+}
+
+
+========== _objc_retainAutorelease  @ 00009c80 ==========
+
+void _objc_retainAutorelease(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c8c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retainAutorelease_0000c0f8)();
+  return;
+}
+
+
+========== _objc_retainAutoreleasedReturnValue  @ 00009c90 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_retainAutoreleasedReturnValue(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009c9c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retainAutoreleasedReturnValue_0000c100)();
+  return;
+}
+
+
+========== _objc_setAssociatedObject  @ 00009ca0 ==========
+
+void _objc_setAssociatedObject(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009cac. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_setAssociatedObject_0000c108)();
+  return;
+}
+
+
+========== _objc_storeStrong  @ 00009cb0 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_storeStrong(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009cbc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_storeStrong_0000c110)();
+  return;
+}
+
+
+========== _objc_unsafeClaimAutoreleasedReturnValue  @ 00009cc0 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_unsafeClaimAutoreleasedReturnValue(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009ccc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_unsafeClaimAutoreleasedReturnValue_0000c118)();
+  return;
+}
+
+
+========== _rewind  @ 00009cd0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+void _rewind(FILE *param_1)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x00009cdc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__rewind_0000c120)();
+  return;
+}
+
+
+========== _snprintf  @ 00009ce0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+int _snprintf(char *param_1,size_t param_2,char *param_3,...)
+
+{
+  int iVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009cec. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  iVar1 = (*(code *)PTR__snprintf_0000c128)((int)param_1);
+  return iVar1;
+}
+
+
+========== _sscanf  @ 00009cf0 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+int _sscanf(char *param_1,char *param_2,...)
+
+{
+  int iVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009cfc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  iVar1 = (*(code *)PTR__sscanf_0000c130)((int)param_1);
+  return iVar1;
+}
+
+
+========== _strlcat  @ 00009d00 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+size_t _strlcat(char *param_1,char *param_2,size_t param_3)
+
+{
+  size_t sVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009d0c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  sVar1 = (*(code *)PTR__strlcat_0000c138)();
+  return sVar1;
+}
+
+
+========== _strlcpy  @ 00009d10 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+size_t _strlcpy(char *param_1,char *param_2,size_t param_3)
+
+{
+  size_t sVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009d1c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  sVar1 = (*(code *)PTR__strlcpy_0000c140)();
+  return sVar1;
+}
+
+
+========== _strlen  @ 00009d20 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+size_t _strlen(char *param_1)
+
+{
+  size_t sVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009d2c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  sVar1 = (*(code *)PTR__strlen_0000c148)();
+  return sVar1;
+}
+
+
+========== _strncmp  @ 00009d30 ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+int _strncmp(char *param_1,char *param_2,size_t param_3)
+
+{
+  int iVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x00009d3c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  iVar1 = (*(code *)PTR__strncmp_0000c150)((int)param_1);
+  return iVar1;
+}
+
+
+========== activateConstraints:  @ 00009d40 ==========
+
+ID __objc_msgSend_stub objc_stub::activateConstraints_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_activateConstraints__00010378);
+  return IVar1;
+}
+
+
+========== activateRingerHUDFromMuteSwitch:  @ 00009d60 ==========
+
+ID __objc_msgSend_stub objc_stub::activateRingerHUDFromMuteSwitch_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_activateRingerHUDFromMuteSwitch__00010380);
+  return IVar1;
+}
+
+
+========== addObserver:selector:name:object:  @ 00009d80 ==========
+
+ID __objc_msgSend_stub objc_stub::addObserver_selector_name_object_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_addObserver_selector_name_object_00010388);
+  return IVar1;
+}
+
+
+========== addObserverForName:object:queue:usingBlock:  @ 00009da0 ==========
+
+ID __objc_msgSend_stub objc_stub::addObserverForName_object_queue_usingBlock_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_addObserverForName_object_queue__00010390);
+  return IVar1;
+}
+
+
+========== addSubview:  @ 00009dc0 ==========
+
+ID __objc_msgSend_stub objc_stub::addSubview_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_addSubview__00010398);
+  return IVar1;
+}
+
+
+========== alpha  @ 00009de0 ==========
+
+ID __objc_msgSend_stub objc_stub::alpha(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_alpha_000103a0);
+  return IVar1;
+}
+
+
+========== animateWithDuration:animations:  @ 00009e00 ==========
+
+ID __objc_msgSend_stub objc_stub::animateWithDuration_animations_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_animateWithDuration_animations__000103b0)
+  ;
+  return IVar1;
+}
+
+
+========== animateWithDuration:animations:completion:  @ 00009e20 ==========
+
+ID __objc_msgSend_stub objc_stub::animateWithDuration_animations_completion_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_animateWithDuration_animations_c_000103b8);
+  return IVar1;
+}
+
+
+========== anyObject  @ 00009e40 ==========
+
+ID __objc_msgSend_stub objc_stub::anyObject(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_anyObject_000103c0);
+  return IVar1;
+}
+
+
+========== arrayWithObjects:count:  @ 00009e60 ==========
+
+ID __objc_msgSend_stub objc_stub::arrayWithObjects_count_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_arrayWithObjects_count__000103c8);
+  return IVar1;
+}
+
+
+========== bellGlyphView  @ 00009e80 ==========
+
+ID __objc_msgSend_stub objc_stub::bellGlyphView(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_bellGlyphView_000103d0);
+  return IVar1;
+}
+
+
+========== blackColor  @ 00009ea0 ==========
+
+ID __objc_msgSend_stub objc_stub::blackColor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_blackColor_000103d8);
+  return IVar1;
+}
+
+
+========== boolValue  @ 00009ec0 ==========
+
+ID __objc_msgSend_stub objc_stub::boolValue(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_boolValue_000103e0);
+  return IVar1;
+}
+
+
+========== bounds  @ 00009ee0 ==========
+
+ID __objc_msgSend_stub objc_stub::bounds(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_bounds_000103e8);
+  return IVar1;
+}
+
+
+========== centerXAnchor  @ 00009f00 ==========
+
+ID __objc_msgSend_stub objc_stub::centerXAnchor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_centerXAnchor_000103f0);
+  return IVar1;
+}
+
+
+========== centerYAnchor  @ 00009f20 ==========
+
+ID __objc_msgSend_stub objc_stub::centerYAnchor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_centerYAnchor_000103f8);
+  return IVar1;
+}
+
+
+========== clampedValue:withMinimum:andMaximum:  @ 00009f40 ==========
+
+ID __objc_msgSend_stub objc_stub::clampedValue_withMinimum_andMaximum_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_clampedValue_withMinimum_andMaxi_00010408);
+  return IVar1;
+}
+
+
+========== clearColor  @ 00009f60 ==========
+
+ID __objc_msgSend_stub objc_stub::clearColor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_clearColor_00010410);
+  return IVar1;
+}
+
+
+========== colorWithWhite:alpha:  @ 00009f80 ==========
+
+ID __objc_msgSend_stub objc_stub::colorWithWhite_alpha_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_colorWithWhite_alpha__00010418);
+  return IVar1;
+}
+
+
+========== constraintEqualToAnchor:  @ 00009fa0 ==========
+
+ID __objc_msgSend_stub objc_stub::constraintEqualToAnchor_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_constraintEqualToAnchor__00010420);
+  return IVar1;
+}
+
+
+========== constraintEqualToConstant:  @ 00009fc0 ==========
+
+ID __objc_msgSend_stub objc_stub::constraintEqualToConstant_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_constraintEqualToConstant__00010428);
+  return IVar1;
+}
+
+
+========== continuousSliderCornerRadius  @ 00009fe0 ==========
+
+ID __objc_msgSend_stub objc_stub::continuousSliderCornerRadius(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_continuousSliderCornerRadius_00010430);
+  return IVar1;
+}
+
+
+========== convertRect:toView:  @ 0000a000 ==========
+
+ID __objc_msgSend_stub objc_stub::convertRect_toView_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_convertRect_toView__00010438);
+  return IVar1;
+}
+
+
+========== createBackgroundView  @ 0000a020 ==========
+
+ID __objc_msgSend_stub objc_stub::createBackgroundView(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_createBackgroundView_00010440);
+  return IVar1;
+}
+
+
+========== createFillLayer  @ 0000a040 ==========
+
+ID __objc_msgSend_stub objc_stub::createFillLayer(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_createFillLayer_00010448);
+  return IVar1;
+}
+
+
+========== currentDevice  @ 0000a060 ==========
+
+ID __objc_msgSend_stub objc_stub::currentDevice(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_currentDevice_00010450);
+  return IVar1;
+}
+
+
+========== currentValue  @ 0000a080 ==========
+
+ID __objc_msgSend_stub objc_stub::currentValue(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_currentValue_00010458);
+  return IVar1;
+}
+
+
+========== defaultCenter  @ 0000a0a0 ==========
+
+ID __objc_msgSend_stub objc_stub::defaultCenter(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_defaultCenter_00010468);
+  return IVar1;
+}
+
+
+========== defaultManager  @ 0000a0c0 ==========
+
+ID __objc_msgSend_stub objc_stub::defaultManager(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_defaultManager_00010470);
+  return IVar1;
+}
+
+
+========== dictionaryWithContentsOfFile:  @ 0000a0e0 ==========
+
+ID __objc_msgSend_stub objc_stub::dictionaryWithContentsOfFile_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_dictionaryWithContentsOfFile__00010478);
+  return IVar1;
+}
+
+
+========== fallbackValue  @ 0000a100 ==========
+
+ID __objc_msgSend_stub objc_stub::fallbackValue(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_fallbackValue_00010480);
+  return IVar1;
+}
+
+
+========== fileExistsAtPath:  @ 0000a120 ==========
+
+ID __objc_msgSend_stub objc_stub::fileExistsAtPath_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_fileExistsAtPath__00010488);
+  return IVar1;
+}
+
+
+========== fileSystemRepresentation  @ 0000a140 ==========
+
+ID __objc_msgSend_stub objc_stub::fileSystemRepresentation(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_fileSystemRepresentation_00010490);
+  return IVar1;
+}
+
+
+========== fillLayer  @ 0000a160 ==========
+
+ID __objc_msgSend_stub objc_stub::fillLayer(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_fillLayer_00010498);
+  return IVar1;
+}
+
+
+========== frame  @ 0000a180 ==========
+
+ID __objc_msgSend_stub objc_stub::frame(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_frame_000104a0);
+  return IVar1;
+}
+
+
+========== getVolume:forCategory:  @ 0000a1a0 ==========
+
+ID __objc_msgSend_stub objc_stub::getVolume_forCategory_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_getVolume_forCategory__000104b0);
+  return IVar1;
+}
+
+
+========== getVolumeFromController  @ 0000a1c0 ==========
+
+ID __objc_msgSend_stub objc_stub::getVolumeFromController(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_getVolumeFromController_000104b8);
+  return IVar1;
+}
+
+
+========== glyphImageView  @ 0000a1e0 ==========
+
+ID __objc_msgSend_stub objc_stub::glyphImageView(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_glyphImageView_000104c0);
+  return IVar1;
+}
+
+
+========== heightAnchor  @ 0000a200 ==========
+
+ID __objc_msgSend_stub objc_stub::heightAnchor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_heightAnchor_000104c8);
+  return IVar1;
+}
+
+
+========== image  @ 0000a220 ==========
+
+ID __objc_msgSend_stub objc_stub::image(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_image_000104d0);
+  return IVar1;
+}
+
+
+========== imageWithRenderingMode:  @ 0000a240 ==========
+
+ID __objc_msgSend_stub objc_stub::imageWithRenderingMode_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_imageWithRenderingMode__000104d8);
+  return IVar1;
+}
+
+
+========== initWithFrame:  @ 0000a260 ==========
+
+ID __objc_msgSend_stub objc_stub::initWithFrame_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_initWithFrame__000104f0);
+  return IVar1;
+}
+
+
+========== initWithFrame:minimumValue:cornerRadius:  @ 0000a280 ==========
+
+ID __objc_msgSend_stub objc_stub::initWithFrame_minimumValue_cornerRadius_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_initWithFrame_minimumValue_corne_000104f8);
+  return IVar1;
+}
+
+
+========== initWithImage:  @ 0000a2a0 ==========
+
+ID __objc_msgSend_stub objc_stub::initWithImage_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_initWithImage__00010508);
+  return IVar1;
+}
+
+
+========== insertSubview:atIndex:  @ 0000a2c0 ==========
+
+ID __objc_msgSend_stub objc_stub::insertSubview_atIndex_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_insertSubview_atIndex__00010510);
+  return IVar1;
+}
+
+
+========== integerValue  @ 0000a2e0 ==========
+
+ID __objc_msgSend_stub objc_stub::integerValue(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_integerValue_00010518);
+  return IVar1;
+}
+
+
+========== isEqual:  @ 0000a300 ==========
+
+ID __objc_msgSend_stub objc_stub::isEqual_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_isEqual__00010520);
+  return IVar1;
+}
+
+
+========== isExpanded  @ 0000a320 ==========
+
+ID __objc_msgSend_stub objc_stub::isExpanded(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_isExpanded_00010528);
+  return IVar1;
+}
+
+
+========== isMuted  @ 0000a340 ==========
+
+ID __objc_msgSend_stub objc_stub::isMuted(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_isMuted_00010530);
+  return IVar1;
+}
+
+
+========== isRingerMuted  @ 0000a360 ==========
+
+ID __objc_msgSend_stub objc_stub::isRingerMuted(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_isRingerMuted_00010538);
+  return IVar1;
+}
+
+
+========== layer  @ 0000a380 ==========
+
+ID __objc_msgSend_stub objc_stub::layer(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_layer_00010540);
+  return IVar1;
+}
+
+
+========== locationInView:  @ 0000a3a0 ==========
+
+ID __objc_msgSend_stub objc_stub::locationInView_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_locationInView__00010548);
+  return IVar1;
+}
+
+
+========== materialViewWithRecipe:options:  @ 0000a3c0 ==========
+
+ID __objc_msgSend_stub objc_stub::materialViewWithRecipe_options_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_materialViewWithRecipe_options__00010550)
+  ;
+  return IVar1;
+}
+
+
+========== materialViewWithRecipeNamed:  @ 0000a3e0 ==========
+
+ID __objc_msgSend_stub objc_stub::materialViewWithRecipeNamed_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_materialViewWithRecipeNamed__00010558);
+  return IVar1;
+}
+
+
+========== maximumValue  @ 0000a400 ==========
+
+ID __objc_msgSend_stub objc_stub::maximumValue(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_maximumValue_00010560);
+  return IVar1;
+}
+
+
+========== minimumValue  @ 0000a420 ==========
+
+ID __objc_msgSend_stub objc_stub::minimumValue(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_minimumValue_00010568);
+  return IVar1;
+}
+
+
+========== object  @ 0000a440 ==========
+
+ID __objc_msgSend_stub objc_stub::object(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_object_00010578);
+  return IVar1;
+}
+
+
+========== objectForKey:  @ 0000a460 ==========
+
+ID __objc_msgSend_stub objc_stub::objectForKey_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_objectForKey__00010580);
+  return IVar1;
+}
+
+
+========== orientation  @ 0000a480 ==========
+
+ID __objc_msgSend_stub objc_stub::orientation(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_orientation_00010588);
+  return IVar1;
+}
+
+
+========== postNotificationName:object:  @ 0000a4a0 ==========
+
+ID __objc_msgSend_stub objc_stub::postNotificationName_object_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_postNotificationName_object__00010590);
+  return IVar1;
+}
+
+
+========== previousLocationInView:  @ 0000a4c0 ==========
+
+ID __objc_msgSend_stub objc_stub::previousLocationInView_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_previousLocationInView__00010598);
+  return IVar1;
+}
+
+
+========== primaryAssetView  @ 0000a4e0 ==========
+
+ID __objc_msgSend_stub objc_stub::primaryAssetView(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_primaryAssetView_000105a0);
+  return IVar1;
+}
+
+
+========== primarySlider  @ 0000a500 ==========
+
+ID __objc_msgSend_stub objc_stub::primarySlider(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_primarySlider_000105a8);
+  return IVar1;
+}
+
+
+========== removeObserver:  @ 0000a520 ==========
+
+ID __objc_msgSend_stub objc_stub::removeObserver_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_removeObserver__000105b8);
+  return IVar1;
+}
+
+
+========== ringerSlider  @ 0000a540 ==========
+
+ID __objc_msgSend_stub objc_stub::ringerSlider(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_ringerSlider_000105c0);
+  return IVar1;
+}
+
+
+========== secondarySlider  @ 0000a560 ==========
+
+ID __objc_msgSend_stub objc_stub::secondarySlider(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_secondarySlider_000105c8);
+  return IVar1;
+}
+
+
+========== setAlpha:  @ 0000a580 ==========
+
+ID __objc_msgSend_stub objc_stub::setAlpha_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setAlpha__000105d0);
+  return IVar1;
+}
+
+
+========== setAutoresizingMask:  @ 0000a5a0 ==========
+
+ID __objc_msgSend_stub objc_stub::setAutoresizingMask_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setAutoresizingMask__000105d8);
+  return IVar1;
+}
+
+
+========== setBackgroundColor:  @ 0000a5c0 ==========
+
+ID __objc_msgSend_stub objc_stub::setBackgroundColor_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setBackgroundColor__000105e0);
+  return IVar1;
+}
+
+
+========== setBellGlyphView:  @ 0000a5e0 ==========
+
+ID __objc_msgSend_stub objc_stub::setBellGlyphView_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setBellGlyphView__000105e8);
+  return IVar1;
+}
+
+
+========== setClipsToBounds:  @ 0000a600 ==========
+
+ID __objc_msgSend_stub objc_stub::setClipsToBounds_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setClipsToBounds__000105f0);
+  return IVar1;
+}
+
+
+========== setCornerCurve:  @ 0000a620 ==========
+
+ID __objc_msgSend_stub objc_stub::setCornerCurve_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setCornerCurve__000105f8);
+  return IVar1;
+}
+
+
+========== setCornerRadius:  @ 0000a640 ==========
+
+ID __objc_msgSend_stub objc_stub::setCornerRadius_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setCornerRadius__00010600);
+  return IVar1;
+}
+
+
+========== setCurrentValue:  @ 0000a660 ==========
+
+ID __objc_msgSend_stub objc_stub::setCurrentValue_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setCurrentValue__00010608);
+  return IVar1;
+}
+
+
+========== setDisabled  @ 0000a680 ==========
+
+ID __objc_msgSend_stub objc_stub::setDisabled(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setDisabled_00010610);
+  return IVar1;
+}
+
+
+========== setEnabled  @ 0000a6a0 ==========
+
+ID __objc_msgSend_stub objc_stub::setEnabled(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setEnabled_00010618);
+  return IVar1;
+}
+
+
+========== setFallbackValue:  @ 0000a6c0 ==========
+
+ID __objc_msgSend_stub objc_stub::setFallbackValue_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setFallbackValue__00010620);
+  return IVar1;
+}
+
+
+========== setFillLayer:  @ 0000a6e0 ==========
+
+ID __objc_msgSend_stub objc_stub::setFillLayer_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setFillLayer__00010628);
+  return IVar1;
+}
+
+
+========== setFont:  @ 0000a700 ==========
+
+ID __objc_msgSend_stub objc_stub::setFont_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setFont__00010630);
+  return IVar1;
+}
+
+
+========== setFrame:  @ 0000a720 ==========
+
+ID __objc_msgSend_stub objc_stub::setFrame_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setFrame__00010638);
+  return IVar1;
+}
+
+
+========== setGlyphImageView:  @ 0000a740 ==========
+
+ID __objc_msgSend_stub objc_stub::setGlyphImageView_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setGlyphImageView__00010640);
+  return IVar1;
+}
+
+
+========== setImage:  @ 0000a760 ==========
+
+ID __objc_msgSend_stub objc_stub::setImage_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setImage__00010648);
+  return IVar1;
+}
+
+
+========== setIsMuted:  @ 0000a780 ==========
+
+ID __objc_msgSend_stub objc_stub::setIsMuted_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setIsMuted__00010650);
+  return IVar1;
+}
+
+
+========== setMaximumValue:  @ 0000a7a0 ==========
+
+ID __objc_msgSend_stub objc_stub::setMaximumValue_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setMaximumValue__00010658);
+  return IVar1;
+}
+
+
+========== setMinimumValue:  @ 0000a7c0 ==========
+
+ID __objc_msgSend_stub objc_stub::setMinimumValue_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setMinimumValue__00010660);
+  return IVar1;
+}
+
+
+========== setMuted  @ 0000a7e0 ==========
+
+ID __objc_msgSend_stub objc_stub::setMuted(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setMuted_00010668);
+  return IVar1;
+}
+
+
+========== setRingerMuted:  @ 0000a800 ==========
+
+ID __objc_msgSend_stub objc_stub::setRingerMuted_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setRingerMuted__00010670);
+  return IVar1;
+}
+
+
+========== setRingerSlider:  @ 0000a820 ==========
+
+ID __objc_msgSend_stub objc_stub::setRingerSlider_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setRingerSlider__00010678);
+  return IVar1;
+}
+
+
+========== setText:  @ 0000a840 ==========
+
+ID __objc_msgSend_stub objc_stub::setText_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setText__00010680);
+  return IVar1;
+}
+
+
+========== setTextAlignment:  @ 0000a860 ==========
+
+ID __objc_msgSend_stub objc_stub::setTextAlignment_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setTextAlignment__00010688);
+  return IVar1;
+}
+
+
+========== setTextColor:  @ 0000a880 ==========
+
+ID __objc_msgSend_stub objc_stub::setTextColor_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setTextColor__00010690);
+  return IVar1;
+}
+
+
+========== setTintColor:  @ 0000a8a0 ==========
+
+ID __objc_msgSend_stub objc_stub::setTintColor_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setTintColor__00010698);
+  return IVar1;
+}
+
+
+========== setTransform:  @ 0000a8c0 ==========
+
+ID __objc_msgSend_stub objc_stub::setTransform_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setTransform__000106a0);
+  return IVar1;
+}
+
+
+========== setTranslatesAutoresizingMaskIntoConstraints:  @ 0000a8e0 ==========
+
+ID __objc_msgSend_stub objc_stub::setTranslatesAutoresizingMaskIntoConstraints_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_setTranslatesAutoresizingMaskInt_000106a8);
+  return IVar1;
+}
+
+
+========== setVolumeLabel:  @ 0000a900 ==========
+
+ID __objc_msgSend_stub objc_stub::setVolumeLabel_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setVolumeLabel__000106b0);
+  return IVar1;
+}
+
+
+========== setVolumeTo:forCategory:  @ 0000a920 ==========
+
+ID __objc_msgSend_stub objc_stub::setVolumeTo_forCategory_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setVolumeTo_forCategory__000106b8);
+  return IVar1;
+}
+
+
+========== setupPercentageLabel  @ 0000a940 ==========
+
+ID __objc_msgSend_stub objc_stub::setupPercentageLabel(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_setupPercentageLabel_000106c0);
+  return IVar1;
+}
+
+
+========== sharedAVSystemController  @ 0000a960 ==========
+
+ID __objc_msgSend_stub objc_stub::sharedAVSystemController(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_sharedAVSystemController_000106c8);
+  return IVar1;
+}
+
+
+========== stringWithFormat:  @ 0000a980 ==========
+
+ID __objc_msgSend_stub objc_stub::stringWithFormat_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_stringWithFormat__000106d0);
+  return IVar1;
+}
+
+
+========== stringWithUTF8String:  @ 0000a9a0 ==========
+
+ID __objc_msgSend_stub objc_stub::stringWithUTF8String_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_stringWithUTF8String__000106d8);
+  return IVar1;
+}
+
+
+========== superview  @ 0000a9c0 ==========
+
+ID __objc_msgSend_stub objc_stub::superview(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_superview_000106e0);
+  return IVar1;
+}
+
+
+========== systemFontOfSize:weight:  @ 0000a9e0 ==========
+
+ID __objc_msgSend_stub objc_stub::systemFontOfSize_weight_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_systemFontOfSize_weight__000106e8);
+  return IVar1;
+}
+
+
+========== systemImageNamed:  @ 0000aa00 ==========
+
+ID __objc_msgSend_stub objc_stub::systemImageNamed_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_systemImageNamed__000106f0);
+  return IVar1;
+}
+
+
+========== transitionWithView:duration:options:animations:completion:  @ 0000aa20 ==========
+
+ID __objc_msgSend_stub
+objc_stub::transitionWithView_duration_options_animations_completion_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)
+                    (self,PTR_s_transitionWithView_duration_opti_00010710);
+  return IVar1;
+}
+
+
+========== updateCurrentValueWithDelta:  @ 0000aa40 ==========
+
+ID __objc_msgSend_stub objc_stub::updateCurrentValueWithDelta_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_updateCurrentValueWithDelta__00010718);
+  return IVar1;
+}
+
+
+========== updateFillLayer  @ 0000aa60 ==========
+
+ID __objc_msgSend_stub objc_stub::updateFillLayer(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_updateFillLayer_00010720);
+  return IVar1;
+}
+
+
+========== updateLabel  @ 0000aa80 ==========
+
+ID __objc_msgSend_stub objc_stub::updateLabel(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_updateLabel_00010728);
+  return IVar1;
+}
+
+
+========== updateLabelWithVolume:  @ 0000aaa0 ==========
+
+ID __objc_msgSend_stub objc_stub::updateLabelWithVolume_(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_updateLabelWithVolume__00010730);
+  return IVar1;
+}
+
+
+========== updateVolumeLabel  @ 0000aac0 ==========
+
+ID __objc_msgSend_stub objc_stub::updateVolumeLabel(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_updateVolumeLabel_00010738);
+  return IVar1;
+}
+
+
+========== view  @ 0000aae0 ==========
+
+ID __objc_msgSend_stub objc_stub::view(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_view_00010740);
+  return IVar1;
+}
+
+
+========== volumeLabel  @ 0000ab00 ==========
+
+ID __objc_msgSend_stub objc_stub::volumeLabel(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_volumeLabel_00010758);
+  return IVar1;
+}
+
+
+========== whiteColor  @ 0000ab20 ==========
+
+ID __objc_msgSend_stub objc_stub::whiteColor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_whiteColor_00010760);
+  return IVar1;
+}
+
+
+========== widthAnchor  @ 0000ab40 ==========
+
+ID __objc_msgSend_stub objc_stub::widthAnchor(ID self,...)
+
+{
+  ID IVar1;
+  
+  IVar1 = (*(code *)PTR__objc_msgSend_0000c0c8)(self,PTR_s_widthAnchor_00010768);
+  return IVar1;
+}
+
+
+========== arrayWithObjects:count:  @ 00020101 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSArray::arrayWithObjects_count_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== dictionaryWithContentsOfFile:  @ 00020301 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSDictionary::dictionaryWithContentsOfFile_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== objectForKey:  @ 00020302 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSDictionary::objectForKey_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== boolValue  @ 00020303 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSDictionary::boolValue(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== defaultManager  @ 00020401 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSFileManager::defaultManager(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== fileExistsAtPath:  @ 00020402 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSFileManager::fileExistsAtPath_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== activateConstraints:  @ 00020501 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSLayoutConstraint::activateConstraints_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== defaultCenter  @ 00020601 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSNotificationCenter::defaultCenter(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== postNotificationName:object:  @ 00020602 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSNotificationCenter::postNotificationName_object_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== removeObserver:  @ 00020603 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSNotificationCenter::removeObserver_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== addObserver:selector:name:object:  @ 00020604 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSNotificationCenter::addObserver_selector_name_object_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== addObserverForName:object:queue:usingBlock:  @ 00020605 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSNotificationCenter::addObserverForName_object_queue_usingBlock_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== stringWithFormat:  @ 00020701 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSString::stringWithFormat_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== stringWithUTF8String:  @ 00020702 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSString::stringWithUTF8String_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== blackColor  @ 00020801 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIColor::blackColor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== whiteColor  @ 00020802 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIColor::whiteColor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== clearColor  @ 00020803 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIColor::clearColor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== colorWithWhite:alpha:  @ 00020804 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIColor::colorWithWhite_alpha_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== currentDevice  @ 00020901 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIDevice::currentDevice(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== orientation  @ 00020902 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIDevice::orientation(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== systemFontOfSize:weight:  @ 00020a01 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIFont::systemFontOfSize_weight_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== systemImageNamed:  @ 00020b01 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIImage::systemImageNamed_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== imageWithRenderingMode:  @ 00020b02 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIImage::imageWithRenderingMode_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== initWithImage:  @ 00020c01 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIImageView::initWithImage_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== initWithFrame:  @ 00020d01 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UILabel::initWithFrame_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setFont:  @ 00020d02 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UILabel::setFont_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setTextColor:  @ 00020d03 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UILabel::setTextColor_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setTextAlignment:  @ 00020d04 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UILabel::setTextAlignment_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setText:  @ 00020d05 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UILabel::setText_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== touchesEnded:withEvent:  @ 00020e01 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::touchesEnded_withEvent_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== touchesBegan:withEvent:  @ 00020e02 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::touchesBegan_withEvent_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== touchesMoved:withEvent:  @ 00020e03 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::touchesMoved_withEvent_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== animateWithDuration:animations:  @ 00020e04 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::animateWithDuration_animations_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== animateWithDuration:animations:completion:  @ 00020e05 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::animateWithDuration_animations_completion_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== dealloc  @ 00020e06 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::dealloc(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== initWithFrame:  @ 00020e07 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::initWithFrame_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setBackgroundColor:  @ 00020e08 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setBackgroundColor_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== layer  @ 00020e09 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::layer(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setCornerCurve:  @ 00020e0a ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setCornerCurve_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setCornerRadius:  @ 00020e0b ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setCornerRadius_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setClipsToBounds:  @ 00020e0c ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setClipsToBounds_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setMaximumValue:  @ 00020e0d ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setMaximumValue_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setMinimumValue:  @ 00020e0e ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setMinimumValue_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== createFillLayer  @ 00020e0f ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::createFillLayer(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== createBackgroundView  @ 00020e10 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::createBackgroundView(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== getVolumeFromController  @ 00020e11 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::getVolumeFromController(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== init  @ 00020e12 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::init(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setGlyphImageView:  @ 00020e13 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setGlyphImageView_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== glyphImageView  @ 00020e14 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::glyphImageView(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setTintColor:  @ 00020e15 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setTintColor_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== setTranslatesAutoresizingMaskIntoConstraints:  @ 00020e16 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::setTranslatesAutoresizingMaskIntoConstraints_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== addSubview:  @ 00020e17 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::addSubview_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== widthAnchor  @ 00020e18 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::widthAnchor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== constraintEqualToConstant:  @ 00020e19 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::constraintEqualToConstant_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== heightAnchor  @ 00020e1a ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::heightAnchor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== centerXAnchor  @ 00020e1b ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::centerXAnchor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== constraintEqualToAnchor:  @ 00020e1c ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::constraintEqualToAnchor_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== centerYAnchor  @ 00020e1d ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::centerYAnchor(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== transitionWithView:duration:options:animations:completion:  @ 00020e1e ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIView::transitionWithView_duration_options_animations_completion_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== ___chkstk_darwin  @ 00021600 ==========
+
+/* WARNING: This is an inlined function */
+/* WARNING: Control flow encountered bad instruction data */
+
+void ___chkstk_darwin(void)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== _objc_msgSend  @ 00021d00 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+ID _objc_msgSend(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+

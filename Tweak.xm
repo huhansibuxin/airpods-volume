@@ -32,6 +32,7 @@ static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
 static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVolumeTo 都记，排查用）
 static BOOL gCallVolumeGuard = YES; // 通话期间媒体音量兜底压制（默认开）
+static BOOL gShowRingerSlider = YES; // 控制中心音量模块展开后显示铃声音量滑块（默认开）
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -47,6 +48,7 @@ static void apv_refresh(void) {
     gDisableHUDTouch = apv_bool(@"disableVolumeHUDTouch", YES);
     gVolDiag = apv_bool(@"volumeDiagLog", NO);
     gCallVolumeGuard = apv_bool(@"callVolumeGuard", YES);
+    gShowRingerSlider = apv_bool(@"showRingerSlider", YES);
 }
 
 @interface AVSystemController : NSObject
@@ -524,6 +526,232 @@ static void installNowPlayingLayoutTweaks(void) {
     }
     MSHookMessageEx(c, s, (IMP)replMRUTransportLayout, (IMP *)&origMRUTransportLayout);
     ccLog(@"hook 装载: MRUNowPlayingTransportControlsView -layoutSubviews (1×1 隐藏上一曲/下一曲)");
+}
+
+// ============================================================
+// 控制中心音量模块长按展开后显示「铃声音量」双滑块
+// 逆向 Ring.dylib（com.yan.ring 1.0.2）实锤：
+//   主功能不是百分比，而是展开 MRUVolumeViewController 后在右侧加一个
+//   MediaControlsVolumeRingerSliderView（自定义类），左侧保留媒体音量滑块，
+//   顶部放铃铛图标。Ring 通过 AVSystemController 的 Ringtone 类别读写铃声音量。
+// 这里用更简单的 APVRingerSliderView（UIView + pan 手势 + fillView）复刻核心功能，
+// 不引入 Ring 的完整自定义类体系，避免过度复杂。
+// ============================================================
+
+@interface APVRingerSliderView : UIView
+@property (nonatomic, assign) float value;
+@property (nonatomic, copy) void (^valueChanged)(float value);
+- (void)setValue:(float)value animated:(BOOL)animated;
+@end
+
+@implementation APVRingerSliderView {
+    UIView *_bgView;
+    UIView *_fillView;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.userInteractionEnabled = YES;
+        _bgView = [[UIView alloc] initWithFrame:self.bounds];
+        _bgView.backgroundColor = [UIColor colorWithWhite:1.0f alpha:0.15f];
+        _bgView.layer.cornerRadius = frame.size.width * 0.5f;
+        _bgView.layer.masksToBounds = YES;
+        _bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self addSubview:_bgView];
+
+        _fillView = [[UIView alloc] initWithFrame:CGRectZero];
+        _fillView.backgroundColor = [UIColor whiteColor];
+        _fillView.layer.cornerRadius = frame.size.width * 0.5f;
+        _fillView.layer.masksToBounds = YES;
+        [self addSubview:_fillView];
+
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self addGestureRecognizer:pan];
+
+        [self setValue:0.5f animated:NO];
+    }
+    return self;
+}
+
+- (void)layoutFill {
+    CGFloat h = self.bounds.size.height * _value;
+    _fillView.frame = CGRectMake(0, self.bounds.size.height - h, self.bounds.size.width, h);
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    [self layoutFill];
+}
+
+- (void)setValue:(float)value {
+    [self setValue:value animated:NO];
+}
+
+- (void)setValue:(float)value animated:(BOOL)animated {
+    _value = fmaxf(0.0f, fminf(1.0f, value));
+    if (animated) {
+        [UIView animateWithDuration:0.05 animations:^{ [self layoutFill]; }];
+    } else {
+        [self layoutFill];
+    }
+}
+
+- (void)handlePan:(UIPanGestureRecognizer *)pan {
+    CGPoint loc = [pan locationInView:self];
+    CGFloat h = self.bounds.size.height;
+    if (h <= 0) return;
+    float value = 1.0f - (float)(loc.y / h);
+    value = fmaxf(0.0f, fminf(1.0f, value));
+    self.value = value;
+    if (self.valueChanged) self.valueChanged(value);
+}
+
+@end
+
+static const void *kRingerSliderKey = &kRingerSliderKey;
+static const void *kRingerBellKey   = &kRingerBellKey;
+
+static float apv_ringerVolume(void) {
+    @try {
+        Class cls = NSClassFromString(@"AVSystemController");
+        if (!cls) return 0.5f;
+        id avc = [cls sharedAVSystemController];
+        SEL sel = NSSelectorFromString(@"getVolume:forCategory:");
+        if (![avc respondsToSelector:sel]) return 0.5f;
+        float vol = 0.5f;
+        ((BOOL (*)(id, SEL, float *, id))objc_msgSend)(avc, sel, &vol, @"Ringtone");
+        return vol;
+    } @catch (id e) { return 0.5f; }
+}
+
+static void apv_setRingerVolume(float vol) {
+    @try {
+        Class cls = NSClassFromString(@"AVSystemController");
+        if (!cls) return;
+        id avc = [cls sharedAVSystemController];
+        SEL sel = NSSelectorFromString(@"setVolume:forCategory:");
+        if (![avc respondsToSelector:sel]) return;
+        ((BOOL (*)(id, SEL, float, id))objc_msgSend)(avc, sel, fmaxf(0.0f, fminf(1.0f, vol)), @"Ringtone");
+    } @catch (id e) {}
+}
+
+static void (*origMRUVolumeLayout)(id, SEL) = NULL;
+static void replMRUVolumeLayout(id self, SEL _cmd) {
+    if (origMRUVolumeLayout) origMRUVolumeLayout(self, _cmd);
+    if (!gShowRingerSlider) return;
+
+    @try {
+        SEL viewSel = NSSelectorFromString(@"view");
+        id view = ((id (*)(id, SEL))objc_msgSend)(self, viewSel);
+        if (![view isKindOfClass:[UIView class]]) return;
+        UIView *moduleView = (UIView *)view;
+
+        SEL expandedSel = NSSelectorFromString(@"isExpanded");
+        BOOL expanded = NO;
+        if ([moduleView respondsToSelector:expandedSel]) {
+            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(moduleView, expandedSel);
+        }
+
+        SEL sliderSel = NSSelectorFromString(@"primarySlider");
+        id slider = ((id (*)(id, SEL))objc_msgSend)(self, sliderSel);
+        if (![slider isKindOfClass:[UIView class]]) return;
+        UIView *primarySlider = (UIView *)slider;
+
+        APVRingerSliderView *ringer = objc_getAssociatedObject(self, kRingerSliderKey);
+        UIImageView *bell = objc_getAssociatedObject(self, kRingerBellKey);
+
+        if (!expanded) {
+            if (ringer) ringer.hidden = YES;
+            if (bell) bell.hidden = YES;
+            return;
+        }
+
+        if (!ringer) {
+            ringer = [[APVRingerSliderView alloc] initWithFrame:CGRectZero];
+            ringer.tag = 0xA9B0;
+            objc_setAssociatedObject(self, kRingerSliderKey, ringer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [moduleView addSubview:ringer];
+            ringer.valueChanged = ^(float value) { apv_setRingerVolume(value); };
+        }
+        ringer.hidden = NO;
+
+        if (!bell) {
+            UIImage *img = [UIImage systemImageNamed:@"bell.fill"];
+            if (!img) {
+                // SFSymbols 不可用时的降级：用 UILabel 画一个铃铛符号
+                UILabel *fallback = [[UILabel alloc] initWithFrame:CGRectZero];
+                fallback.text = @"\U0001F514";
+                fallback.textAlignment = NSTextAlignmentCenter;
+                fallback.font = [UIFont systemFontOfSize:18];
+                fallback.textColor = [UIColor whiteColor];
+                objc_setAssociatedObject(self, kRingerBellKey, fallback, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                [moduleView addSubview:fallback];
+                bell = (UIImageView *)fallback;
+            } else {
+                bell = [[UIImageView alloc] initWithImage:img];
+                bell.contentMode = UIViewContentModeScaleAspectFit;
+                bell.tintColor = [UIColor whiteColor];
+                objc_setAssociatedObject(self, kRingerBellKey, bell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                [moduleView addSubview:bell];
+            }
+            bell.tag = 0xA9B1;
+        }
+        bell.hidden = NO;
+
+        CGRect b = moduleView.bounds;
+        CGRect sf = primarySlider.frame;
+        CGFloat sliderW = sf.size.width;
+        CGFloat sliderH = sf.size.height;
+        CGFloat sliderY = sf.origin.y;
+
+        // 把媒体音量滑块移到左 30%，铃声音量滑块放右 70%，保持系统宽高
+        CGFloat leftX  = roundf(b.size.width * 0.30f - sliderW * 0.5f);
+        CGFloat rightX = roundf(b.size.width * 0.70f - sliderW * 0.5f);
+        primarySlider.frame = CGRectMake(leftX, sliderY, sliderW, sliderH);
+        ringer.frame = CGRectMake(rightX, sliderY, sliderW, sliderH);
+
+        // 铃铛图标居中于铃声音量滑块上方
+        CGFloat bellSize = 22.0f;
+        CGFloat bellY = sliderY - bellSize - 6.0f;
+        if (bellY < 8.0f) bellY = 8.0f;
+        bell.frame = CGRectMake(roundf(rightX + sliderW * 0.5f - bellSize * 0.5f),
+                                bellY, bellSize, bellSize);
+
+        // 尝试把顶部 AirPods 图标也移到左侧滑块上方（如果 view 上有 primaryAssetView）
+        SEL assetSel = NSSelectorFromString(@"primaryAssetView");
+        if ([moduleView respondsToSelector:assetSel]) {
+            id asset = ((id (*)(id, SEL))objc_msgSend)(moduleView, assetSel);
+            if ([asset isKindOfClass:[UIView class]]) {
+                UIView *av = (UIView *)asset;
+                CGRect af = av.frame;
+                av.frame = CGRectMake(roundf(leftX + sliderW * 0.5f - af.size.width * 0.5f),
+                                      af.origin.y, af.size.width, af.size.height);
+            }
+        }
+
+        ringer.value = apv_ringerVolume();
+    } @catch (id e) {}
+}
+
+static void installRingerSlider(void) {
+    if (!gShowRingerSlider) {
+        ccLog(@"设置已关闭 showRingerSlider，不装铃声音量 hook");
+        return;
+    }
+    dlopen("/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI", RTLD_NOW);
+    Class c = NSClassFromString(@"MRUVolumeViewController");
+    if (!c) {
+        ccLog(@"MRUVolumeViewController 未找到，跳过铃声音量");
+        return;
+    }
+    SEL s = NSSelectorFromString(@"viewDidLayoutSubviews");
+    if (![c instancesRespondToSelector:s]) {
+        ccLog(@"MRUVolumeViewController 不响应 viewDidLayoutSubviews，跳过铃声音量");
+        return;
+    }
+    MSHookMessageEx(c, s, (IMP)replMRUVolumeLayout, (IMP *)&origMRUVolumeLayout);
+    ccLog(@"hook 装载: MRUVolumeViewController -viewDidLayoutSubviews (铃声音量双滑块)");
 }
 
 // ============================================================
@@ -1238,6 +1466,8 @@ static void handleRouteEvent(NSString *source) {
     installNowPlaying1x1();
     // 1×1 模块内部布局：只隐藏上一曲/下一曲（展开态完全原生）
     installNowPlayingLayoutTweaks();
+    // 控制中心音量模块展开后显示铃声音量双滑块（Ring 主功能移植）
+    installRingerSlider();
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
     [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
