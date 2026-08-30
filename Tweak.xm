@@ -625,9 +625,20 @@ static void installNowPlayingLayoutTweaks(void) {
 // Ring.dylib 反编译证实：ringerSlider 类就是系统自带的 MediaControlsVolumeRingerSliderView，
 // 自带原生毛玻璃背景/白色填充/圆角/触摸交互。我们之前用 APVRingerSliderView 自绘，所以
 // 右边是纯白方块。这里优先用原生类；取不到或初始化失败再降级到自绘。
-static UIView *apv_createNativeRingerSlider(CGRect frame, float value) {
+static UIView *apv_createNativeRingerSlider(CGRect frame, float value, UIView *styleReference) {
+    // 该类在 MediaControls.framework 里，不在 MediaRemoteUI。
+    dlopen("/System/Library/PrivateFrameworks/MediaControls.framework/MediaControls", RTLD_NOW);
     Class c = NSClassFromString(@"MediaControlsVolumeRingerSliderView");
-    if (!c) return nil;
+    if (!c && styleReference) {
+        // 兜底：用和左边 primarySlider 一模一样的类，保证视觉风格一致
+        c = [styleReference class];
+        apvBootLog([NSString stringWithFormat:@"原生铃声音量类未找到，降级用 primarySlider 同类: %@", c]);
+    }
+    if (!c) {
+        apvBootLog(@"MediaControlsVolumeRingerSliderView 及 styleReference 均为 nil，走 APVRingerSliderView 自绘");
+        return nil;
+    }
+    apvBootLog([NSString stringWithFormat:@"铃声音量 slider 使用类: %@", c]);
     id raw = [c alloc];
     UIView *slider = nil;
     SEL initSel = NSSelectorFromString(@"initWithFrame:minimumValue:cornerRadius:");
@@ -637,7 +648,10 @@ static UIView *apv_createNativeRingerSlider(CGRect frame, float value) {
     } else if ([raw respondsToSelector:@selector(initWithFrame:)]) {
         slider = ((id (*)(id, SEL, CGRect))objc_msgSend)(raw, @selector(initWithFrame:), frame);
     }
-    if (!slider) return nil;
+    if (!slider) {
+        apvBootLog(@"原生 slider init 返回 nil，走 APVRingerSliderView 自绘");
+        return nil;
+    }
     SEL curSel = NSSelectorFromString(@"setCurrentValue:");
     if ([slider respondsToSelector:curSel]) {
         ((void (*)(id, SEL, double))objc_msgSend)(slider, curSel, (double)value);
@@ -714,13 +728,13 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         if (![slider isKindOfClass:[UIView class]]) return;
         UIView *primarySlider = (UIView *)slider;
 
-        // 展开态详细信息（首个展开布局时记一次，不受诊断门控）
-        static BOOL didRingerBootLog = NO;
-        if (!didRingerBootLog) {
-            didRingerBootLog = YES;
+        // 展开态详细信息（首次进入展开时记一次，不受诊断门控）
+        static BOOL didRingerExpandedLog = NO;
+        if (expanded && !didRingerExpandedLog) {
+            didRingerExpandedLog = YES;
             apvBootLog([NSString stringWithFormat:
-                @"replMRUVolumeLayout 展开态: expanded=%d primarySliderCls=%@ viewCls=%@",
-                expanded, [slider class], [moduleView class]]);
+                @"replMRUVolumeLayout 展开态: expanded=1 primarySliderCls=%@ viewCls=%@",
+                [slider class], [moduleView class]]);
         }
 
         UIView *ringer = objc_getAssociatedObject(self, kRingerSliderKey);
@@ -750,7 +764,7 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         if (!ringer) {
             CGRect rFrame = CGRectMake(rightX, sliderY, sliderW, sliderH);
             // 优先使用系统原生 MediaControlsVolumeRingerSliderView（Ring 同款）
-            ringer = apv_createNativeRingerSlider(rFrame, apv_ringerVolume());
+            ringer = apv_createNativeRingerSlider(rFrame, apv_ringerVolume(), primarySlider);
             if (!ringer) {
                 // 降级：自己画一个（样式不如原生，但能工作）
                 APVRingerSliderView *custom = [[APVRingerSliderView alloc] initWithFrame:rFrame];
