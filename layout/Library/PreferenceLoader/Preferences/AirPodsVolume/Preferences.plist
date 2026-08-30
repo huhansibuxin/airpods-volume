@@ -83,6 +83,41 @@
 		</dict>
 		<dict>
 			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>通话期间音量兜底</string>
+			<key>key</key>
+			<string>callVolumeGuard</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>音量诊断日志（排查用）</string>
+			<key>key</key>
+			<string>volumeDiagLog</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>通话期间音量兜底：打视频/语音时按音量走 MediaRemote 路径，不走我们唯一能拦的 AVSystemController，封顶会失效 → 通话期间每 2 秒兜底压回 70%（只在输出是 AirPods 时压，不污染喇叭记忆），挂断 12 秒后自动停。
+音量诊断日志：排查用，开后每次音量设置都记类别/数值/调用栈到 /var/jb/tmp/airpods_vol.log，平时请关闭。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>音量 HUD</string>

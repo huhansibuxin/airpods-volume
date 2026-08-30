@@ -30,6 +30,8 @@ static BOOL gLimitAlert = YES, gHideReplayKit = YES;
 static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES;
 static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
+static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVolumeTo 都记，排查用）
+static BOOL gCallVolumeGuard = YES; // 通话期间媒体音量兜底压制（默认开）
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -43,6 +45,8 @@ static void apv_refresh(void) {
     gBlockShortcuts = apv_bool(@"blockShortcutsNotifications", YES);
     gMiniVolumeHUD = apv_bool(@"miniVolumeHUD", YES);
     gDisableHUDTouch = apv_bool(@"disableVolumeHUDTouch", YES);
+    gVolDiag = apv_bool(@"volumeDiagLog", NO);
+    gCallVolumeGuard = apv_bool(@"callVolumeGuard", YES);
 }
 
 @interface AVSystemController : NSObject
@@ -94,8 +98,10 @@ static BOOL sAirPodsConnected = NO;
 - (void)setDevice:(id)arg1 wantsToBeActivated:(BOOL)arg2;
 @end
 
-// 前向声明：路由日志函数（定义在下方），避免被插在它前面的函数调用时报未声明
+// 前向声明：日志函数定义在下方，但上面的音量 hook 就要用到
 static void routeLog(NSString *msg);
+static void volLog(NSString *msg);
+static NSString *volStack(NSUInteger n);
 
 static BOOL isAirPodsName(NSString *name) {
     return name && [name containsString:@"AirPods"];
@@ -207,6 +213,7 @@ static float capForCategory(id cat) {
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     // 开关：设置里"限制铃声/通知音量"关闭 → 完全不介入音量
     if (!gLimitAlert) return %orig(vol, cat);
+    float vol_orig = vol; // 原始请求值（诊断用：看系统/App 到底想要多少）
     float cap = capForCategory(cat);
     // 摘下时通知音强制 100%（静音跳过）；戴上时各类音量按 cap 封顶
     // （媒体 70%/通知 40%——hook 层兜底，控制中心滑动条走 MediaRemote
@@ -215,6 +222,11 @@ static float capForCategory(id cat) {
         vol = 1.0f;
     else if (cap < 1.0f)
         vol = MIN(vol, cap);
+    if (gVolDiag) {
+        volLog([NSString stringWithFormat:
+            @"setVolumeTo cat=%@ req=%.3f -> %.3f (cap=%.2f conn=%d)%@",
+            cat, vol_orig, vol, cap, sAirPodsConnected, volStack(6)]);
+    }
     return %orig(vol, cat);
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
@@ -319,8 +331,11 @@ typedef struct { unsigned long long width; unsigned long long height; } CCUILayo
 // 控制中心音乐模块（nowplaying）的 identifier
 static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcenter.nowplaying";
 
-// 诊断日志（轻量：装载 + 命中各数行；验证通过后可将 CC_DEBUG 置 0 关掉）
-#define CC_DEBUG 1
+// 控制中心模块诊断日志
+// ⚠️ v1.9.57 已静默（CC_DEBUG 0）。1×1 模块功能已验证正常，
+// 之前 "隐藏副标题 N 个" 每个 layoutSubviews 都 fopen/fclose 写一次文件，
+// 是实测到的 CPU 大头（老板要求的 CPU 审计里揪出来的）。要排查模块时再置 1。
+#define CC_DEBUG 0
 static void ccLog(NSString *msg) {
 #if CC_DEBUG
     FILE *f = fopen("/var/jb/tmp/airpods_cc.log", "a");
@@ -328,7 +343,37 @@ static void ccLog(NSString *msg) {
         fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
         fclose(f);
     }
+#else
+    (void)msg; // 静默时消掉 unused parameter 警告
 #endif
+}
+
+// 音量诊断日志：**由设置开关控制，默认关**。
+// 用途：排查"戴 AirPods 听抖音时打微信视频，媒体音量弹到 100%"——
+// 记录每一次 setVolumeTo:forCategory: 的类别/原始值/是否被封顶 + 调用栈，
+// 用来判断 100% 是系统、微信还是 MediaRemote 路径设的，以及走没走我们的 hook。
+static void volLog(NSString *msg) {
+    if (!gVolDiag) return; // 关掉时零开销，连字符串都不拼（调用方也要用同样守卫）
+    FILE *f = fopen("/var/jb/tmp/airpods_vol.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
+}
+
+// 调用栈前 N 帧（只在开诊断时才调用，别放进热路径）
+static NSString *volStack(NSUInteger n) {
+    NSArray *syms = [NSThread callStackSymbols];
+    NSMutableString *ms = [NSMutableString string];
+    NSUInteger max = MIN(n, syms.count);
+    for (NSUInteger i = 1; i < max; i++) { // 跳过 volStack 自己
+        NSString *line = syms[i];
+        // 只留形如 "0x... + 帧偏移" 之前的部分，砍掉超长地址
+        NSRange r = [line rangeOfString:@" 0x"];
+        if (r.location != NSNotFound) line = [line substringToIndex:r.location];
+        [ms appendFormat:@"\n      %@", line];
+    }
+    return ms;
 }
 
 static id (*origModuleSettingsForModule)(id, SEL, NSString *, CCUILayoutSize) = NULL;
@@ -617,6 +662,20 @@ static BOOL carHFPActive(void) {
     return NO;
 }
 
+// 是否正处于蓝牙 HFP 通话（微信视频/语音、系统电话都走这个端口）。
+// 只看端口类型，不区分是车载还是 AirPods——只要 BluetoothHFP 端口出现在
+// 当前路由里，就是"正在煲电话粥"，音量兜底窗口就该开着。
+static BOOL hfpCallActive(void) {
+    @try {
+        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        for (AVAudioSessionPortDescription *p in route.outputs)
+            if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) return YES;
+        for (AVAudioSessionPortDescription *p in route.inputs)
+            if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) return YES;
+    } @catch (id e) {}
+    return NO;
+}
+
 // ---- HFP 通话路由综合检测（车载抢通话，2026-08-23 老板实测）----
 // 蓝牙耳机同时有 A2DP(媒体)+HFP(通话)两个端口；视频/语音通话时系统把 HFP
 // 单独切到车载（车载免提优先），而 A2DP 媒体可能还在 AirPods（抖音在放）。
@@ -821,6 +880,68 @@ static void stopPoll(void) {
     if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
 }
 
+// ============================================================
+// 通话期间媒体音量兜底压制（v1.9.57，老板实测问题修复）
+//
+// 现象：戴 AirPods 听抖音 → 打微信视频，媒体音量弹到 100%；
+//       手动调低后有时能回到 70，有时又弹回 100。
+//
+// 根因：系统/微信在通话建立时设音量走的是 **MediaRemote 路径**，
+//   那条路根本不经过 AVSystemController -setVolumeTo:forCategory:
+//   ——而我们唯一的封顶 (capForCategory) 就挂在那一个方法上。
+//   所以通话那一刻的 100% 我们**完全拦不住**（代码注释里早就写着
+//   "控制中心滑动条走 MediaRemote 路径不经此 hook"，同一个盲区）。
+//
+// 旧兜底为什么时灵时不灵：原来靠"路由事件后 5s 复查"，判断是否要压用
+//   `[avc getVolume:&mv ...] && mv > 0.7f`。但无播放会话时 getVolume
+//   返回的是**缓存假值 0.70**，`> 0.7` 恒为假 → 明明实际是 100 也压不动。
+//   这就是老板说的"两次压回来了、两次没有"。
+//
+// 修法：通话期间（HFP 端口在场）开 2s 兜底窗口，**无条件**把
+//   Audio/Video 压到 70%、Ringtone/Alert 压到 40%——不看 getVolume 的
+//   读数，绕开假值问题。压之前判过"输出确实是 AirPods"，所以不会
+//   污染喇叭的音量记忆（摘下后系统照常恢复喇叭记忆值）。
+//   通话结束 12s 后自动停表，平时零轮询。
+// ============================================================
+
+static dispatch_source_t sCallVolTimer = NULL;
+static BOOL sCallVolRunning = NO;
+static NSTimeInterval sCallVolStopAt = 0;
+static BOOL sPrevHFP = NO;
+
+static void startCallVolumeGuard(void) {
+    if (!sCallVolTimer) return;
+    sCallVolStopAt = [[NSDate date] timeIntervalSince1970] + 12.0;
+    if (!sCallVolRunning) { dispatch_resume(sCallVolTimer); sCallVolRunning = YES; }
+}
+
+static void stopCallVolumeGuard(void) {
+    sCallVolStopAt = 0;
+    if (sCallVolRunning) { dispatch_suspend(sCallVolTimer); sCallVolRunning = NO; }
+}
+
+static void callVolumeGuardTick(void) {
+    @try {
+        // 零成本短路：开关关了 / AirPods 不在场 → 直接停表
+        if (!gCallVolumeGuard || !gLimitAlert || !sAirPodsConnected) {
+            stopCallVolumeGuard();
+            return;
+        }
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if (hfpCallActive()) {
+            sCallVolStopAt = now + 12.0;   // 还在通话 → 续期
+        } else if (now > sCallVolStopAt) {
+            stopCallVolumeGuard();         // 挂断 12s 后收工
+            return;
+        }
+        if (!currentOutputIsAirPods()) return; // 通话走听筒/车载时不碰音量
+        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+        [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
+        [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
+        [avc setVolumeTo:0.4f forCategory:@"Alert"];
+    } @catch (id e) {}
+}
+
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
 // "开盒必切"（v1.9.21，老板定案）：不依赖入耳检测（worn 门控已删——
 // 其滞后/假阳性导致开盒未戴不切、摘下抢回），切换条件 = AirPods 在场
@@ -916,6 +1037,21 @@ static void handleRouteEvent(NSString *source) {
             routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
                       source, airInRoute, airInBT, sAirPodsConnected]);
         }
+
+        // 通话音量兜底窗口：HFP 端口 0→1 跳变（打视频/接电话）时启动。
+        // 事件驱动，不是常驻轮询——挂断后 tick 自己到期停表。
+        if (gVolDiag || gCallVolumeGuard) {
+            BOOL hfpNow = hfpCallActive();
+            if (hfpNow != sPrevHFP) {
+                if (gVolDiag) {
+                    volLog([NSString stringWithFormat:
+                        @"HFP %d->%d (src=%@ conn=%d outAir=%d)",
+                        sPrevHFP, hfpNow, source, sAirPodsConnected, currentOutputIsAirPods()]);
+                }
+                if (hfpNow) startCallVolumeGuard();
+                sPrevHFP = hfpNow;
+            }
+        }
         if (sAirPodsConnected) {
             float cur;
             // 开关：设置里"音量保护"关闭时不改任何音量
@@ -954,24 +1090,11 @@ static void handleRouteEvent(NSString *source) {
                 pressWhenAirPods(2.0, @"t2.0");
                 pressWhenAirPods(3.2, @"t3.2");
             }
-            // 通话挂断后的媒体复查（老板需求）：微信视频/语音拨出未接通→挂断时，
-            // 系统把路由从 HFP 通话通道切回 A2DP，并恢复"媒体音量记忆值"——若
-            // 记忆值是 100（实测弹回 100），且恢复走 MediaRemote 路径绕过
-            // setVolumeTo cap，我们就拦不住。每次路由事件安排一次 5 秒后复查：
-            // 挂断 5 秒内发现媒体 >70% → 压回 70%（AirPods 记忆值随之变 70，
-            // 下次挂断系统恢复 70，不再弹 100）。getVolume 无播放会话时返回
-            // 缓存假值 0.70，>0.7 判断不会误压；真 100 能读到并压回。
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                if (sAirPodsConnected && currentOutputIsAirPods() && gLimitAlert) {
-                    id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                    float mv = -1.0f;
-                    if ([avc2 getVolume:&mv forCategory:@"Audio/Video"] && mv > 0.7f) {
-                        [avc2 setVolumeTo:0.7f forCategory:@"Audio/Video"];
-                        routeLog([NSString stringWithFormat:@"recheck(%@) media %.2f ->70 (post-call restore)", source, mv]);
-                    }
-                }
-            });
+            // ⚠️ v1.9.57：旧的"路由事件 5s 后复查媒体音量"已删除。
+            // 它用 `[avc getVolume:&mv] && mv > 0.7f` 判断要不要压，但无播放
+            // 会话时 getVolume 返回缓存假值 0.70 → 判断恒假 → 真 100% 也压不动
+            // （老板实测"两次压回来了、两次没有"）。改由 callVolumeGuard 在
+            // 通话期间每 2s 无条件压，绕开假值问题。
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
             if (!isRingerMuted() && gLimitAlert) {
@@ -1047,6 +1170,14 @@ static void handleRouteEvent(NSString *source) {
         enforceAirPodsRoute();
     });
     dispatch_suspend(sPollTimer); // 初始不轮询，等事件启动窗口
+
+    // 通话期间音量兜底：2s 一跳，初始挂起，等 HFP 0→1 跳变（打视频/接电话）才开。
+    // 挂断 12s 后 tick 自己停表 → 平时零开销。
+    sCallVolTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(sCallVolTimer, dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC),
+                              2.0 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(sCallVolTimer, ^{ callVolumeGuardTick(); });
+    dispatch_suspend(sCallVolTimer);
 
     // 蓝牙设备连接成功（开盒 AirPods、车载等任何蓝牙设备都触发）
     // → 启动轮询窗口 + 立即强制路由。
