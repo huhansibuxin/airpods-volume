@@ -948,6 +948,68 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         UIView *overlay = objc_getAssociatedObject(self, kRingerOverlayKey);
         if (overlay) overlay.frame = ringer.frame;
 
+        // ===== v1.9.67 一次性诊断 dump：定位 MRUContinuousSliderView 真正的样式入口 =====
+        // 已实证 stylingProvider/visualStylingProvider/delegate/updateVisualStyling 全部不存在，
+        // 左滑块的白填充另有机制 → dump 方法/属性/视图层级/框架类名一次性找出。
+        static BOOL didRingerDiagDump = NO;
+        if (!didRingerDiagDump && ringer) {
+            didRingerDiagDump = YES;
+            @try {
+                // 1) 继承链逐层方法 + 属性（到 UIView/NSObject 为止）
+                Class cWalk = [ringer class];
+                for (int depth = 0; cWalk && depth < 5; depth++) {
+                    unsigned int mcount = 0;
+                    Method *ms = class_copyMethodList(cWalk, &mcount);
+                    NSMutableString *mn = [NSMutableString string];
+                    for (unsigned int i = 0; i < mcount; i++)
+                        [mn appendFormat:@"%@ ", NSStringFromSelector(method_getName(ms[i]))];
+                    free(ms);
+                    apvBootLog([NSString stringWithFormat:@"[%@ d%d] %u 方法: %@",
+                                NSStringFromClass(cWalk), depth, mcount, mn]);
+                    unsigned int pcount = 0;
+                    objc_property_t *ps = class_copyPropertyList(cWalk, &pcount);
+                    NSMutableString *pn = [NSMutableString string];
+                    for (unsigned int i = 0; i < pcount; i++)
+                        [pn appendFormat:@"%s ", property_getName(ps[i])];
+                    free(ps);
+                    apvBootLog([NSString stringWithFormat:@"[%@ d%d] %u 属性: %@",
+                                NSStringFromClass(cWalk), depth, pcount, pn]);
+                    cWalk = class_getSuperclass(cWalk);
+                    if (!cWalk || cWalk == [UIView class] ||
+                        cWalk == [UIResponder class] || cWalk == [NSObject class]) break;
+                }
+                // 2) 左右滑块真实视图层级对比（看左滑块的 fill 子视图长什么样）
+                NSString *rd = [ringer respondsToSelector:@selector(recursiveDescription)]
+                    ? [ringer performSelector:@selector(recursiveDescription)] : @"(无 recursiveDescription)";
+                NSString *pd = [primarySlider respondsToSelector:@selector(recursiveDescription)]
+                    ? [primarySlider performSelector:@selector(recursiveDescription)] : @"(无 recursiveDescription)";
+                apvBootLog([NSString stringWithFormat:@"ringer 层级:\n%@\n----\nprimary 层级:\n%@", rd, pd]);
+                // 3) 两个框架里所有 Slider/Ringer/Volume 类名（找 iOS16 铃声滑块的新类名）
+                const char *imgs[2] = {
+                    "/System/Library/PrivateFrameworks/MediaControls.framework/MediaControls",
+                    "/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI"
+                };
+                for (int i = 0; i < 2; i++) {
+                    unsigned int cnt = 0;
+                    const char **names = objc_copyClassNamesForImage(imgs[i], &cnt);
+                    if (!names) { apvBootLog(@"类枚举: 图片未注册"); continue; }
+                    NSMutableString *hit = [NSMutableString string];
+                    for (unsigned int j = 0; j < cnt; j++) {
+                        NSString *n = [NSString stringWithUTF8String:names[j]];
+                        if ([n containsString:@"Slider"] || [n containsString:@"Ringer"] ||
+                            [n containsString:@"Volume"])
+                            [hit appendFormat:@"%@ ", n];
+                    }
+                    free(names);
+                    apvBootLog([NSString stringWithFormat:@"%@ Slider/Ringer/Volume 类: %@",
+                                i == 0 ? @"MediaControls" : @"MediaRemoteUI", hit]);
+                }
+                apvBootLog(@"diag dump 完成");
+            } @catch (id e) {
+                apvBootLog([NSString stringWithFormat:@"diag dump 异常: %@", e]);
+            }
+        }
+
         // 同步铃声音量：原生类走 setCurrentValue:；自定义类走 .value
         float rv = apv_ringerVolume();
         float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;

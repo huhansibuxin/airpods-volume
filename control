@@ -1,7 +1,7 @@
 Package: com.huhansibuxin.airpodsvolume
 Name: AirPodsVolume
 Depends: ellekit
-Version: 1.9.66
+Version: 1.9.67
 Architecture: iphoneos-arm64
 Description: Limit ringer/notification volume when headphones connected. Prevents ear-blasting call alerts while wearing AirPods.
 Maintainer: huhansibuxin
