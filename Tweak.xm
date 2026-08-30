@@ -403,19 +403,21 @@ static void installNowPlaying1x1(void) {
 //   MRUNowPlayingTransportControlsView -layoutSubviews → leftButton/rightButton alpha 归零
 //   MRUNowPlayingLabelView             -layoutSubviews → 隐藏第 2 个及以后的 UILabel
 // BetterCC 在 _mediaPortraitSize==1 的分支就是"左右按钮 alpha=0，只留 middleButton"。
-// ⚠️ 只在 compact（layout==0，即 1×1 未展开）生效；长按展开后恢复系统原样。
+// ⚠️ 判断"是否 1×1 格子"**不能用 layout 属性**——实测它在全屏展开态
+// 也返回 0，照它判断会把全屏播放器的上一曲/下一曲一起隐藏掉（老板实测）。
+// 改用视图实际宽度：1×1 模块 ≈ 屏宽/4（约 100pt），全屏展开后 ≥ 300pt。
+// 只在 1×1 格子里动，长按展开后完全交回系统。
 // ============================================================
 
 static void (*origMRUControlsLayout)(id, SEL) = NULL;
 static void (*origMRUTransportLayout)(id, SEL) = NULL;
 static void (*origMRULabelLayout)(id, SEL) = NULL;
 
-// layout 属性：0 = compact(1×1)，非 0 = 已展开
-static NSInteger mru_layoutOf(id view) {
-    if (!view) return -1;
-    SEL s = NSSelectorFromString(@"layout");
-    if (![view respondsToSelector:s]) return -1;
-    return ((NSInteger (*)(id, SEL))objc_msgSend)(view, s);
+// 1×1 格子判定：宽度落在 (1, 160) 之间
+static BOOL mru_isCompact(id view) {
+    if (![view isKindOfClass:[UIView class]]) return NO;
+    CGRect b = ((UIView *)view).bounds;
+    return (b.size.width > 1.0 && b.size.width < 160.0);
 }
 
 static id mru_obj(id view, NSString *selName) {
@@ -425,24 +427,59 @@ static id mru_obj(id view, NSString *selName) {
     return ((id (*)(id, SEL))objc_msgSend)(view, s);
 }
 
-// 隐藏副标题：LabelView 里第 2 个及以后的 UILabel
-static void hideSecondaryLabels(id labelView) {
-    NSArray *subs = ((NSArray *(*)(id, SEL))objc_msgSend)(labelView, @selector(subviews));
-    int n = 0;
-    for (UIView *v in subs) {
-        if ([v isKindOfClass:[UILabel class]]) {
-            n++;
-            if (n >= 2) v.hidden = YES;
-        }
+// 递归收集 UILabel（副标题可能嵌在子视图里，只看第一层会漏）
+static void mru_collectLabels(UIView *v, NSMutableArray *out) {
+    for (UIView *sub in v.subviews) {
+        if ([sub isKindOfClass:[UILabel class]]) [out addObject:sub];
+        mru_collectLabels(sub, out);
     }
+}
+
+// 保留第 1 个（标题=歌名），隐藏第 2 个及以后（副标题=歌手/专辑）
+static NSUInteger mru_hideExtraLabels(UIView *root) {
+    NSMutableArray *labels = [NSMutableArray array];
+    mru_collectLabels(root, labels);
+    NSUInteger hidden = 0;
+    for (NSUInteger i = 1; i < labels.count; i++) {
+        UIView *l = labels[i];
+        l.hidden = YES;
+        l.alpha = 0.0;      // 双保险：系统刷新 label 时会重置 hidden
+        hidden++;
+    }
+    return hidden;
 }
 
 static void replMRULabelLayout(id self, SEL _cmd) {
     if (origMRULabelLayout) origMRULabelLayout(self, _cmd);
     @try {
         if (!gShrinkNowPlaying || !gHideSubtitle) return;
-        if (mru_layoutOf(self) != 0) return;
-        hideSecondaryLabels(self);
+        if (!mru_isCompact(self)) {
+            // 展开/全屏态：把 1×1 里隐藏掉的副标题恢复回来
+            NSMutableArray *labels = [NSMutableArray array];
+            mru_collectLabels((UIView *)self, labels);
+            for (NSUInteger i = 1; i < labels.count; i++) {
+                UIView *l = labels[i];
+                if (l.hidden) { l.hidden = NO; l.alpha = 1.0; }
+            }
+            return;
+        }
+
+        static BOOL sLogged = NO;
+        if (!sLogged) {
+            sLogged = YES;
+            UIView *v = (UIView *)self;
+            NSMutableString *ms = [NSMutableString stringWithFormat:
+                @"diag LabelView bounds=%.0fx%.0f subviews:", v.bounds.size.width, v.bounds.size.height];
+            for (UIView *s in v.subviews) [ms appendFormat:@" %@", NSStringFromClass([s class])];
+            ccLog(ms);
+        }
+        // 系统在 layout 之后还会刷新 label 内容并把 hidden 重置回去，
+        // 所以推到下一个 runloop 再隐藏，保证压在系统的更新之后。
+        UIView *lv = (UIView *)self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSUInteger n = mru_hideExtraLabels(lv);
+            if (n) ccLog([NSString stringWithFormat:@"隐藏副标题 %lu 个", (unsigned long)n]);
+        });
     } @catch (NSException *e) {}
 }
 
@@ -450,23 +487,37 @@ static void replMRUTransportLayout(id self, SEL _cmd) {
     if (origMRUTransportLayout) origMRUTransportLayout(self, _cmd);
     @try {
         if (!gShrinkNowPlaying || !gHidePrevNext) return;
-        if (mru_layoutOf(self) != 0) return;
+        if (!mru_isCompact(self)) {
+            // 展开/全屏态：上一曲/下一曲恢复显示，播放键尺寸还原
+            [mru_obj(self, @"leftButton") setAlpha:1.0];
+            [mru_obj(self, @"rightButton") setAlpha:1.0];
+            UIView *m = (UIView *)mru_obj(self, @"middleButton");
+            if (m && !CGAffineTransformEqualToTransform(m.transform, CGAffineTransformIdentity))
+                m.transform = CGAffineTransformIdentity;
+            return;
+        }
 
         [mru_obj(self, @"leftButton") setAlpha:0.0];
         [mru_obj(self, @"rightButton") setAlpha:0.0];
 
-        // 播放键按 gPlayBtnScale 放大（宽度 = 模块宽 × scale）
+        // 播放键放大：**用 transform**——直接改 frame 会被 autolayout 重置
+        // （老板实测改 1 / 2 都没反应，就是改 frame 无效）。
         UIView *middle = (UIView *)mru_obj(self, @"middleButton");
         if (middle) {
-            CGRect f = middle.frame;
-            CGFloat moduleW = middle.superview ? middle.superview.bounds.size.width : f.size.width;
-            CGFloat targetW = moduleW * gPlayBtnScale;
-            if (targetW > f.size.width + 0.5) {
-                CGFloat cx = CGRectGetMidX(f);
-                f.size.width = targetW;
-                f.size.height = MAX(f.size.height, targetW * 0.42);
-                f.origin.x = cx - targetW / 2.0;
-                middle.frame = f;
+            CGFloat moduleW = middle.superview ? middle.superview.bounds.size.width : 0.0;
+            CGFloat curW = middle.bounds.size.width;  // bounds 不受 transform 影响
+            static BOOL sLogged = NO;
+            if (!sLogged) {
+                sLogged = YES;
+                ccLog([NSString stringWithFormat:
+                    @"diag Transport bounds=%.0fx%.0f middle=%@ curW=%.0f moduleW=%.0f scale=%.2f",
+                    ((UIView *)self).bounds.size.width, ((UIView *)self).bounds.size.height,
+                    NSStringFromClass([middle class]), curW, moduleW, gPlayBtnScale]);
+            }
+            if (moduleW > 0.0 && curW > 0.0) {
+                CGFloat target = moduleW * gPlayBtnScale;
+                CGFloat s = target / curW;
+                if (s > 1.01) middle.transform = CGAffineTransformMakeScale(s, s);
             }
         }
     } @catch (NSException *e) {}
@@ -476,9 +527,16 @@ static void replMRUControlsLayout(id self, SEL _cmd) {
     if (origMRUControlsLayout) origMRUControlsLayout(self, _cmd);
     @try {
         if (!gShrinkNowPlaying) return;
-        if (mru_layoutOf(self) != 0) return;
-        // 把 transportControlsView 压到底部（给放大的播放键腾位置）
+        if (!mru_isCompact(self)) return;
+
+        static BOOL sLogged = NO;
         UIView *tv = (UIView *)mru_obj(self, @"transportControlsView");
+        if (!sLogged) {
+            sLogged = YES;
+            ccLog([NSString stringWithFormat:@"diag Controls bounds=%.0fx%.0f transport=%@",
+                   ((UIView *)self).bounds.size.width, ((UIView *)self).bounds.size.height,
+                   tv ? NSStringFromClass([tv class]) : @"nil"]);
+        }
         if (!tv) return;
         CGRect b = ((UIView *)self).bounds;
         CGFloat h = 46.0;

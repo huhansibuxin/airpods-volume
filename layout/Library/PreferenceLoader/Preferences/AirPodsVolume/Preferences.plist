@@ -163,7 +163,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>播放键宽度 = 占 1×1 模块宽度的比例，0.75 约等于 1.5 格；范围建议 0.5–1.0，超出会挤到模块外。改完下拉控制中心即可看到效果。</string>
+			<string>播放键宽度 = 占 1×1 模块宽度的比例：0.5 约半格，0.75 约 1.5 格（默认），1.0 占满整格。超过 1.0 会顶出模块外，建议 0.5–1.0。改完下拉控制中心即可看到效果，不用 respring。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
