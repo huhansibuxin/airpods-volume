@@ -1279,6 +1279,65 @@ static void apv_queryRealMediaVolume(void (^done)(float)) {
     } @catch (id e) {}
 }
 
+// 跨进程设置真实媒体播放音量（MediaRemote 路径，系统级生效）。
+// 关键：WeChat 在自己进程里改的音量，AVSystemController(SpringBoard 进程实例) 压不回去，
+// 必须走 MediaRemote 这条跨进程通道才能真正覆盖。
+static void (*sMRSetMediaPlaybackVolume)(float, dispatch_queue_t, void (^)(BOOL)) = NULL;
+static void apv_setRealMediaVolume(float vol) {
+    @try {
+        if (!sMRSetMediaPlaybackVolume) {
+            dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW);
+            sMRSetMediaPlaybackVolume = (void (*)(float, dispatch_queue_t, void (^)(BOOL)))
+                dlsym(RTLD_DEFAULT, "MRMediaRemoteSetMediaPlaybackVolume");
+            if (gVolDiag) volLog(sMRSetMediaPlaybackVolume ?
+                @"MRMediaRemoteSetMediaPlaybackVolume 符号已解析" :
+                @"MRMediaRemoteSetMediaPlaybackVolume 符号未找到");
+        }
+        if (!sMRSetMediaPlaybackVolume) return;
+        float v = fmaxf(0.0f, fminf(1.0f, vol));
+        sMRSetMediaPlaybackVolume(v, dispatch_get_main_queue(), ^(BOOL success){
+            if (gVolDiag) volLog([NSString stringWithFormat:@"MR 设媒体音量 %.2f 结果=%d", v, success]);
+        });
+    } @catch (id e) {}
+}
+
+// ============================================================
+// 跨进程音量变化监听（Darwin 通知，全系统投递）
+// AVSystemController_SystemVolumeDidChangeNotification 是【进程内】通知，
+// WeChat 在自己进程改音量时只在 WeChat 进程发 → SpringBoard 收不到（v1.9.70 实测静默）。
+// 而 MRMediaRemoteVolumeDidChangeNotification 经 Darwin notifyd 全系统投递，
+// 任何进程（含微信）的音量变化都会惊动 SpringBoard → 这是实时拦 in-app 改音量的唯一事件源。
+// ============================================================
+static const void *kMRVolObs = &kMRVolObs;
+static void apv_mrVolNotifCb(CFNotificationCenterRef center, void *observer,
+                             CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    @try {
+        if (!gLimitAlert) return;
+        if (!currentOutputIsAirPods()) return;
+        float cap = 0.7f;
+        apv_queryRealMediaVolume(^(float rv) {
+            if (gVolDiag) volLog([NSString stringWithFormat:@"MR音量变化通知 真值=%.3f cap=%.2f", rv, cap]);
+            if (rv > cap + 0.001f) {
+                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                if (now - sLastRealtimePress < 1.5) return;   // 防抖，避免与 HFP 复查/系统通知重复压
+                sLastRealtimePress = now;
+                apv_setRealMediaVolume(cap);
+                volLog([NSString stringWithFormat:@"MR实时压制 media %.3f -> %.2f (AirPods 在场)", rv, cap]);
+            }
+        });
+    } @catch (id e) {}
+}
+
+static void installMRVolumeNotif(void) {
+    if (!gLimitAlert) return;
+    CFNotificationCenterRef darwin = CFNotificationCenterGetDarwinNotifyCenter();
+    if (!darwin) return;
+    CFNotificationCenterAddObserver(darwin, (void *)kMRVolObs, apv_mrVolNotifCb,
+        CFSTR("MRMediaRemoteVolumeDidChangeNotification"), NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately);
+    apvBootLog(@"跨进程音量通知已装载 (MRMediaRemoteVolumeDidChangeNotification Darwin)");
+}
+
 static void handleSystemVolumeChanged(NSNotification *n) {
     @try {
         if (!gLimitAlert) return;
@@ -1491,7 +1550,8 @@ static void handleRouteEvent(NSString *source) {
                 }
                 if (hfpNow) startCallVolumeGuard();
                 // v1.9.70：打视频瞬间（HFP 0→1）微信可能经 MediaRemote 弹 100%，
-                // 延迟 1.2s 用 MediaRemote 真值复查一次，超 cap 就压（事件触发的一次性读数，非轮询）
+                // 延迟 1.2s 用 MediaRemote 真值复查一次，超 cap 就压（事件触发的一次性读数，非轮询）。
+                // v1.9.71：改用跨进程 apv_setRealMediaVolume，确保能压回微信在自己进程设的值。
                 if (hfpNow && gLimitAlert) {
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
                                    dispatch_get_main_queue(), ^{
@@ -1500,10 +1560,34 @@ static void handleRouteEvent(NSString *source) {
                             if (gVolDiag) volLog([NSString stringWithFormat:
                                 @"HFP 建立真值复查 media=%.3f cap=%.2f", rv, cap]);
                             if (rv > cap + 0.001f && currentOutputIsAirPods()) {
-                                id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                                [avc2 setVolumeTo:cap forCategory:@"Audio/Video"];
-                                volLog([NSString stringWithFormat:
-                                    @"HFP 建立真值压制 media %.3f -> %.2f", rv, cap]);
+                                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                                if (now - sLastRealtimePress >= 1.5) {
+                                    sLastRealtimePress = now;
+                                    apv_setRealMediaVolume(cap);
+                                    volLog([NSString stringWithFormat:
+                                        @"HFP 建立真值压制 media %.3f -> %.2f", rv, cap]);
+                                }
+                            }
+                        });
+                    });
+                }
+                // v1.9.71：通话结束（HFP 1→0）微信可能把 MediaPlaybackVolume 留在 100，
+                // 污染 AirPods 记忆→下次听歌炸耳。挂断瞬间真值复查一次并压回（事件驱动，一次性）。
+                if (!hfpNow && sPrevHFP && gLimitAlert) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        apv_queryRealMediaVolume(^(float rv) {
+                            float cap = currentOutputIsAirPods() ? 0.7f : 1.0f;
+                            if (gVolDiag) volLog([NSString stringWithFormat:
+                                @"HFP 结束真值复查 media=%.3f cap=%.2f", rv, cap]);
+                            if (rv > cap + 0.001f && currentOutputIsAirPods()) {
+                                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                                if (now - sLastRealtimePress >= 1.5) {
+                                    sLastRealtimePress = now;
+                                    apv_setRealMediaVolume(cap);
+                                    volLog([NSString stringWithFormat:
+                                        @"HFP 结束真值压制 media %.3f -> %.2f (防炸耳)", rv, cap]);
+                                }
                             }
                         });
                     });
@@ -1676,6 +1760,8 @@ static void handleRouteEvent(NSString *source) {
     installRingerSlider();
     // 实时媒体音量压制（SystemVolumeDidChange 事件驱动 + MediaRemote 真值，v1.9.70）
     installRealtimeVolumeGuard();
+    // 跨进程音量变化监听（Darwin 通知，能拦住 WeChat in-app 改音量，v1.9.71）
+    installMRVolumeNotif();
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
     [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
