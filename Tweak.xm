@@ -232,6 +232,94 @@ static float capForCategory(id cat) {
 %end
 
 // ============================================================
+// 控制中心：Now Playing（正在播放）模块压成 1x1
+// ============================================================
+// 尺寸单位 = 控制中心网格格数（竖屏共 4 列）。原生 nowplaying 占 2 宽 x 2 高
+// （吃掉半屏宽 + 两行），目标改 1x1。
+//
+// ⚠️ 为什么不能改 plist：尺寸表在
+// /System/Library/PrivateFrameworks/ControlCenterUI.framework/DefaultModuleSettings~iphone.plist
+// 但根分区挂载属性是 (apfs, sealed, read-only)，rootless 越狱下 root 也写不进去
+// （实测 echo >> 该文件报 read-only file system），只能走运行时 hook。
+//
+// 实现依据（逆向 xyz.cypwn.bettercc 0.0.55，Ghidra 反编译实锤）：
+//   它 MSHookMessageEx 挂 CCUIModuleSettingsManager 的
+//   -moduleSettingsForModuleIdentifier:prototypeSize:，命中目标模块后
+//   **不调原实现**，直接返回新建的
+//   [[CCUIModuleSettings alloc] initWithPortraitLayoutSize:landscapeLayoutSize:]。
+//   我们只做 media 那一支，其余模块一律走原实现（不误伤别的模块）。
+// ============================================================
+
+typedef struct { unsigned long long width; unsigned long long height; } CCUILayoutSize;
+
+@interface CCUIModuleSettings : NSObject
+- (instancetype)initWithPortraitLayoutSize:(CCUILayoutSize)portraitSize
+                       landscapeLayoutSize:(CCUILayoutSize)landscapeSize;
+@end
+
+@interface CCUIModuleSettingsManager : NSObject
+- (id)moduleSettingsForModuleIdentifier:(NSString *)identifier
+                          prototypeSize:(CCUILayoutSize)prototypeSize;
+@end
+
+// 控制中心音乐模块（nowplaying）的 identifier
+static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcenter.nowplaying";
+
+// 诊断日志（轻量：装载 + 命中各数行；验证通过后可将 CC_DEBUG 置 0 关掉）
+#define CC_DEBUG 1
+static void ccLog(NSString *msg) {
+#if CC_DEBUG
+    FILE *f = fopen("/var/jb/tmp/airpods_cc.log", "a");
+    if (f) {
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    }
+#endif
+}
+
+static id (*origModuleSettingsForModule)(id, SEL, NSString *, CCUILayoutSize) = NULL;
+
+static id replModuleSettingsForModule(id self, SEL _cmd, NSString *identifier, CCUILayoutSize proto) {
+    // 非目标模块：原样返回，保持系统行为
+    if (![identifier isEqualToString:kNowPlayingModuleID]) {
+        return origModuleSettingsForModule ? origModuleSettingsForModule(self, _cmd, identifier, proto) : nil;
+    }
+
+    // 目标模块：拿原 settings 做兜底，再返回 1x1 的新 settings
+    id origSettings = origModuleSettingsForModule ? origModuleSettingsForModule(self, _cmd, identifier, proto) : nil;
+    @try {
+        CCUILayoutSize one = { 1, 1 };
+        CCUIModuleSettings *mini = [[CCUIModuleSettings alloc] initWithPortraitLayoutSize:one
+                                                                    landscapeLayoutSize:one];
+        if (mini) {
+            ccLog(@"nowplaying -> 1x1 (新建 CCUIModuleSettings 替换)");
+            return mini;
+        }
+        ccLog(@"nowplaying -> 新建 CCUIModuleSettings 返回 nil，退回原 settings");
+    } @catch (id e) {
+        ccLog([NSString stringWithFormat:@"nowplaying EXC %@", e]);
+    }
+    return origSettings;
+}
+
+static void installNowPlaying1x1(void) {
+    // 系统框架只在 dyld 缓存里（文件系统里已无二进制），先强制加载再取类
+    dlopen("/System/Library/PrivateFrameworks/ControlCenterUI.framework/ControlCenterUI", RTLD_NOW);
+    Class mgrCls = NSClassFromString(@"CCUIModuleSettingsManager");
+    if (!mgrCls) {
+        ccLog(@"CCUIModuleSettingsManager 未找到（框架未加载）");
+        return;
+    }
+    SEL sel = NSSelectorFromString(@"moduleSettingsForModuleIdentifier:prototypeSize:");
+    if (![mgrCls instancesRespondToSelector:sel]) {
+        ccLog(@"CCUIModuleSettingsManager 不响应 moduleSettingsForModuleIdentifier:prototypeSize:");
+        return;
+    }
+    MSHookMessageEx(mgrCls, sel, (IMP)replModuleSettingsForModule, (IMP *)&origModuleSettingsForModule);
+    ccLog(@"hook 装载完成: CCUIModuleSettingsManager -moduleSettingsForModuleIdentifier:prototypeSize:");
+}
+
+// ============================================================
 // Block Shortcuts automation notifications
 // iOS16 上 NCNotificationDispatcher.postNotificationWithRequest:
 // 不是唯一入口：自动化通知常被系统合并/更新，走
@@ -820,6 +908,9 @@ static void handleRouteEvent(NSString *source) {
         startPollWindow();
         handleRouteEvent(@"ctor-init");
     }
+
+    // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
+    installNowPlaying1x1();
 
     // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
     dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
