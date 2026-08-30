@@ -664,11 +664,17 @@ static BOOL currentOutputIsAirPods(void);    // 同样在下方定义
 // 并复制圆角参数， visually 与左边无法区分。
 static void apv_copyStylingIfPossible(UIView *source, UIView *target) {
     if (!source || !target) return;
+    apvBootLog([NSString stringWithFormat:@"进入 copyStyling: source=%@ target=%@",
+                NSStringFromClass([source class]), NSStringFromClass([target class])]);
     @try {
         SEL getSel = NSSelectorFromString(@"stylingProvider");
         SEL setSel = NSSelectorFromString(@"setStylingProvider:");
-        if ([source respondsToSelector:getSel] && [target respondsToSelector:setSel]) {
+        BOOL srcHas = [source respondsToSelector:getSel];
+        BOOL tgtHas = [target respondsToSelector:setSel];
+        apvBootLog([NSString stringWithFormat:@"stylingProvider: src=%d tgt=%d", srcHas, tgtHas]);
+        if (srcHas && tgtHas) {
             id sp = ((id (*)(id, SEL))objc_msgSend)(source, getSel);
+            apvBootLog([NSString stringWithFormat:@"stylingProvider 读取值=%@", sp ? @"非nil" : @"nil"]);
             if (sp) {
                 ((void (*)(id, SEL, id))objc_msgSend)(target, setSel, sp);
                 apvBootLog(@"已复制 stylingProvider");
@@ -676,8 +682,12 @@ static void apv_copyStylingIfPossible(UIView *source, UIView *target) {
         }
         SEL vGetSel = NSSelectorFromString(@"visualStylingProvider");
         SEL vSetSel = NSSelectorFromString(@"setVisualStylingProvider:");
-        if ([source respondsToSelector:vGetSel] && [target respondsToSelector:vSetSel]) {
+        srcHas = [source respondsToSelector:vGetSel];
+        tgtHas = [target respondsToSelector:vSetSel];
+        apvBootLog([NSString stringWithFormat:@"visualStylingProvider: src=%d tgt=%d", srcHas, tgtHas]);
+        if (srcHas && tgtHas) {
             id vsp = ((id (*)(id, SEL))objc_msgSend)(source, vGetSel);
+            apvBootLog([NSString stringWithFormat:@"visualStylingProvider 读取值=%@", vsp ? @"非nil" : @"nil"]);
             if (vsp) {
                 ((void (*)(id, SEL, id))objc_msgSend)(target, vSetSel, vsp);
                 apvBootLog(@"已复制 visualStylingProvider");
@@ -685,8 +695,12 @@ static void apv_copyStylingIfPossible(UIView *source, UIView *target) {
         }
         SEL dGetSel = NSSelectorFromString(@"delegate");
         SEL dSetSel = NSSelectorFromString(@"setDelegate:");
-        if ([source respondsToSelector:dGetSel] && [target respondsToSelector:dSetSel]) {
+        srcHas = [source respondsToSelector:dGetSel];
+        tgtHas = [target respondsToSelector:dSetSel];
+        apvBootLog([NSString stringWithFormat:@"delegate: src=%d tgt=%d", srcHas, tgtHas]);
+        if (srcHas && tgtHas) {
             id del = ((id (*)(id, SEL))objc_msgSend)(source, dGetSel);
+            apvBootLog([NSString stringWithFormat:@"delegate 读取值=%@", del ? @"非nil" : @"nil"]);
             if (del) {
                 ((void (*)(id, SEL, id))objc_msgSend)(target, dSetSel, del);
                 apvBootLog(@"已复制 delegate");
@@ -694,16 +708,25 @@ static void apv_copyStylingIfPossible(UIView *source, UIView *target) {
         }
         SEL crSetSel = NSSelectorFromString(@"setContinuousSliderCornerRadius:");
         SEL crGetSel = NSSelectorFromString(@"continuousSliderCornerRadius");
-        if ([source respondsToSelector:crGetSel] && [target respondsToSelector:crSetSel]) {
+        srcHas = [source respondsToSelector:crGetSel];
+        tgtHas = [target respondsToSelector:crSetSel];
+        apvBootLog([NSString stringWithFormat:@"continuousSliderCornerRadius: src=%d tgt=%d", srcHas, tgtHas]);
+        if (srcHas && tgtHas) {
             double cr = ((double (*)(id, SEL))objc_msgSend)(source, crGetSel);
             ((void (*)(id, SEL, double))objc_msgSend)(target, crSetSel, cr);
+            apvBootLog([NSString stringWithFormat:@"已复制 cornerRadius=%.3f", cr]);
         }
         SEL updateSel = NSSelectorFromString(@"updateVisualStyling");
-        if ([target respondsToSelector:updateSel]) {
+        BOOL tgtHasUpdate = [target respondsToSelector:updateSel];
+        apvBootLog([NSString stringWithFormat:@"updateVisualStyling: tgt=%d", tgtHasUpdate]);
+        if (tgtHasUpdate) {
             ((void (*)(id, SEL))objc_msgSend)(target, updateSel);
             apvBootLog(@"已调用 updateVisualStyling");
         }
-    } @catch (id e) {}
+        apvBootLog(@"copyStyling 完成");
+    } @catch (id e) {
+        apvBootLog([NSString stringWithFormat:@"copyStyling 异常: %@", e]);
+    }
 }
 
 static UIView *apv_createNativeRingerSlider(CGRect frame, float value, UIView *styleReference) {
@@ -766,6 +789,11 @@ static UIView *apv_createNativeRingerSlider(CGRect frame, float value, UIView *s
     // 禁用 slider 自身交互，我们在它上面加透明触摸层接管，避免它改动媒体音量
     slider.userInteractionEnabled = NO;
     slider.tag = 0xA9B0;
+
+    // 强制刷新布局，让 visual styling 真正生效
+    [slider setNeedsLayout];
+    [slider layoutIfNeeded];
+
     return slider;
 }
 
@@ -883,6 +911,21 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
             objc_setAssociatedObject(self, kRingerSliderKey, ringer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [moduleView addSubview:ringer];
 
+            // iOS16 MRUVolumeView 可能有 secondarySlider 属性；把它登记进去，
+            // 系统才会像对待原生第二滑块一样给它应用 visual styling。
+            SEL secSetSel = NSSelectorFromString(@"setSecondarySlider:");
+            if ([moduleView respondsToSelector:secSetSel]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(moduleView, secSetSel, ringer);
+                apvBootLog(@"已设置 moduleView.secondarySlider");
+            }
+
+            // 复制左边滑块的 autoresizingMask，并强制布局刷新，让样式 provider 生效
+            ringer.autoresizingMask = primarySlider.autoresizingMask;
+            [ringer setNeedsLayout];
+            [ringer layoutIfNeeded];
+            [moduleView setNeedsLayout];
+            [moduleView layoutIfNeeded];
+
             // 原生 MRUContinuousSliderView 不自带铃声音量逻辑，加透明触摸层接管
             if (![ringer isKindOfClass:[APVRingerSliderView class]]) {
                 UIView *overlay = [[UIView alloc] initWithFrame:rFrame];
@@ -912,6 +955,8 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         SEL setCurSel = NSSelectorFromString(@"setCurrentValue:");
         if ([ringer respondsToSelector:setCurSel]) {
             ((void (*)(id, SEL, double))objc_msgSend)(ringer, setCurSel, (double)rv);
+            [ringer setNeedsLayout];
+            [ringer layoutIfNeeded];
         } else if ([ringer isKindOfClass:[APVRingerSliderView class]]) {
             ((APVRingerSliderView *)ringer).value = rv;
         }
