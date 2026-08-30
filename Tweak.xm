@@ -24,26 +24,12 @@ static BOOL apv_bool(NSString *key, BOOL def) {
     return valid ? (BOOL)v : def;
 }
 
-// 读数值（用户清空输入框会得到空串/0 → 必须回退默认，否则按钮尺寸崩坏）
-static CGFloat apv_float(NSString *key, CGFloat def) {
-    @try {
-        NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kAPVDomain];
-        id v = [d objectForKey:key];
-        if (v) {
-            CGFloat f = [v floatValue];
-            if (f > 0.0) return f;
-        }
-    } @catch (NSException *e) {}
-    return def;
-}
-
 // 缓存（启动 + 设置变更通知时刷新，避免每个事件都读 pref）
 static BOOL gAutoRoute = YES, gStealBack = YES, gStealHFP = YES;
 static BOOL gLimitAlert = YES, gHideReplayKit = YES;
-static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES, gHideSubtitle = YES;
+static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES;
 static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
-static CGFloat gPlayBtnScale = 0.75;
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -53,12 +39,10 @@ static void apv_refresh(void) {
     gHideReplayKit = apv_bool(@"hideReplayKitCCModules", YES);
     gShrinkNowPlaying = apv_bool(@"shrinkNowPlayingCCModule", YES);
     gHidePrevNext = apv_bool(@"hideNowPlayingPrevNext", YES);
-    gHideSubtitle = apv_bool(@"hideNowPlayingSubtitle", YES);
     gBlockPopup = apv_bool(@"blockAirPodsPopup", YES);
     gBlockShortcuts = apv_bool(@"blockShortcutsNotifications", YES);
     gMiniVolumeHUD = apv_bool(@"miniVolumeHUD", YES);
     gDisableHUDTouch = apv_bool(@"disableVolumeHUDTouch", YES);
-    gPlayBtnScale = apv_float(@"nowPlayingButtonScale", 0.75);
 }
 
 @interface AVSystemController : NSObject
@@ -420,138 +404,39 @@ static void installNowPlaying1x1(void) {
 // 只在 1×1 格子里动，长按展开后完全交回系统。
 // ============================================================
 
-static void (*origMRUControlsLayout)(id, SEL) = NULL;
 static void (*origMRUTransportLayout)(id, SEL) = NULL;
-static void (*origMRULabelLayout)(id, SEL) = NULL;
+
+// 取属性的 SEL 只解析一次（NSSelectorFromString 在 layoutSubviews 里每次跑是浪费）
+static SEL sSelLeft = NULL;
+static SEL sSelRight = NULL;
 
 // 1×1 格子判定：宽度落在 (1, 160) 之间
+// 实测 1×1 ≈ 96pt，展开态 ≈ 400pt，160 是安全分界线。
 static BOOL mru_isCompact(id view) {
     if (![view isKindOfClass:[UIView class]]) return NO;
-    CGRect b = ((UIView *)view).bounds;
-    return (b.size.width > 1.0 && b.size.width < 160.0);
+    CGFloat w = ((UIView *)view).bounds.size.width;
+    return (w > 1.0 && w < 160.0);
 }
 
-static id mru_obj(id view, NSString *selName) {
-    if (!view) return nil;
-    SEL s = NSSelectorFromString(selName);
+// 精确取属性：只对 self 自己 respondToSelector，不递归遍历整个视图树
+static id mru_obj(id view, SEL s) {
+    if (!view || !s) return nil;
     if (![view respondsToSelector:s]) return nil;
     return ((id (*)(id, SEL))objc_msgSend)(view, s);
 }
 
-// 递归收集 UILabel（副标题可能嵌在子视图里，只看第一层会漏）
-static void mru_collectLabels(UIView *v, NSMutableArray *out) {
-    for (UIView *sub in v.subviews) {
-        if ([sub isKindOfClass:[UILabel class]]) [out addObject:sub];
-        mru_collectLabels(sub, out);
-    }
-}
-
-// 保留第 1 个（标题=歌名），隐藏第 2 个及以后（副标题=歌手/专辑）
-static NSUInteger mru_hideExtraLabels(UIView *root) {
-    NSMutableArray *labels = [NSMutableArray array];
-    mru_collectLabels(root, labels);
-    NSUInteger hidden = 0;
-    for (NSUInteger i = 1; i < labels.count; i++) {
-        UIView *l = labels[i];
-        l.hidden = YES;
-        l.alpha = 0.0;      // 双保险：系统刷新 label 时会重置 hidden
-        hidden++;
-    }
-    return hidden;
-}
-
-static void replMRULabelLayout(id self, SEL _cmd) {
-    if (origMRULabelLayout) origMRULabelLayout(self, _cmd);
-    @try {
-        if (!gShrinkNowPlaying || !gHideSubtitle) return;
-        if (!mru_isCompact(self)) {
-            // 展开/全屏态：把 1×1 里隐藏掉的副标题恢复回来
-            NSMutableArray *labels = [NSMutableArray array];
-            mru_collectLabels((UIView *)self, labels);
-            for (NSUInteger i = 1; i < labels.count; i++) {
-                UIView *l = labels[i];
-                if (l.hidden) { l.hidden = NO; l.alpha = 1.0; }
-            }
-            return;
-        }
-
-        static BOOL sLogged = NO;
-        if (!sLogged) {
-            sLogged = YES;
-            UIView *v = (UIView *)self;
-            NSMutableString *ms = [NSMutableString stringWithFormat:
-                @"diag LabelView bounds=%.0fx%.0f subviews:", v.bounds.size.width, v.bounds.size.height];
-            for (UIView *s in v.subviews) [ms appendFormat:@" %@", NSStringFromClass([s class])];
-            ccLog(ms);
-        }
-        // 系统在 layout 之后还会刷新 label 内容并把 hidden 重置回去，
-        // 所以推到下一个 runloop 再隐藏，保证压在系统的更新之后。
-        UIView *lv = (UIView *)self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSUInteger n = mru_hideExtraLabels(lv);
-            if (n) ccLog([NSString stringWithFormat:@"隐藏副标题 %lu 个", (unsigned long)n]);
-        });
-    } @catch (NSException *e) {}
-}
-
+// 1×1：只把上一曲/下一曲按掉（alpha 0，UIKit 对 alpha<0.01 的视图不做 hit-test，
+// 所以点不到，也不会占掉中间的点击区域）。展开态完全归还原生，一个属性都不碰。
 static void replMRUTransportLayout(id self, SEL _cmd) {
     if (origMRUTransportLayout) origMRUTransportLayout(self, _cmd);
     @try {
-        if (!gShrinkNowPlaying || !gHidePrevNext) return;
-        if (!mru_isCompact(self)) {
-            // 展开/全屏态：上一曲/下一曲恢复显示，播放键尺寸还原
-            [mru_obj(self, @"leftButton") setAlpha:1.0];
-            [mru_obj(self, @"rightButton") setAlpha:1.0];
-            UIView *m = (UIView *)mru_obj(self, @"middleButton");
-            if (m && !CGAffineTransformEqualToTransform(m.transform, CGAffineTransformIdentity))
-                m.transform = CGAffineTransformIdentity;
-            return;
-        }
-
-        [mru_obj(self, @"leftButton") setAlpha:0.0];
-        [mru_obj(self, @"rightButton") setAlpha:0.0];
-
-        // 播放键放大：**用 transform**——直接改 frame 会被 autolayout 重置
-        // （老板实测改 1 / 2 都没反应，就是改 frame 无效）。
-        UIView *middle = (UIView *)mru_obj(self, @"middleButton");
-        if (middle) {
-            CGFloat moduleW = middle.superview ? middle.superview.bounds.size.width : 0.0;
-            CGFloat curW = middle.bounds.size.width;  // bounds 不受 transform 影响
-            static BOOL sLogged = NO;
-            if (!sLogged) {
-                sLogged = YES;
-                ccLog([NSString stringWithFormat:
-                    @"diag Transport bounds=%.0fx%.0f middle=%@ curW=%.0f moduleW=%.0f scale=%.2f",
-                    ((UIView *)self).bounds.size.width, ((UIView *)self).bounds.size.height,
-                    NSStringFromClass([middle class]), curW, moduleW, gPlayBtnScale]);
-            }
-            if (moduleW > 0.0 && curW > 0.0) {
-                CGFloat target = moduleW * gPlayBtnScale;
-                CGFloat s = target / curW;
-                if (s > 1.01) middle.transform = CGAffineTransformMakeScale(s, s);
-            }
-        }
-    } @catch (NSException *e) {}
-}
-
-static void replMRUControlsLayout(id self, SEL _cmd) {
-    if (origMRUControlsLayout) origMRUControlsLayout(self, _cmd);
-    @try {
-        if (!gShrinkNowPlaying) return;
-        if (!mru_isCompact(self)) return;
-
-        static BOOL sLogged = NO;
-        UIView *tv = (UIView *)mru_obj(self, @"transportControlsView");
-        if (!sLogged) {
-            sLogged = YES;
-            ccLog([NSString stringWithFormat:@"diag Controls bounds=%.0fx%.0f transport=%@",
-                   ((UIView *)self).bounds.size.width, ((UIView *)self).bounds.size.height,
-                   tv ? NSStringFromClass([tv class]) : @"nil"]);
-        }
-        if (!tv) return;
-        CGRect b = ((UIView *)self).bounds;
-        CGFloat h = 46.0;
-        tv.frame = CGRectMake(0, b.size.height - h, b.size.width, h);
+        // 开关关了也要把 alpha 还原回去，否则关不掉
+        BOOL want = (gShrinkNowPlaying && gHidePrevNext && mru_isCompact(self));
+        CGFloat a = want ? 0.0 : 1.0;
+        UIView *l = (UIView *)mru_obj(self, sSelLeft);
+        UIView *r = (UIView *)mru_obj(self, sSelRight);
+        if (l.alpha != a) { l.alpha = a; l.userInteractionEnabled = !want; }
+        if (r.alpha != a) { r.alpha = a; r.userInteractionEnabled = !want; }
     } @catch (NSException *e) {}
 }
 
@@ -559,29 +444,21 @@ static void installNowPlayingLayoutTweaks(void) {
     // MRUNowPlaying* 在 MediaRemoteUI 私有框架（系统框架只在 dyld 缓存里）
     dlopen("/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI", RTLD_NOW);
 
-    struct { const char *cls; const char *sel; IMP repl; void **orig; } hooks[] = {
-        { "MRUNowPlayingControlsView", "layoutSubviews",
-          (IMP)replMRUControlsLayout, (void **)&origMRUControlsLayout },
-        { "MRUNowPlayingTransportControlsView", "layoutSubviews",
-          (IMP)replMRUTransportLayout, (void **)&origMRUTransportLayout },
-        { "MRUNowPlayingLabelView", "layoutSubviews",
-          (IMP)replMRULabelLayout, (void **)&origMRULabelLayout },
-    };
+    sSelLeft  = NSSelectorFromString(@"leftButton");
+    sSelRight = NSSelectorFromString(@"rightButton");
 
-    for (int i = 0; i < 3; i++) {
-        Class c = NSClassFromString([NSString stringWithUTF8String:hooks[i].cls]);
-        if (!c) {
-            ccLog([NSString stringWithFormat:@"%s 类未找到，跳过", hooks[i].cls]);
-            continue;
-        }
-        SEL s = NSSelectorFromString([NSString stringWithUTF8String:hooks[i].sel]);
-        if (![c instancesRespondToSelector:s]) {
-            ccLog([NSString stringWithFormat:@"%s 不响应 %s，跳过", hooks[i].cls, hooks[i].sel]);
-            continue;
-        }
-        MSHookMessageEx(c, s, hooks[i].repl, (IMP *)hooks[i].orig);
-        ccLog([NSString stringWithFormat:@"hook 装载: %s -%s", hooks[i].cls, hooks[i].sel]);
+    Class c = NSClassFromString(@"MRUNowPlayingTransportControlsView");
+    SEL s = NSSelectorFromString(@"layoutSubviews");
+    if (!c) {
+        ccLog(@"MRUNowPlayingTransportControlsView 类未找到，跳过");
+        return;
     }
+    if (![c instancesRespondToSelector:s]) {
+        ccLog(@"MRUNowPlayingTransportControlsView 不响应 layoutSubviews，跳过");
+        return;
+    }
+    MSHookMessageEx(c, s, (IMP)replMRUTransportLayout, (IMP *)&origMRUTransportLayout);
+    ccLog(@"hook 装载: MRUNowPlayingTransportControlsView -layoutSubviews (1×1 隐藏上一曲/下一曲)");
 }
 
 // ============================================================
@@ -1009,7 +886,9 @@ static void enforceAirPodsRoute(void) {
         // HFP 通话路由单独切到车载（车载免提优先），而 A2DP 媒体输出可能还在
         // AirPods（抖音在放）→ 上面 outIsAP=YES 误判"输出是 AirPods"不抢。
         // 综合检测 carOwnsCall（HFP 输出/输入/系统输出任一为车载）→ 多策略抢回。
-        if (carOwnsCall() && gStealHFP) {
+        // ⚠️ 顺序有讲究：gStealHFP 是内存里的 BOOL（零成本），carOwnsCall()
+        // 要遍历 蓝牙设备 + 路由 + 输出端三组列表。开关关掉时短路掉整个检测。
+        if (gStealHFP && carOwnsCall()) {
             routeLog(@"enforce carOwnsCall=1 -> forceCallToAirPods");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
@@ -1149,10 +1028,17 @@ static void handleRouteEvent(NSString *source) {
     dispatch_source_set_timer(sPollTimer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(sPollTimer, ^{
+        // 便宜的短路（CPU 审计 v1.9.56）：
+        //  1) 三个路由开关全关 → 停表，一次检测都不做
+        //  2) AirPods 不在场 → 停表，等 btconnect 再开（以前会白跑满 60s 窗口）
+        if ((!gAutoRoute && !gStealBack && !gStealHFP) || !sAirPodsConnected) {
+            stopPoll();
+            return;
+        }
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         // 车模式（车载+AirPods 同时在场）：持续监控，窗口续期不断，
         // 保证"车载连接状态下打微信视频被切车载"能在 1.5s 内被抢回
-        if (sAirPodsConnected && otherBTDeviceConnected()) {
+        if (otherBTDeviceConnected()) {
             sPollWindowEnd = now + 60.0;
         } else if (now > sPollWindowEnd) {
             if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
@@ -1194,7 +1080,7 @@ static void handleRouteEvent(NSString *source) {
 
     // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
     installNowPlaying1x1();
-    // 1×1 模块内部布局：隐藏上/下一首 + 副标题，放大播放键
+    // 1×1 模块内部布局：只隐藏上一曲/下一曲（展开态完全原生）
     installNowPlayingLayoutTweaks();
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
