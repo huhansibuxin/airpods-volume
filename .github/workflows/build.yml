@@ -19,7 +19,12 @@ jobs:
           echo "THEOS_PACKAGE_SCHEME=rootless" >> $GITHUB_ENV
 
       - name: Install dependencies
-        run: brew install dpkg ldid
+        run: |
+          # 新版 Homebrew 默认要求 tap trust，未信任时 brew install 直接中断
+          # （报错提示 brew trust ... / HOMEBREW_NO_REQUIRE_TAP_TRUST）。
+          # CI runner 上装的是第三方 tap，这里显式关掉该检查。
+          export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
+          brew install dpkg ldid
 
       - name: Install SDK
         run: |
