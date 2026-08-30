@@ -99,6 +99,20 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
+			<string>媒体音量保护（脱离耳机也能测）</string>
+			<key>key</key>
+			<string>limitMediaVolume</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
 			<string>诊断日志（排查用）</string>
 			<key>key</key>
 			<string>volumeDiagLog</string>

@@ -33,6 +33,7 @@ static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
 static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVolumeTo 都记，排查用）
 static BOOL gCallVolumeGuard = YES; // 通话期间媒体音量兜底压制（默认开）
 static BOOL gShowRingerSlider = YES; // 控制中心音量模块展开后显示铃声音量滑块（默认开）
+static BOOL gLimitMediaVolume = NO;  // 媒体音量保护（默认关：开=始终把媒体音量限制 0.70，与是否戴 AirPods 无关，便于脱离耳机测试）
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -49,6 +50,7 @@ static void apv_refresh(void) {
     gVolDiag = apv_bool(@"volumeDiagLog", NO);
     gCallVolumeGuard = apv_bool(@"callVolumeGuard", YES);
     gShowRingerSlider = apv_bool(@"showRingerSlider", YES);
+    gLimitMediaVolume = apv_bool(@"limitMediaVolume", NO);
 }
 
 @interface AVSystemController : NSObject
@@ -978,6 +980,15 @@ static BOOL currentOutputIsAirPods(void) {
     return NO;
 }
 
+// 媒体音量是否应被限制（封顶 0.70）。
+// 默认仅戴 AirPods 时限制（gLimitAlert 开 + currentOutputIsAirPods）；
+// 打开「媒体音量保护」开关(gLimitMediaVolume)后不受 AirPods 限制，便于脱离耳机自测。
+static BOOL apv_mediaShouldCap(void) {
+    if (!gLimitAlert) return NO;
+    return gLimitMediaVolume || currentOutputIsAirPods();
+}
+static float apv_mediaCap(void) { return apv_mediaShouldCap() ? 0.70f : 1.0f; }
+
 // 检测 HFP 通话路由是否被车载占用（视频/语音通话场景，2026-08-23 老板实测）：
 // 抖音 A2DP 还在 AirPods 放，打微信视频时系统把 HFP 通话路由单独切到车载
 //（车载免提优先级）→ currentRoute.outputs 出现"非 AirPods 的 BluetoothHFP 端口"。
@@ -1301,6 +1312,25 @@ static void apv_setRealMediaVolume(float vol) {
     } @catch (id e) {}
 }
 
+// 通话/HFP 边界处用 MediaRemote 真值复查媒体音量（事件触发，非轮询）。
+// 始终记录真实值（不再受 gVolDiag 门控）——这是判断"弹 100% 究竟是媒体音量还是通话音量"的关键证据。
+// 超 cap 则跨进程压回 0.7（1.5s 防抖避免与别处重复写）。
+static void apv_pressMediaIfOverCap(NSString *why) {
+    if (!apv_mediaShouldCap()) return;
+    float cap = apv_mediaCap();
+    apv_queryRealMediaVolume(^(float rv) {
+        volLog([NSString stringWithFormat:@"%@ 真值复查 media=%.3f cap=%.2f", why, rv, cap]);
+        if (rv > cap + 0.001f) {
+            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+            if (now - sLastRealtimePress >= 1.5) {
+                sLastRealtimePress = now;
+                apv_setRealMediaVolume(cap);
+                volLog([NSString stringWithFormat:@"%@ 真值压制 media %.3f -> %.2f", why, rv, cap]);
+            }
+        }
+    });
+}
+
 // ============================================================
 // 跨进程音量变化监听（Darwin 通知，全系统投递）
 // AVSystemController_SystemVolumeDidChangeNotification 是【进程内】通知，
@@ -1309,12 +1339,12 @@ static void apv_setRealMediaVolume(float vol) {
 // 任何进程（含微信）的音量变化都会惊动 SpringBoard → 这是实时拦 in-app 改音量的唯一事件源。
 // ============================================================
 static const void *kMRVolObs = &kMRVolObs;
+static const void *kMRVolDiagObs = &kMRVolDiagObs;
 static void apv_mrVolNotifCb(CFNotificationCenterRef center, void *observer,
                              CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     @try {
-        if (!gLimitAlert) return;
-        if (!currentOutputIsAirPods()) return;
-        float cap = 0.7f;
+        if (!apv_mediaShouldCap()) return;
+        float cap = apv_mediaCap();
         apv_queryRealMediaVolume(^(float rv) {
             if (gVolDiag) volLog([NSString stringWithFormat:@"MR音量变化通知 真值=%.3f cap=%.2f", rv, cap]);
             if (rv > cap + 0.001f) {
@@ -1322,9 +1352,21 @@ static void apv_mrVolNotifCb(CFNotificationCenterRef center, void *observer,
                 if (now - sLastRealtimePress < 1.5) return;   // 防抖，避免与 HFP 复查/系统通知重复压
                 sLastRealtimePress = now;
                 apv_setRealMediaVolume(cap);
-                volLog([NSString stringWithFormat:@"MR实时压制 media %.3f -> %.2f (AirPods 在场)", rv, cap]);
+                volLog([NSString stringWithFormat:@"MR实时压制 media %.3f -> %.2f", rv, cap]);
             }
         });
+    } @catch (id e) {}
+}
+
+// Darwin 通知名诊断回调：记录所有含 Volume/Media 的系统通知，定位微信 in-app 改音量的真实广播名
+static void apv_mrVolDiagCb(CFNotificationCenterRef center, void *observer,
+                            CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    @try {
+        NSString *n = (__bridge NSString *)name;
+        if ([n rangeOfString:@"Volume" options:NSCaseInsensitiveSearch].length ||
+            [n rangeOfString:@"Media" options:NSCaseInsensitiveSearch].length) {
+            volLog([NSString stringWithFormat:@"[Darwin通知] %@", n]);
+        }
     } @catch (id e) {}
 }
 
@@ -1336,6 +1378,14 @@ static void installMRVolumeNotif(void) {
         CFSTR("MRMediaRemoteVolumeDidChangeNotification"), NULL,
         CFNotificationSuspensionBehaviorDeliverImmediately);
     apvBootLog(@"跨进程音量通知已装载 (MRMediaRemoteVolumeDidChangeNotification Darwin)");
+
+    // 诊断：抓所有含 Volume/Media 的 Darwin 通知名，定位微信 in-app 改音量真正广播的通知
+    // （v1.9.71 实测 MRMediaRemoteVolumeDidChangeNotification 对我们场景不投递）。仅诊断开关开时挂。
+    if (gVolDiag) {
+        CFNotificationCenterAddObserver(darwin, (void *)kMRVolDiagObs, apv_mrVolDiagCb,
+            NULL, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+        apvBootLog(@"Darwin 通知名诊断已装载 (gVolDiag)");
+    }
 }
 
 static void handleSystemVolumeChanged(NSNotification *n) {
@@ -1351,17 +1401,16 @@ static void handleSystemVolumeChanged(NSNotification *n) {
         }
         // 只管媒体音量类别；读不到类别时保守不压（防误伤通话音量）
         if (![cat isEqualToString:@"Audio/Video"]) return;
-        float cap = sAirPodsConnected ? 0.7f : 1.0f;
+        if (!apv_mediaShouldCap()) return;
+        float cap = apv_mediaCap();
         if (vol <= cap + 0.001f) return;
         // 防抖：1.5s 内已压过就不再写（压回 0.7 的第二次通知值=cap，天然不进这里）
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         if (now - sLastRealtimePress < 1.5) return;
         sLastRealtimePress = now;
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        // 输出不是 AirPods 时不压（避免污染喇叭记忆）
-        if (!currentOutputIsAirPods()) return;
         [avc setVolumeTo:cap forCategory:@"Audio/Video"];
-        volLog([NSString stringWithFormat:@"实时压制 media %.3f -> %.2f (AirPods 在场)", vol, cap]);
+        volLog([NSString stringWithFormat:@"实时压制 media %.3f -> %.2f", vol, cap]);
         // 压完用 MediaRemote 真值复查一次，确认是否真的压到位（MediaRemote 写入路径可能不吃 AVSystemController 的账）
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
@@ -1549,47 +1598,24 @@ static void handleRouteEvent(NSString *source) {
                         sPrevHFP, hfpNow, source, sAirPodsConnected, currentOutputIsAirPods()]);
                 }
                 if (hfpNow) startCallVolumeGuard();
-                // v1.9.70：打视频瞬间（HFP 0→1）微信可能经 MediaRemote 弹 100%，
-                // 延迟 1.2s 用 MediaRemote 真值复查一次，超 cap 就压（事件触发的一次性读数，非轮询）。
-                // v1.9.71：改用跨进程 apv_setRealMediaVolume，确保能压回微信在自己进程设的值。
-                if (hfpNow && gLimitAlert) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
-                                   dispatch_get_main_queue(), ^{
-                        apv_queryRealMediaVolume(^(float rv) {
-                            float cap = currentOutputIsAirPods() ? 0.7f : 1.0f;
-                            if (gVolDiag) volLog([NSString stringWithFormat:
-                                @"HFP 建立真值复查 media=%.3f cap=%.2f", rv, cap]);
-                            if (rv > cap + 0.001f && currentOutputIsAirPods()) {
-                                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                                if (now - sLastRealtimePress >= 1.5) {
-                                    sLastRealtimePress = now;
-                                    apv_setRealMediaVolume(cap);
-                                    volLog([NSString stringWithFormat:
-                                        @"HFP 建立真值压制 media %.3f -> %.2f", rv, cap]);
-                                }
-                            }
+                // v1.9.72：打视频瞬间（HFP 0→1）微信可能经 MediaRemote 弹 100%（媒体音量）。
+                // 在多个时间点真值复查：0.3s(刚建立)/1.2s(视频起)/3s(稳定)，任一时刻超 cap 即压回。
+                // 用 apv_pressMediaIfOverCap（始终记真值），便于判断弹的到底是媒体还是通话音量。
+                if (hfpNow) {
+                    for (NSNumber *d in @[@0.3, @1.2, @3.0]) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)([d doubleValue] * NSEC_PER_SEC)),
+                                       dispatch_get_main_queue(), ^{
+                            apv_pressMediaIfOverCap(@"HFP 建立");
                         });
-                    });
+                    }
                 }
-                // v1.9.71：通话结束（HFP 1→0）微信可能把 MediaPlaybackVolume 留在 100，
-                // 污染 AirPods 记忆→下次听歌炸耳。挂断瞬间真值复查一次并压回（事件驱动，一次性）。
-                if (!hfpNow && sPrevHFP && gLimitAlert) {
+                // 通话结束（HFP 1→0）微信可能把 MediaPlaybackVolume 留在 100，污染 AirPods 记忆→下次听歌炸耳。
+                // 挂断 0.8s 真值复查并压回（事件驱动，一次性）。
+                if (!hfpNow && sPrevHFP) {
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
                                    dispatch_get_main_queue(), ^{
-                        apv_queryRealMediaVolume(^(float rv) {
-                            float cap = currentOutputIsAirPods() ? 0.7f : 1.0f;
-                            if (gVolDiag) volLog([NSString stringWithFormat:
-                                @"HFP 结束真值复查 media=%.3f cap=%.2f", rv, cap]);
-                            if (rv > cap + 0.001f && currentOutputIsAirPods()) {
-                                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                                if (now - sLastRealtimePress >= 1.5) {
-                                    sLastRealtimePress = now;
-                                    apv_setRealMediaVolume(cap);
-                                    volLog([NSString stringWithFormat:
-                                        @"HFP 结束真值压制 media %.3f -> %.2f (防炸耳)", rv, cap]);
-                                }
-                            }
-                        });
+                        apv_pressMediaIfOverCap(@"HFP 结束");
                     });
                 }
                 sPrevHFP = hfpNow;
