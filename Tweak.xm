@@ -31,9 +31,7 @@ static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES;
 static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
 static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVolumeTo 都记，排查用）
-static BOOL gCallVolumeGuard = YES; // 通话期间媒体音量兜底压制（默认开）
 static BOOL gShowRingerSlider = YES; // 控制中心音量模块展开后显示铃声音量滑块（默认开）
-static BOOL gLimitMediaVolume = NO;  // 媒体音量保护（默认关：开=始终把媒体音量限制 0.70，与是否戴 AirPods 无关，便于脱离耳机测试）
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -48,9 +46,7 @@ static void apv_refresh(void) {
     gMiniVolumeHUD = apv_bool(@"miniVolumeHUD", YES);
     gDisableHUDTouch = apv_bool(@"disableVolumeHUDTouch", YES);
     gVolDiag = apv_bool(@"volumeDiagLog", NO);
-    gCallVolumeGuard = apv_bool(@"callVolumeGuard", YES);
     gShowRingerSlider = apv_bool(@"showRingerSlider", YES);
-    gLimitMediaVolume = apv_bool(@"limitMediaVolume", NO);
 }
 
 @interface AVSystemController : NSObject
@@ -162,7 +158,7 @@ static BOOL isRingerMuted(void) {
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
     if (isNotificationCategory(cat)) return 0.4f;
-    return 0.7f; // media + everything else: cap at 70%
+    return 1.0f; // v1.9.75: 媒体音量完全不管（系统自管理已验证正常），只压铃声/通知 40%
 }
 
 // ============================================================
@@ -171,15 +167,12 @@ static float capForCategory(id cat) {
 
 %hook SBVolumeControl
 - (BOOL)increaseVolume {
-    // 戴上 AirPods：物理音量键+ 禁用（老板要求：戴上时按钮不生效，只能控制中心调）。
-    // 原实现读 getVolume("Audio/Video") >= 0.7 吞掉音量+——但视频通话（HFP）时
-    // getVolume 返回通话音量（常 >=0.7）→ 音量+永远按不动（实测 bug）；且老板
-    // 要的是戴上时 +/- 全禁，故直接 return NO，不做任何读取判断。
+    // v1.9.75 定案：戴 AirPods 时音量键 +/- 全禁（只能控制中心/设置调媒体音量）；
+    // 不戴 AirPods 时按钮完全原生（媒体音量随便调）。
     if (sAirPodsConnected) return NO;
     return %orig;
 }
 - (BOOL)decreaseVolume {
-    // 戴上 AirPods：物理音量键- 禁用（与 + 对称，老板要求按钮整体不生效）
     if (sAirPodsConnected) return NO;
     return %orig;
 }
@@ -980,15 +973,6 @@ static BOOL currentOutputIsAirPods(void) {
     return NO;
 }
 
-// 媒体音量是否应被限制（封顶 0.70）。
-// 默认仅戴 AirPods 时限制（gLimitAlert 开 + currentOutputIsAirPods）；
-// 打开「媒体音量保护」开关(gLimitMediaVolume)后不受 AirPods 限制，便于脱离耳机自测。
-static BOOL apv_mediaShouldCap(void) {
-    if (!gLimitAlert) return NO;
-    return gLimitMediaVolume || currentOutputIsAirPods();
-}
-static float apv_mediaCap(void) { return apv_mediaShouldCap() ? 0.70f : 1.0f; }
-
 // 检测 HFP 通话路由是否被车载占用（视频/语音通话场景，2026-08-23 老板实测）：
 // 抖音 A2DP 还在 AirPods 放，打微信视频时系统把 HFP 通话路由单独切到车载
 //（车载免提优先级）→ currentRoute.outputs 出现"非 AirPods 的 BluetoothHFP 端口"。
@@ -1250,244 +1234,13 @@ static void stopPoll(void) {
 // ============================================================
 
 // ============================================================
-// 实时媒体音量压制（v1.9.70，真值 + 事件驱动）
-// 老痛点：AVSystemController getVolume 无播放会话时返回假值 0.70，
-//   我们只能"盲压"（attach 三连压/通话兜底），微信打视频经 MediaRemote
-//   路径弹 100% 既看不到也拦不住。
-// 调研实锤（mediacli / VolumeBar / 知识小集）：
-//   1) MRMediaRemoteGetMediaPlaybackVolume(queue, ^(float v){...})
-//      —— MediaRemote.framework C 函数，返回**真实**媒体播放音量 0~1。
-//   2) AVSystemController_SystemVolumeDidChangeNotification
-//      —— 系统私有 NSNotification，任何音量变化（按键/控制中心/app 设置）
-//      都发，userInfo:
-//        AVSystemController_AudioVolumeNotificationParameter = 新值
-//        AVSystemController_AudioCategoryNotificationParameter = 类别
-//        AVSystemController_AudioVolumeChangeReasonNotificationParameter = 原因
-// 设计：纯事件驱动（零轮询）。通知回调里读新值，Audio/Video 类别且
-//   超过 cap（AirPods 在场 0.7，不在场 1.0 不压）→ 立刻 setVolumeTo 压回。
-//   压回触发的第二次通知值 = cap，天然收敛，另加 1.5s 去重防抖。
-//   HFP 0→1（打视频）时额外用 GetMediaPlaybackVolume 复查一次真值。
-// 门控：gLimitAlert（设置"音量保护"），诊断日志归 gVolDiag。
+// v1.9.75 定案（老板实测驱动）：媒体音量完全不管。
+//   v1.9.74 零干预实测：微信来视频/挂断时 MediaPlaybackVolume 全程纹丝不动（0.700），
+//   系统三个音量（通知/媒体播放/通话）各自记忆、自管理完全正常。
+//   MRMediaRemoteSetMediaPlaybackVolume 一调必崩（PAC，v1.9.73 安全模式实锤），
+//   AVSystemController setVolumeTo 压媒体又干扰系统记忆 → 媒体压制整体移除。
+//   保留：戴 AirPods 时音量键禁用（SBVolumeControl hook）+ 铃声/通知 40% 压制。
 // ============================================================
-
-static dispatch_source_t sVolNotifDebounce = NULL;
-static NSTimeInterval sLastRealtimePress = 0;
-static void (*sMRGetMediaPlaybackVolume)(dispatch_queue_t, void (^)(float)) = NULL;
-
-// 读真实媒体播放音量（MediaRemote 路径，绕开 AVSystemController 假值）
-static void apv_queryRealMediaVolume(void (^done)(float)) {
-    @try {
-        if (!sMRGetMediaPlaybackVolume) {
-            dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW);
-            sMRGetMediaPlaybackVolume = (void (*)(dispatch_queue_t, void (^)(float)))
-                dlsym(RTLD_DEFAULT, "MRMediaRemoteGetMediaPlaybackVolume");
-            if (gVolDiag) volLog(sMRGetMediaPlaybackVolume ?
-                @"MRMediaRemoteGetMediaPlaybackVolume 符号已解析" :
-                @"MRMediaRemoteGetMediaPlaybackVolume 符号未找到");
-        }
-        if (!sMRGetMediaPlaybackVolume) return;
-        sMRGetMediaPlaybackVolume(dispatch_get_main_queue(), ^(float v) { done(v); });
-    } @catch (id e) {}
-}
-
-// 设置媒体播放音量。
-// ⚠️ v1.9.73 铁律：禁止调用 MRMediaRemoteSetMediaPlaybackVolume！
-// iOS16 SpringBoard 里该私有 API 一调必崩（EXC_BAD_ACCESS PAC failure，
-// _MRServiceCreateErrorHandlerBlock 内部 block 拷贝时指针认证失败），
-// 已实测安全模式（SpringBoard-2026-08-31-071255.ips，触发点=真值 0.761>cap 压回）。
-// 改回 AVSystemController setVolumeTo:（SpringBoard 进程实例，安全不崩；
-// 对微信 in-app 经 MediaRemote 设的值可能压不完全，但 HFP 结束复查会补刀，且绝不崩）。
-static void apv_setRealMediaVolume(float vol) {
-    @try {
-        float v = fmaxf(0.0f, fminf(1.0f, vol));
-        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        if (avc && [avc respondsToSelector:@selector(setVolumeTo:forCategory:)]) {
-            [avc setVolumeTo:v forCategory:@"Audio/Video"];
-            if (gVolDiag) volLog([NSString stringWithFormat:@"avc 设媒体音量 %.2f", v]);
-        }
-    } @catch (id e) {}
-}
-
-// 通话/HFP 边界处用 MediaRemote 真值复查媒体音量（事件触发，非轮询）。
-// 始终记录真实值（不再受 gVolDiag 门控）——这是判断"弹 100% 究竟是媒体音量还是通话音量"的关键证据。
-// 超 cap 则用 AVSystemController 压回 0.7（1.5s 防抖避免与别处重复写；禁止 MR setter，见 apv_setRealMediaVolume）。
-static void apv_pressMediaIfOverCap(NSString *why) {
-    float cap = apv_mediaCap();
-    apv_queryRealMediaVolume(^(float rv) {
-        // 始终记录真实媒体音量（只读，不依赖开关）——这是验证"微信来视频/挂断是否污染媒体记忆"的证据。
-        volLog([NSString stringWithFormat:@"%@ 真值复查 media=%.3f cap=%.2f", why, rv, cap]);
-        // 压制才看开关：开关全关时只记录不写入（老板实测：零干预时系统音量记忆完全正常）
-        if (!apv_mediaShouldCap()) return;
-        if (rv > cap + 0.001f) {
-            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-            if (now - sLastRealtimePress >= 1.5) {
-                sLastRealtimePress = now;
-                apv_setRealMediaVolume(cap);
-                volLog([NSString stringWithFormat:@"%@ 真值压制 media %.3f -> %.2f", why, rv, cap]);
-            }
-        }
-    });
-}
-
-// ============================================================
-// 跨进程音量变化监听（Darwin 通知，全系统投递）
-// AVSystemController_SystemVolumeDidChangeNotification 是【进程内】通知，
-// WeChat 在自己进程改音量时只在 WeChat 进程发 → SpringBoard 收不到（v1.9.70 实测静默）。
-// 而 MRMediaRemoteVolumeDidChangeNotification 经 Darwin notifyd 全系统投递，
-// 任何进程（含微信）的音量变化都会惊动 SpringBoard → 这是实时拦 in-app 改音量的唯一事件源。
-// ============================================================
-static const void *kMRVolObs = &kMRVolObs;
-static const void *kMRVolDiagObs = &kMRVolDiagObs;
-static void apv_mrVolNotifCb(CFNotificationCenterRef center, void *observer,
-                             CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    @try {
-        if (!apv_mediaShouldCap()) return;
-        float cap = apv_mediaCap();
-        apv_queryRealMediaVolume(^(float rv) {
-            if (gVolDiag) volLog([NSString stringWithFormat:@"MR音量变化通知 真值=%.3f cap=%.2f", rv, cap]);
-            if (rv > cap + 0.001f) {
-                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                if (now - sLastRealtimePress < 1.5) return;   // 防抖，避免与 HFP 复查/系统通知重复压
-                sLastRealtimePress = now;
-                apv_setRealMediaVolume(cap);
-                volLog([NSString stringWithFormat:@"MR实时压制 media %.3f -> %.2f", rv, cap]);
-            }
-        });
-    } @catch (id e) {}
-}
-
-// Darwin 通知名诊断回调：记录所有含 Volume/Media 的系统通知，定位微信 in-app 改音量的真实广播名。
-// 限流：同一通知名只记第一次；不同名字 1s 内最多 1 条（防 catch-all 高频刷日志拖慢 SpringBoard）。
-static NSMutableSet *sMRDiagSeen = nil;
-static NSTimeInterval sMRDiagLastLog = 0;
-static void apv_mrVolDiagCb(CFNotificationCenterRef center, void *observer,
-                            CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    @try {
-        NSString *n = (__bridge NSString *)name;
-        if (!n) return;
-        BOOL hit = ([n rangeOfString:@"Volume" options:NSCaseInsensitiveSearch].length ||
-                    [n rangeOfString:@"Media" options:NSCaseInsensitiveSearch].length);
-        if (!hit) return;
-        if (!sMRDiagSeen) sMRDiagSeen = [NSMutableSet set];
-        if ([sMRDiagSeen containsObject:n]) return;   // 已见过，不再刷
-        [sMRDiagSeen addObject:n];
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        if (now - sMRDiagLastLog < 1.0) return;       // 1s 限流
-        sMRDiagLastLog = now;
-        volLog([NSString stringWithFormat:@"[Darwin通知] %@", n]);
-    } @catch (id e) {}
-}
-
-static void installMRVolumeNotif(void) {
-    if (!gLimitAlert) return;
-    CFNotificationCenterRef darwin = CFNotificationCenterGetDarwinNotifyCenter();
-    if (!darwin) return;
-    CFNotificationCenterAddObserver(darwin, (void *)kMRVolObs, apv_mrVolNotifCb,
-        CFSTR("MRMediaRemoteVolumeDidChangeNotification"), NULL,
-        CFNotificationSuspensionBehaviorDeliverImmediately);
-    apvBootLog(@"跨进程音量通知已装载 (MRMediaRemoteVolumeDidChangeNotification Darwin)");
-
-    // 诊断：抓所有含 Volume/Media 的 Darwin 通知名，定位微信 in-app 改音量真正广播的通知
-    // （v1.9.71 实测 MRMediaRemoteVolumeDidChangeNotification 对我们场景不投递）。仅诊断开关开时挂。
-    if (gVolDiag) {
-        CFNotificationCenterAddObserver(darwin, (void *)kMRVolDiagObs, apv_mrVolDiagCb,
-            NULL, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-        apvBootLog(@"Darwin 通知名诊断已装载 (gVolDiag)");
-    }
-}
-
-static void handleSystemVolumeChanged(NSNotification *n) {
-    @try {
-        if (!gLimitAlert) return;
-        NSDictionary *ui = n.userInfo;
-        NSString *cat = ui[@"AVSystemController_AudioCategoryNotificationParameter"];
-        float vol = [ui[@"AVSystemController_AudioVolumeNotificationParameter"] floatValue];
-        NSString *reason = ui[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"];
-        if (gVolDiag) {
-            volLog([NSString stringWithFormat:@"实时音量通知 cat=%@ vol=%.3f reason=%@ keys=%@",
-                    cat, vol, reason, [ui allKeys]]);
-        }
-        // 只管媒体音量类别；读不到类别时保守不压（防误伤通话音量）
-        if (![cat isEqualToString:@"Audio/Video"]) return;
-        if (!apv_mediaShouldCap()) return;
-        float cap = apv_mediaCap();
-        if (vol <= cap + 0.001f) return;
-        // 防抖：1.5s 内已压过就不再写（压回 0.7 的第二次通知值=cap，天然不进这里）
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        if (now - sLastRealtimePress < 1.5) return;
-        sLastRealtimePress = now;
-        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        [avc setVolumeTo:cap forCategory:@"Audio/Video"];
-        volLog([NSString stringWithFormat:@"实时压制 media %.3f -> %.2f", vol, cap]);
-        // 压完用 MediaRemote 真值复查一次，确认是否真的压到位（MediaRemote 写入路径可能不吃 AVSystemController 的账）
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            apv_queryRealMediaVolume(^(float rv) {
-                if (gVolDiag) volLog([NSString stringWithFormat:@"真值复查 media=%.3f (cap=%.2f)", rv, cap]);
-            });
-        });
-    } @catch (id e) {}
-}
-
-static void installRealtimeVolumeGuard(void) {
-    if (!gLimitAlert) return;
-    [[NSNotificationCenter defaultCenter] addObserverForName:
-        @"AVSystemController_SystemVolumeDidChangeNotification"
-        object:nil queue:[NSOperationQueue mainQueue]
-        usingBlock:^(NSNotification *n) { handleSystemVolumeChanged(n); }];
-    apvBootLog(@"实时音量压制已装载 (SystemVolumeDidChange 事件驱动)");
-}
-
-static dispatch_source_t sCallVolTimer = NULL;
-static BOOL sCallVolRunning = NO;
-static NSTimeInterval sCallVolStopAt = 0;
-static BOOL sPrevHFP = NO;
-
-static void startCallVolumeGuard(void) {
-    if (!sCallVolTimer) return;
-    sCallVolStopAt = [[NSDate date] timeIntervalSince1970] + 12.0;
-    if (!sCallVolRunning) { dispatch_resume(sCallVolTimer); sCallVolRunning = YES; }
-}
-
-static void stopCallVolumeGuard(void) {
-    sCallVolStopAt = 0;
-    if (sCallVolRunning) { dispatch_suspend(sCallVolTimer); sCallVolRunning = NO; }
-}
-
-static void callVolumeGuardTick(void) {
-    @try {
-        // 零成本短路：开关关了 / AirPods 不在场 → 直接停表
-        if (!gCallVolumeGuard || !gLimitAlert || !sAirPodsConnected) {
-            stopCallVolumeGuard();
-            return;
-        }
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        if (hfpCallActive()) {
-            sCallVolStopAt = now + 12.0;   // 还在通话 → 续期
-        } else if (now > sCallVolStopAt) {
-            stopCallVolumeGuard();         // 挂断 12s 后收工
-            return;
-        }
-        if (!currentOutputIsAirPods()) return; // 通话走听筒/车载时不碰音量
-        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-        // v1.9.62：不再每 2s 无条件 setVolumeTo（可能干扰微信视频音频流），
-        // 只在当前值确实高于 cap 时才写。getVolume 无播放会话时返回假值 0.70，
-        // 此时 (cur > cap) 为假，不会触发多余写入。
-        float cur = 0.0f;
-        if ([avc getVolume:&cur forCategory:@"Audio/Video"] && cur > 0.70f) {
-            [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
-            if (gVolDiag) volLog(@"callGuard press Audio/Video >70");
-        }
-        if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.40f) {
-            [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
-            if (gVolDiag) volLog(@"callGuard press Ringtone >40");
-        }
-        if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.40f) {
-            [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            if (gVolDiag) volLog(@"callGuard press Alert >40");
-        }
-    } @catch (id e) {}
-}
 
 // 路由强制核心：AirPods 在场且输出非 AirPods → 切回（事件与轮询共用）。
 // "开盒必切"（v1.9.21，老板定案）：不依赖入耳检测（worn 门控已删——
@@ -1575,8 +1328,6 @@ static void enforceAirPodsRoute(void) {
 }
 
 static int sLastEvtState = -1; // 日志限流：AirPods 在场状态 0/1，变化才写日志
-static BOOL sPrevAttached = NO; // 上次 handleRouteEvent 的在场状态（conn 0→1 判定"新戴上"，
-                                // 只在此时压媒体音量；摘下方向绝不碰）
 
 static void handleRouteEvent(NSString *source) {
     @try {
@@ -1592,43 +1343,6 @@ static void handleRouteEvent(NSString *source) {
                       source, airInRoute, airInBT, sAirPodsConnected]);
         }
 
-        // 通话音量兜底窗口：HFP 端口 0→1 跳变（打视频/接电话）时启动。
-        // 事件驱动，不是常驻轮询——挂断后 tick 自己到期停表。
-        // ⚠️ 这里只能用 gCallVolumeGuard 作门控：诊断开关(gVolDiag)单独开、
-        // 兜底关时，绝不能因为日志开着就误触发 startCallVolumeGuard()。
-        // 日志由内部的 if (gVolDiag) 单独门控。
-        if (gCallVolumeGuard) {
-            BOOL hfpNow = hfpCallActive();
-            if (hfpNow != sPrevHFP) {
-                if (gVolDiag) {
-                    volLog([NSString stringWithFormat:
-                        @"HFP %d->%d (src=%@ conn=%d outAir=%d)",
-                        sPrevHFP, hfpNow, source, sAirPodsConnected, currentOutputIsAirPods()]);
-                }
-                if (hfpNow) startCallVolumeGuard();
-                // v1.9.72：打视频瞬间（HFP 0→1）微信可能经 MediaRemote 弹 100%（媒体音量）。
-                // 在多个时间点真值复查：0.3s(刚建立)/1.2s(视频起)/3s(稳定)，任一时刻超 cap 即压回。
-                // 用 apv_pressMediaIfOverCap（始终记真值），便于判断弹的到底是媒体还是通话音量。
-                if (hfpNow) {
-                    for (NSNumber *d in @[@0.3, @1.2, @3.0]) {
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)([d doubleValue] * NSEC_PER_SEC)),
-                                       dispatch_get_main_queue(), ^{
-                            apv_pressMediaIfOverCap(@"HFP 建立");
-                        });
-                    }
-                }
-                // 通话结束（HFP 1→0）微信可能把 MediaPlaybackVolume 留在 100，污染 AirPods 记忆→下次听歌炸耳。
-                // 挂断 0.8s 真值复查并压回（事件驱动，一次性）。
-                if (!hfpNow && sPrevHFP) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
-                                   dispatch_get_main_queue(), ^{
-                        apv_pressMediaIfOverCap(@"HFP 结束");
-                    });
-                }
-                sPrevHFP = hfpNow;
-            }
-        }
         if (sAirPodsConnected) {
             float cur;
             // 开关：设置里"音量保护"关闭时不改任何音量
@@ -1638,40 +1352,8 @@ static void handleRouteEvent(NSString *source) {
                 if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
                     [avc setVolumeTo:0.4f forCategory:@"Alert"];
             }
-            // 媒体音量：只在"新戴上"（conn 0→1 跳变）时压到 70（v1.9.27）。
-            // ⚠️ 关键时序修复：**绝不立即压**——btconnect 瞬间输出还在喇叭，
-            // setVolumeTo(0.7) 会改喇叭音量+污染喇叭记忆（摘下后系统恢复的
-            // 喇叭记忆被我们改成 70 → 回不到戴前值，老板实测"摘下停在 70"）。
-            // 正确做法：等 attached 切换完成（输出确认是 AirPods）再压——
-            // 只改 AirPods 音量/记忆，喇叭记忆不碰，摘下后系统正常恢复。
-            // 压三次（0.8s/2.0s/3.2s，输出是 AirPods 才压）：覆盖系统经
-            // MediaRemote 路径的延迟音量设置。getVolume 恒假值不读取。
-            // 开关：音量保护关掉时不压媒体音量
-            BOOL newlyAttached = !sPrevAttached && gLimitAlert;
-            if (newlyAttached) {
-                if (currentOutputIsAirPods()) {
-                    [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
-                    routeLog([NSString stringWithFormat:@"attach(%@) press media ->70 (already AirPods)", source]);
-                }
-                void (^pressWhenAirPods)(double, NSString *) = ^(double delay, NSString *tag) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
-                                   dispatch_get_main_queue(), ^{
-                        if (currentOutputIsAirPods()) {
-                            id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-                            [avc2 setVolumeTo:0.7f forCategory:@"Audio/Video"];
-                            routeLog([NSString stringWithFormat:@"attach(%@) %@ press media ->70 (output AirPods)", source, tag]);
-                        }
-                    });
-                };
-                pressWhenAirPods(0.8, @"t0.8");
-                pressWhenAirPods(2.0, @"t2.0");
-                pressWhenAirPods(3.2, @"t3.2");
-            }
-            // ⚠️ v1.9.57：旧的"路由事件 5s 后复查媒体音量"已删除。
-            // 它用 `[avc getVolume:&mv] && mv > 0.7f` 判断要不要压，但无播放
-            // 会话时 getVolume 返回缓存假值 0.70 → 判断恒假 → 真 100% 也压不动
-            // （老板实测"两次压回来了、两次没有"）。改由 callVolumeGuard 在
-            // 通话期间每 2s 无条件压，绕开假值问题。
+            // v1.9.75：媒体音量完全不管——系统对每个输出设备独立记忆音量，
+            // 微信来视频/挂断时 MediaPlaybackVolume 自管理正常（v1.9.74 零干预实测 0.700 纹丝不动）。
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
             if (!isRingerMuted() && gLimitAlert) {
@@ -1682,7 +1364,6 @@ static void handleRouteEvent(NSString *source) {
             // 输出切回喇叭时系统自动恢复喇叭记忆音量（老板实测手动点喇叭
             // 会自动回到戴前值 93）。之前主动 setVolumeTo 反而覆盖了系统恢复。
         }
-        sPrevAttached = sAirPodsConnected; // 更新状态（新戴上判定用）
         enforceAirPodsRoute();
     } @catch (id e) {
         routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
@@ -1748,14 +1429,6 @@ static void handleRouteEvent(NSString *source) {
     });
     dispatch_suspend(sPollTimer); // 初始不轮询，等事件启动窗口
 
-    // 通话期间音量兜底：2s 一跳，初始挂起，等 HFP 0→1 跳变（打视频/接电话）才开。
-    // 挂断 12s 后 tick 自己停表 → 平时零开销。
-    sCallVolTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-    dispatch_source_set_timer(sCallVolTimer, dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC),
-                              2.0 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(sCallVolTimer, ^{ callVolumeGuardTick(); });
-    dispatch_suspend(sCallVolTimer);
-
     // 蓝牙设备连接成功（开盒 AirPods、车载等任何蓝牙设备都触发）
     // → 启动轮询窗口 + 立即强制路由。
     // 关键：**先重置 3s 逃生冷却**——车载连接是"自动事件"，必须保证抢回
@@ -1792,10 +1465,6 @@ static void handleRouteEvent(NSString *source) {
     installNowPlayingLayoutTweaks();
     // 控制中心音量模块展开后显示铃声音量双滑块（Ring 主功能移植）
     installRingerSlider();
-    // 实时媒体音量压制（SystemVolumeDidChange 事件驱动 + MediaRemote 真值，v1.9.70）
-    installRealtimeVolumeGuard();
-    // 跨进程音量变化监听（Darwin 通知，能拦住 WeChat in-app 改音量，v1.9.71）
-    installMRVolumeNotif();
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
     [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
