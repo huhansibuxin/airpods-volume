@@ -653,33 +653,49 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
     if (origMRUVolumeLayout) origMRUVolumeLayout(self, _cmd);
     if (!gShowRingerSlider) return;
 
+    // 不受诊断门控：确认 hook 真在跑（放在 @try 之前，任何提前 return 都能抓到）
+    static BOOL didRingerTopLog = NO;
+    if (!didRingerTopLog) {
+        didRingerTopLog = YES;
+        apvBootLog(@"replMRUVolumeLayout 首次进入（orig 已调用）");
+    }
+
     @try {
         SEL viewSel = NSSelectorFromString(@"view");
         id view = ((id (*)(id, SEL))objc_msgSend)(self, viewSel);
         if (![view isKindOfClass:[UIView class]]) return;
         UIView *moduleView = (UIView *)view;
 
-        // isExpanded 是 MRUVolumeViewController（控制器）的属性，
-        // 不是 view 的属性（UIView 无此方法）——之前错发给 view 导致恒 NO、滑块永不显示。
-        // 实锤见 Ring 反编译 ring_decompiled.txt:723 / :4118（isExpanded 发在 self 上）。
+        // isExpanded 发在 self.view 上（Ring FUN_00006590 行723：isExpanded(view)）。
+        // 先查 view，再退而查 self，双保险；都不响应时按"展开"处理。
         SEL expandedSel = NSSelectorFromString(@"isExpanded");
-        BOOL expanded = YES;  // 控制器不响应 isExpanded 时按"展开"处理，避免又恒 NO
-        if ([self respondsToSelector:expandedSel]) {
+        BOOL expanded = YES;
+        if ([moduleView respondsToSelector:expandedSel]) {
+            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(moduleView, expandedSel);
+        } else if ([self respondsToSelector:expandedSel]) {
             expanded = ((BOOL (*)(id, SEL))objc_msgSend)(self, expandedSel);
         }
 
+        // ★ primarySlider / secondarySlider 是 self.view 的属性，不是控制器的！
+        // 之前错写成 objc_msgSend(self, primarySlider) → 返回 nil → 永远提前 return，
+        // 滑块从不创建（Ring FUN_00006590 行744：primarySlider(view)）。
         SEL sliderSel = NSSelectorFromString(@"primarySlider");
-        id slider = ((id (*)(id, SEL))objc_msgSend)(self, sliderSel);
+        id slider = nil;
+        if ([moduleView respondsToSelector:sliderSel]) {
+            slider = ((id (*)(id, SEL))objc_msgSend)(moduleView, sliderSel);
+        } else if ([self respondsToSelector:sliderSel]) {
+            slider = ((id (*)(id, SEL))objc_msgSend)(self, sliderSel);
+        }
         if (![slider isKindOfClass:[UIView class]]) return;
         UIView *primarySlider = (UIView *)slider;
 
-        // 一次性启动日志（不受诊断门控）：确认 hook 真在跑 + expanded 取值 + primarySlider 类
+        // 展开态详细信息（首个展开布局时记一次，不受诊断门控）
         static BOOL didRingerBootLog = NO;
         if (!didRingerBootLog) {
             didRingerBootLog = YES;
             apvBootLog([NSString stringWithFormat:
-                @"replMRUVolumeLayout 首次触发: expanded=%d primarySliderCls=%@",
-                expanded, [slider class]]);
+                @"replMRUVolumeLayout 展开态: expanded=%d primarySliderCls=%@ viewCls=%@",
+                expanded, [slider class], [moduleView class]]);
         }
 
         APVRingerSliderView *ringer = objc_getAssociatedObject(self, kRingerSliderKey);
@@ -755,7 +771,9 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         }
 
         ringer.value = apv_ringerVolume();
-    } @catch (id e) {}
+    } @catch (id e) {
+        apvBootLog([NSString stringWithFormat:@"replMRUVolumeLayout 异常: %@", e]);
+    }
 }
 
 static void installRingerSlider(void) {
