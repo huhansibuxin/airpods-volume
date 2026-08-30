@@ -627,6 +627,7 @@ static void installNowPlayingLayoutTweaks(void) {
 // ============================================================
 
 static void apv_setRingerVolume(float vol);  // 定义在下方，先声明避免 C 编译报错
+static BOOL currentOutputIsAirPods(void);    // 同样在下方定义
 
 @interface APVRingerTouchHandler : NSObject
 @property (nonatomic, weak) UIView *slider;
@@ -642,8 +643,8 @@ static void apv_setRingerVolume(float vol);  // 定义在下方，先声明避�
     if (h <= 0) return;
     float value = 1.0f - (float)(loc.y / h);
     value = fmaxf(0.0f, fminf(1.0f, value));
-    // 戴 AirPods 时铃声音量封顶 40%（与 setVolumeTo hook 保持一致）
-    float cap = sAirPodsConnected ? 0.4f : 1.0f;
+    // 戴 AirPods 时铃声音量封顶 40%（实时查当前输出，比全局 sAirPodsConnected 更准）
+    float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
     if (value > cap) value = cap;
     SEL setCurSel = NSSelectorFromString(@"setCurrentValue:");
     if ([slider respondsToSelector:setCurSel]) {
@@ -661,6 +662,50 @@ static void apv_setRingerVolume(float vol);  // 定义在下方，先声明避�
 //      这样左右圆角一致。我 1.9.63 传了 0 → 右边是直角。
 // 这里优先用 Ring 同款类名；取不到就用和 primarySlider 一模一样的类，
 // 并复制圆角参数， visually 与左边无法区分。
+static void apv_copyStylingIfPossible(UIView *source, UIView *target) {
+    if (!source || !target) return;
+    @try {
+        SEL getSel = NSSelectorFromString(@"stylingProvider");
+        SEL setSel = NSSelectorFromString(@"setStylingProvider:");
+        if ([source respondsToSelector:getSel] && [target respondsToSelector:setSel]) {
+            id sp = ((id (*)(id, SEL))objc_msgSend)(source, getSel);
+            if (sp) {
+                ((void (*)(id, SEL, id))objc_msgSend)(target, setSel, sp);
+                apvBootLog(@"已复制 stylingProvider");
+            }
+        }
+        SEL vGetSel = NSSelectorFromString(@"visualStylingProvider");
+        SEL vSetSel = NSSelectorFromString(@"setVisualStylingProvider:");
+        if ([source respondsToSelector:vGetSel] && [target respondsToSelector:vSetSel]) {
+            id vsp = ((id (*)(id, SEL))objc_msgSend)(source, vGetSel);
+            if (vsp) {
+                ((void (*)(id, SEL, id))objc_msgSend)(target, vSetSel, vsp);
+                apvBootLog(@"已复制 visualStylingProvider");
+            }
+        }
+        SEL dGetSel = NSSelectorFromString(@"delegate");
+        SEL dSetSel = NSSelectorFromString(@"setDelegate:");
+        if ([source respondsToSelector:dGetSel] && [target respondsToSelector:dSetSel]) {
+            id del = ((id (*)(id, SEL))objc_msgSend)(source, dGetSel);
+            if (del) {
+                ((void (*)(id, SEL, id))objc_msgSend)(target, dSetSel, del);
+                apvBootLog(@"已复制 delegate");
+            }
+        }
+        SEL crSetSel = NSSelectorFromString(@"setContinuousSliderCornerRadius:");
+        SEL crGetSel = NSSelectorFromString(@"continuousSliderCornerRadius");
+        if ([source respondsToSelector:crGetSel] && [target respondsToSelector:crSetSel]) {
+            double cr = ((double (*)(id, SEL))objc_msgSend)(source, crGetSel);
+            ((void (*)(id, SEL, double))objc_msgSend)(target, crSetSel, cr);
+        }
+        SEL updateSel = NSSelectorFromString(@"updateVisualStyling");
+        if ([target respondsToSelector:updateSel]) {
+            ((void (*)(id, SEL))objc_msgSend)(target, updateSel);
+            apvBootLog(@"已调用 updateVisualStyling");
+        }
+    } @catch (id e) {}
+}
+
 static UIView *apv_createNativeRingerSlider(CGRect frame, float value, UIView *styleReference) {
     // 先加载可能所在的两个 framework
     dlopen("/System/Library/PrivateFrameworks/MediaControls.framework/MediaControls", RTLD_NOW);
@@ -703,9 +748,19 @@ static UIView *apv_createNativeRingerSlider(CGRect frame, float value, UIView *s
     }
     apvBootLog([NSString stringWithFormat:@"铃声音量 slider 使用类: %@ cornerRadius=%.3f", c, cornerRadius]);
 
+    // MRUContinuousSliderView 本身没有样式，需从左边 primarySlider 复制 stylingProvider
+    // 否则 background/foreground fill 都不会渲染，看起来像空的深色方块。
+    if (styleReference) apv_copyStylingIfPossible(styleReference, slider);
+
+    // 设置当前值：优先 setCurrentValue:，再试 setValue:animated:（UISlider 系）
     SEL curSel = NSSelectorFromString(@"setCurrentValue:");
     if ([slider respondsToSelector:curSel]) {
         ((void (*)(id, SEL, double))objc_msgSend)(slider, curSel, (double)value);
+    } else {
+        SEL valSel = NSSelectorFromString(@"setValue:animated:");
+        if ([slider respondsToSelector:valSel]) {
+            ((void (*)(id, SEL, float, BOOL))objc_msgSend)(slider, valSel, value, NO);
+        }
     }
 
     // 禁用 slider 自身交互，我们在它上面加透明触摸层接管，避免它改动媒体音量
@@ -852,7 +907,7 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
 
         // 同步铃声音量：原生类走 setCurrentValue:；自定义类走 .value
         float rv = apv_ringerVolume();
-        float cap = sAirPodsConnected ? 0.4f : 1.0f;
+        float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
         if (rv > cap) rv = cap;  // 戴耳机时显示也封顶
         SEL setCurSel = NSSelectorFromString(@"setCurrentValue:");
         if ([ringer respondsToSelector:setCurSel]) {
