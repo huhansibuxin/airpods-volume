@@ -622,12 +622,26 @@ static void installNowPlayingLayoutTweaks(void) {
 @end
 
 // ============================================================
-// 铃声音量滑块触摸处理器：原生 MRUContinuousSliderView 默认连的是媒体音量，
-// 我们拿它当"皮"，自己拦截触摸写 AVSystemController Ringtone，并戴耳机时封顶 40%。
+// 铃声音量滑块（Ring 复刻版）
+// Ring 反编译实锤（ring_decompiled.txt:1320-1834）：
+//   MediaControlsVolumeRingerSliderView 是 Ring 自写的 UIView 子类，不是系统类！
+//   它的"原生观感"来自系统同款毛玻璃材质 MTMaterialView（MaterialKit.framework）：
+//     背景视图 = [MTMaterialView materialViewWithRecipe:4 options:0]（垫底）
+//     填充视图 = [MTMaterialView materialViewWithRecipe:0 options:0] + 白色底色，
+//                从底部向上填充（高度 = value * bounds.height，动画过渡）
+//     容器     = cornerCurve=continuous + cornerRadius=42 + clipsToBounds
+//   setCurrentValue: 内部直接写 AVSystemController Ringtone。
+//   左边 primarySlider 内部同为 MTMaterialView 体系 → 两边观感天然一致。
 // ============================================================
 
 static void apv_setRingerVolume(float vol);  // 定义在下方，先声明避免 C 编译报错
 static BOOL currentOutputIsAirPods(void);    // 同样在下方定义
+static void apv_ringerApplyValue(UIView *container, float value);
+
+static const void *kRingerSliderKey  = &kRingerSliderKey;
+static const void *kRingerBellKey    = &kRingerBellKey;
+static const void *kRingerFillKey    = &kRingerFillKey;
+static const void *kRingerHandlerKey = &kRingerHandlerKey;
 
 @interface APVRingerTouchHandler : NSObject
 @property (nonatomic, weak) UIView *slider;
@@ -646,160 +660,87 @@ static BOOL currentOutputIsAirPods(void);    // 同样在下方定义
     // 戴 AirPods 时铃声音量封顶 40%（实时查当前输出，比全局 sAirPodsConnected 更准）
     float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
     if (value > cap) value = cap;
-    SEL setCurSel = NSSelectorFromString(@"setCurrentValue:");
-    if ([slider respondsToSelector:setCurSel]) {
-        ((void (*)(id, SEL, double))objc_msgSend)(slider, setCurSel, (double)value);
-    }
     apv_setRingerVolume(value);
+    apv_ringerApplyValue(slider, value); // 拖动实时反映填充高度
 }
 @end
 
-// 创建系统原生 MediaControlsVolumeRingerSliderView 作为铃声音量滑块。
-// Ring.dylib 反编译证实：
-//   1. iOS15/部分版本用 MediaControlsVolumeRingerSliderView（MediaControls.framework）；
-//   2. iOS16 上该滑块类被重命名为 MRUContinuousSliderView（MediaRemoteUI）。
-//   3. Ring 初始化时先读左边滑块的 continuousSliderCornerRadius，再传给右边，
-//      这样左右圆角一致。我 1.9.63 传了 0 → 右边是直角。
-// 这里优先用 Ring 同款类名；取不到就用和 primarySlider 一模一样的类，
-// 并复制圆角参数， visually 与左边无法区分。
-static void apv_copyStylingIfPossible(UIView *source, UIView *target) {
-    if (!source || !target) return;
-    apvBootLog([NSString stringWithFormat:@"进入 copyStyling: source=%@ target=%@",
-                NSStringFromClass([source class]), NSStringFromClass([target class])]);
+// Ring updateFillLayer 复刻：填充从底部向上，高度 = value * height，动画过渡
+static void apv_ringerApplyValue(UIView *container, float value) {
     @try {
-        SEL getSel = NSSelectorFromString(@"stylingProvider");
-        SEL setSel = NSSelectorFromString(@"setStylingProvider:");
-        BOOL srcHas = [source respondsToSelector:getSel];
-        BOOL tgtHas = [target respondsToSelector:setSel];
-        apvBootLog([NSString stringWithFormat:@"stylingProvider: src=%d tgt=%d", srcHas, tgtHas]);
-        if (srcHas && tgtHas) {
-            id sp = ((id (*)(id, SEL))objc_msgSend)(source, getSel);
-            apvBootLog([NSString stringWithFormat:@"stylingProvider 读取值=%@", sp ? @"非nil" : @"nil"]);
-            if (sp) {
-                ((void (*)(id, SEL, id))objc_msgSend)(target, setSel, sp);
-                apvBootLog(@"已复制 stylingProvider");
-            }
-        }
-        SEL vGetSel = NSSelectorFromString(@"visualStylingProvider");
-        SEL vSetSel = NSSelectorFromString(@"setVisualStylingProvider:");
-        srcHas = [source respondsToSelector:vGetSel];
-        tgtHas = [target respondsToSelector:vSetSel];
-        apvBootLog([NSString stringWithFormat:@"visualStylingProvider: src=%d tgt=%d", srcHas, tgtHas]);
-        if (srcHas && tgtHas) {
-            id vsp = ((id (*)(id, SEL))objc_msgSend)(source, vGetSel);
-            apvBootLog([NSString stringWithFormat:@"visualStylingProvider 读取值=%@", vsp ? @"非nil" : @"nil"]);
-            if (vsp) {
-                ((void (*)(id, SEL, id))objc_msgSend)(target, vSetSel, vsp);
-                apvBootLog(@"已复制 visualStylingProvider");
-            }
-        }
-        SEL dGetSel = NSSelectorFromString(@"delegate");
-        SEL dSetSel = NSSelectorFromString(@"setDelegate:");
-        srcHas = [source respondsToSelector:dGetSel];
-        tgtHas = [target respondsToSelector:dSetSel];
-        apvBootLog([NSString stringWithFormat:@"delegate: src=%d tgt=%d", srcHas, tgtHas]);
-        if (srcHas && tgtHas) {
-            id del = ((id (*)(id, SEL))objc_msgSend)(source, dGetSel);
-            apvBootLog([NSString stringWithFormat:@"delegate 读取值=%@", del ? @"非nil" : @"nil"]);
-            if (del) {
-                ((void (*)(id, SEL, id))objc_msgSend)(target, dSetSel, del);
-                apvBootLog(@"已复制 delegate");
-            }
-        }
-        SEL crSetSel = NSSelectorFromString(@"setContinuousSliderCornerRadius:");
-        SEL crGetSel = NSSelectorFromString(@"continuousSliderCornerRadius");
-        srcHas = [source respondsToSelector:crGetSel];
-        tgtHas = [target respondsToSelector:crSetSel];
-        apvBootLog([NSString stringWithFormat:@"continuousSliderCornerRadius: src=%d tgt=%d", srcHas, tgtHas]);
-        if (srcHas && tgtHas) {
-            double cr = ((double (*)(id, SEL))objc_msgSend)(source, crGetSel);
-            ((void (*)(id, SEL, double))objc_msgSend)(target, crSetSel, cr);
-            apvBootLog([NSString stringWithFormat:@"已复制 cornerRadius=%.3f", cr]);
-        }
-        SEL updateSel = NSSelectorFromString(@"updateVisualStyling");
-        BOOL tgtHasUpdate = [target respondsToSelector:updateSel];
-        apvBootLog([NSString stringWithFormat:@"updateVisualStyling: tgt=%d", tgtHasUpdate]);
-        if (tgtHasUpdate) {
-            ((void (*)(id, SEL))objc_msgSend)(target, updateSel);
-            apvBootLog(@"已调用 updateVisualStyling");
-        }
-        apvBootLog(@"copyStyling 完成");
-    } @catch (id e) {
-        apvBootLog([NSString stringWithFormat:@"copyStyling 异常: %@", e]);
-    }
+        UIView *fill = objc_getAssociatedObject(container, kRingerFillKey);
+        if (!fill) return;
+        CGRect b = container.bounds;
+        if (b.size.height <= 0) return;
+        float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
+        if (value > cap) value = cap; // 戴耳机显示也封顶
+        CGFloat fillH = b.size.height * (CGFloat)value;
+        CGRect nf = CGRectMake(0, b.size.height - fillH, b.size.width, fillH);
+        [UIView animateWithDuration:0.25 animations:^{ fill.frame = nf; }];
+    } @catch (id e) {}
 }
 
-static UIView *apv_createNativeRingerSlider(CGRect frame, float value, UIView *styleReference) {
-    // 先加载可能所在的两个 framework
-    dlopen("/System/Library/PrivateFrameworks/MediaControls.framework/MediaControls", RTLD_NOW);
-    dlopen("/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI", RTLD_NOW);
-
-    Class c = NSClassFromString(@"MediaControlsVolumeRingerSliderView");
-    if (!c && styleReference) {
-        c = [styleReference class];
-        apvBootLog([NSString stringWithFormat:@"MediaControlsVolumeRingerSliderView 未找到，降级用 primarySlider 同类: %@", c]);
+// Ring initWithFrame:minimumValue:cornerRadius: + createFillLayer + createBackgroundView 复刻
+static UIView *apv_createRingerSlider(CGRect frame, float value, double cornerRadius) {
+    UIView *container = [[UIView alloc] initWithFrame:frame];
+    container.backgroundColor = [UIColor clearColor];
+    container.layer.cornerRadius = cornerRadius > 0 ? cornerRadius : 42.0;
+    if (@available(iOS 13.0, *)) {
+        container.layer.cornerCurve = kCACornerCurveContinuous;
     }
-    if (!c) {
-        apvBootLog(@"原生铃声音量类未找到且 styleReference 为 nil，走 APVRingerSliderView 自绘");
-        return nil;
-    }
+    container.clipsToBounds = YES;
+    container.tag = 0xA9B0;
+    container.userInteractionEnabled = YES;
 
-    // 读左边滑块的圆角，两边必须一致才圆润
-    double cornerRadius = 42.0;  // MediaControlsVolumeRingerSliderView 内部默认值
-    double minimumValue = 0.0625; // Ring 默认最小值（静音时 slider 底部留白）
-    if (styleReference) {
-        SEL crSel = NSSelectorFromString(@"continuousSliderCornerRadius");
-        if ([styleReference respondsToSelector:crSel]) {
-            cornerRadius = ((double (*)(id, SEL))objc_msgSend)(styleReference, crSel);
-            apvBootLog([NSString stringWithFormat:@"读取 primarySlider continuousSliderCornerRadius=%.3f", cornerRadius]);
-        } else {
-            apvBootLog(@"primarySlider 无 continuousSliderCornerRadius，使用默认值 42");
-        }
+    // MTMaterialView（MaterialKit.framework）= 控制中心音量条同款毛玻璃材质
+    dlopen("/System/Library/PrivateFrameworks/MaterialKit.framework/MaterialKit", RTLD_NOW);
+    Class mtk = NSClassFromString(@"MTMaterialView");
+    UIView *background = nil, *fill = nil;
+    SEL recipeSel = NSSelectorFromString(@"materialViewWithRecipe:options:");
+    if (mtk && [mtk respondsToSelector:recipeSel]) {
+        @try {
+            background = ((id (*)(id, SEL, long, long))objc_msgSend)(mtk, recipeSel, 4, 0);
+            fill       = ((id (*)(id, SEL, long, long))objc_msgSend)(mtk, recipeSel, 0, 0);
+        } @catch (id e) {}
     }
-
-    id raw = [c alloc];
-    UIView *slider = nil;
-    SEL initSel = NSSelectorFromString(@"initWithFrame:minimumValue:cornerRadius:");
-    if ([raw respondsToSelector:initSel]) {
-        slider = ((id (*)(id, SEL, CGRect, double, double))objc_msgSend)(raw, initSel, frame, minimumValue, cornerRadius);
-    } else if ([raw respondsToSelector:@selector(initWithFrame:)]) {
-        slider = ((id (*)(id, SEL, CGRect))objc_msgSend)(raw, @selector(initWithFrame:), frame);
-    }
-    if (!slider) {
-        apvBootLog(@"原生 slider init 返回 nil，走 APVRingerSliderView 自绘");
-        return nil;
-    }
-    apvBootLog([NSString stringWithFormat:@"铃声音量 slider 使用类: %@ cornerRadius=%.3f", c, cornerRadius]);
-
-    // MRUContinuousSliderView 本身没有样式，需从左边 primarySlider 复制 stylingProvider
-    // 否则 background/foreground fill 都不会渲染，看起来像空的深色方块。
-    if (styleReference) apv_copyStylingIfPossible(styleReference, slider);
-
-    // 设置当前值：优先 setCurrentValue:，再试 setValue:animated:（UISlider 系）
-    SEL curSel = NSSelectorFromString(@"setCurrentValue:");
-    if ([slider respondsToSelector:curSel]) {
-        ((void (*)(id, SEL, double))objc_msgSend)(slider, curSel, (double)value);
+    if (!background) {
+        background = [[UIView alloc] init];
+        background.backgroundColor = [UIColor colorWithWhite:0.20 alpha:0.55];
+        apvBootLog(@"MTMaterialView 不可用，背景降级纯色");
     } else {
-        SEL valSel = NSSelectorFromString(@"setValue:animated:");
-        if ([slider respondsToSelector:valSel]) {
-            ((void (*)(id, SEL, float, BOOL))objc_msgSend)(slider, valSel, value, NO);
-        }
+        apvBootLog(@"背景 = MTMaterialView recipe=4 options=0");
     }
+    if (!fill) {
+        fill = [[UIView alloc] init];
+        fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.92];
+        apvBootLog(@"fill 降级纯色白");
+    } else {
+        // Ring createFillLayer 分支1：recipe 0 材质 + 白色底色
+        fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.90];
+        apvBootLog(@"填充 = MTMaterialView recipe=0 + 白色");
+    }
+    UIViewAutoresizing mask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    background.autoresizingMask = mask;
+    fill.autoresizingMask = mask;
+    background.frame = container.bounds;
+    fill.frame = container.bounds; // 马上由 apv_ringerApplyValue 修正
+    [container addSubview:background];
+    [container addSubview:fill];
+    objc_setAssociatedObject(container, kRingerFillKey, fill, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    // 禁用 slider 自身交互，我们在它上面加透明触摸层接管，避免它改动媒体音量
-    slider.userInteractionEnabled = NO;
-    slider.tag = 0xA9B0;
-
-    // 强制刷新布局，让 visual styling 真正生效
-    [slider setNeedsLayout];
-    [slider layoutIfNeeded];
-
-    return slider;
+    apv_ringerApplyValue(container, value);
+    apvBootLog([NSString stringWithFormat:@"铃声音量滑块(Ring复刻)创建完成 cornerRadius=%.1f bg=%@ fill=%@",
+                container.layer.cornerRadius, NSStringFromClass([background class]),
+                NSStringFromClass([fill class])]);
+    return container;
 }
 
-static const void *kRingerSliderKey = &kRingerSliderKey;
-static const void *kRingerBellKey   = &kRingerBellKey;
-static const void *kRingerOverlayKey = &kRingerOverlayKey;
+// ============================================================
+// （v1.9.68 已删除旧的 MRUContinuousSliderView 方案）
+// v1.9.66 boot log 实锤该类没有 stylingProvider/visualStylingProvider/delegate/
+// updateVisualStyling 任何样式接口，无法让它渲染填充——方向本身就是错的。
+// Ring 根本不用系统滑块类，见上方 Ring 复刻版实现。
+// ============================================================
 
 static float apv_ringerVolume(void) {
     @try {
@@ -901,9 +842,15 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
 
         if (!ringer) {
             CGRect rFrame = CGRectMake(rightX, sliderY, sliderW, sliderH);
-            ringer = apv_createNativeRingerSlider(rFrame, apv_ringerVolume(), primarySlider);
+            // 圆角与左边一致（Ring：读 primarySlider.continuousSliderCornerRadius，默认 42）
+            double cornerRadius = 42.0;
+            SEL crSel = NSSelectorFromString(@"continuousSliderCornerRadius");
+            if ([primarySlider respondsToSelector:crSel]) {
+                cornerRadius = ((double (*)(id, SEL))objc_msgSend)(primarySlider, crSel);
+            }
+            ringer = apv_createRingerSlider(rFrame, apv_ringerVolume(), cornerRadius);
             if (!ringer) {
-                // 降级：自己画一个（样式不如原生，但能工作）
+                // 兜底：自绘版（理论上不会走到，UIView 容器必创建成功）
                 APVRingerSliderView *custom = [[APVRingerSliderView alloc] initWithFrame:rFrame];
                 custom.valueChanged = ^(float value) { apv_setRingerVolume(value); };
                 ringer = custom;
@@ -911,117 +858,20 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
             objc_setAssociatedObject(self, kRingerSliderKey, ringer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [moduleView addSubview:ringer];
 
-            // iOS16 MRUVolumeView 可能有 secondarySlider 属性；把它登记进去，
-            // 系统才会像对待原生第二滑块一样给它应用 visual styling。
-            SEL secSetSel = NSSelectorFromString(@"setSecondarySlider:");
-            if ([moduleView respondsToSelector:secSetSel]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(moduleView, secSetSel, ringer);
-                apvBootLog(@"已设置 moduleView.secondarySlider");
-            }
-
-            // 复制左边滑块的 autoresizingMask，并强制布局刷新，让样式 provider 生效
-            ringer.autoresizingMask = primarySlider.autoresizingMask;
-            [ringer setNeedsLayout];
-            [ringer layoutIfNeeded];
-            [moduleView setNeedsLayout];
-            [moduleView layoutIfNeeded];
-
-            // 原生 MRUContinuousSliderView 不自带铃声音量逻辑，加透明触摸层接管
-            if (![ringer isKindOfClass:[APVRingerSliderView class]]) {
-                UIView *overlay = [[UIView alloc] initWithFrame:rFrame];
-                overlay.backgroundColor = [UIColor clearColor];
-                overlay.userInteractionEnabled = YES;
-                overlay.tag = 0xA9B2;
-                [moduleView addSubview:overlay];
-
-                APVRingerTouchHandler *handler = [[APVRingerTouchHandler alloc] init];
-                handler.slider = ringer;
-                UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:handler action:@selector(handlePan:)];
-                [overlay addGestureRecognizer:pan];
-                objc_setAssociatedObject(self, kRingerOverlayKey, overlay, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
+            // Ring：滑块自己接收触摸。用绝对定位 pan（点哪到哪，比 Ring 的相对拖动直观）
+            APVRingerTouchHandler *handler = [[APVRingerTouchHandler alloc] init];
+            handler.slider = ringer;
+            UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:handler
+                                                                                  action:@selector(handlePan:)];
+            [ringer addGestureRecognizer:pan];
+            // 手势 target 引用方式不完全可控，handler 挂关联对象防释放
+            objc_setAssociatedObject(ringer, kRingerHandlerKey, handler, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         ringer.hidden = NO;
         ringer.frame = CGRectMake(rightX, sliderY, sliderW, sliderH);
 
-        // 透明触摸层跟滑块对齐
-        UIView *overlay = objc_getAssociatedObject(self, kRingerOverlayKey);
-        if (overlay) overlay.frame = ringer.frame;
-
-        // ===== v1.9.67 一次性诊断 dump：定位 MRUContinuousSliderView 真正的样式入口 =====
-        // 已实证 stylingProvider/visualStylingProvider/delegate/updateVisualStyling 全部不存在，
-        // 左滑块的白填充另有机制 → dump 方法/属性/视图层级/框架类名一次性找出。
-        static BOOL didRingerDiagDump = NO;
-        if (!didRingerDiagDump && ringer) {
-            didRingerDiagDump = YES;
-            @try {
-                // 1) 继承链逐层方法 + 属性（到 UIView/NSObject 为止）
-                Class cWalk = [ringer class];
-                for (int depth = 0; cWalk && depth < 5; depth++) {
-                    unsigned int mcount = 0;
-                    Method *ms = class_copyMethodList(cWalk, &mcount);
-                    NSMutableString *mn = [NSMutableString string];
-                    for (unsigned int i = 0; i < mcount; i++)
-                        [mn appendFormat:@"%@ ", NSStringFromSelector(method_getName(ms[i]))];
-                    free(ms);
-                    apvBootLog([NSString stringWithFormat:@"[%@ d%d] %u 方法: %@",
-                                NSStringFromClass(cWalk), depth, mcount, mn]);
-                    unsigned int pcount = 0;
-                    objc_property_t *ps = class_copyPropertyList(cWalk, &pcount);
-                    NSMutableString *pn = [NSMutableString string];
-                    for (unsigned int i = 0; i < pcount; i++)
-                        [pn appendFormat:@"%s ", property_getName(ps[i])];
-                    free(ps);
-                    apvBootLog([NSString stringWithFormat:@"[%@ d%d] %u 属性: %@",
-                                NSStringFromClass(cWalk), depth, pcount, pn]);
-                    cWalk = class_getSuperclass(cWalk);
-                    if (!cWalk || cWalk == [UIView class] ||
-                        cWalk == [UIResponder class] || cWalk == [NSObject class]) break;
-                }
-                // 2) 左右滑块真实视图层级对比（看左滑块的 fill 子视图长什么样）
-                NSString *rd = [ringer respondsToSelector:@selector(recursiveDescription)]
-                    ? [ringer performSelector:@selector(recursiveDescription)] : @"(无 recursiveDescription)";
-                NSString *pd = [primarySlider respondsToSelector:@selector(recursiveDescription)]
-                    ? [primarySlider performSelector:@selector(recursiveDescription)] : @"(无 recursiveDescription)";
-                apvBootLog([NSString stringWithFormat:@"ringer 层级:\n%@\n----\nprimary 层级:\n%@", rd, pd]);
-                // 3) 两个框架里所有 Slider/Ringer/Volume 类名（找 iOS16 铃声滑块的新类名）
-                const char *imgs[2] = {
-                    "/System/Library/PrivateFrameworks/MediaControls.framework/MediaControls",
-                    "/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI"
-                };
-                for (int i = 0; i < 2; i++) {
-                    unsigned int cnt = 0;
-                    const char **names = objc_copyClassNamesForImage(imgs[i], &cnt);
-                    if (!names) { apvBootLog(@"类枚举: 图片未注册"); continue; }
-                    NSMutableString *hit = [NSMutableString string];
-                    for (unsigned int j = 0; j < cnt; j++) {
-                        NSString *n = [NSString stringWithUTF8String:names[j]];
-                        if ([n containsString:@"Slider"] || [n containsString:@"Ringer"] ||
-                            [n containsString:@"Volume"])
-                            [hit appendFormat:@"%@ ", n];
-                    }
-                    free(names);
-                    apvBootLog([NSString stringWithFormat:@"%@ Slider/Ringer/Volume 类: %@",
-                                i == 0 ? @"MediaControls" : @"MediaRemoteUI", hit]);
-                }
-                apvBootLog(@"diag dump 完成");
-            } @catch (id e) {
-                apvBootLog([NSString stringWithFormat:@"diag dump 异常: %@", e]);
-            }
-        }
-
-        // 同步铃声音量：原生类走 setCurrentValue:；自定义类走 .value
-        float rv = apv_ringerVolume();
-        float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
-        if (rv > cap) rv = cap;  // 戴耳机时显示也封顶
-        SEL setCurSel = NSSelectorFromString(@"setCurrentValue:");
-        if ([ringer respondsToSelector:setCurSel]) {
-            ((void (*)(id, SEL, double))objc_msgSend)(ringer, setCurSel, (double)rv);
-            [ringer setNeedsLayout];
-            [ringer layoutIfNeeded];
-        } else if ([ringer isKindOfClass:[APVRingerSliderView class]]) {
-            ((APVRingerSliderView *)ringer).value = rv;
-        }
+        // 同步铃声音量显示（fill 高度跟随实际值；戴耳机 40% 封顶在 applyValue 内处理）
+        apv_ringerApplyValue(ringer, apv_ringerVolume());
 
         if (!bell) {
             UIImage *img = [UIImage systemImageNamed:@"bell.fill"];
