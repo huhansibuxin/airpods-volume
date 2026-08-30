@@ -26,7 +26,7 @@ static BOOL apv_bool(NSString *key, BOOL def) {
 
 // 缓存（启动 + 设置变更通知时刷新，避免每个事件都读 pref）
 static BOOL gAutoRoute = YES, gStealBack = YES, gStealHFP = YES;
-static BOOL gLimitAlert = YES, gHideReplayKit = YES;
+static BOOL gHideReplayKit = YES;
 static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES;
 static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
@@ -37,7 +37,6 @@ static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
     gStealBack = apv_bool(@"stealBackFromCar", YES);
     gStealHFP = apv_bool(@"stealBackHFPCalls", YES);
-    gLimitAlert = apv_bool(@"limitAlertVolume", YES);
     gHideReplayKit = apv_bool(@"hideReplayKitCCModules", YES);
     gShrinkNowPlaying = apv_bool(@"shrinkNowPlayingCCModule", YES);
     gHidePrevNext = apv_bool(@"hideNowPlayingPrevNext", YES);
@@ -208,13 +207,10 @@ static float capForCategory(id cat) {
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
-    // 开关：设置里"限制铃声/通知音量"关闭 → 完全不介入音量
-    if (!gLimitAlert) return %orig(vol, cat);
+    // v1.9.76：铃声管理常驻（无开关）——摘下时通知音强制 100%（静音跳过），
+    // 戴上时通知音按 cap 0.4 封顶；媒体音量完全不管（capForCategory 返回 1.0）。
     float vol_orig = vol; // 原始请求值（诊断用：看系统/App 到底想要多少）
     float cap = capForCategory(cat);
-    // 摘下时通知音强制 100%（静音跳过）；戴上时各类音量按 cap 封顶
-    // （媒体 70%/通知 40%——hook 层兜底，控制中心滑动条走 MediaRemote
-    // 路径不经此 hook，由 handleRouteEvent 戴上时读当前值主动压兜底）
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         vol = 1.0f;
     else if (cap < 1.0f)
@@ -227,7 +223,6 @@ static float capForCategory(id cat) {
     return %orig(vol, cat);
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
-    if (!gLimitAlert) return %orig;
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         return [self setVolumeTo:1.0f forCategory:cat];
     float cap = capForCategory(cat);
@@ -241,7 +236,7 @@ static float capForCategory(id cat) {
 }
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
     BOOL r = %orig(vol, cat);
-    if (r && gLimitAlert) {
+    if (r) {
         float cap = capForCategory(cat);
         if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
             *vol = 1.0f;
@@ -1344,19 +1339,18 @@ static void handleRouteEvent(NSString *source) {
         }
 
         if (sAirPodsConnected) {
+            // v1.9.76：戴上时铃声/通知限 40%（常驻，无开关）。
+            // getVolume 被 hook 也会 cap 到 0.4，这里用 hook 前真实值判断主动压一次。
             float cur;
-            // 开关：设置里"音量保护"关闭时不改任何音量
-            if (gLimitAlert) {
-                if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
-                    [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
-                if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
-                    [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            }
+            if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
+                [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
+            if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
+                [avc setVolumeTo:0.4f forCategory:@"Alert"];
             // v1.9.75：媒体音量完全不管——系统对每个输出设备独立记忆音量，
             // 微信来视频/挂断时 MediaPlaybackVolume 自管理正常（v1.9.74 零干预实测 0.700 纹丝不动）。
         } else {
-            // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
-            if (!isRingerMuted() && gLimitAlert) {
+            // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%（v1.9.76 常驻，无开关），静音模式下不强制
+            if (!isRingerMuted()) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
@@ -1385,8 +1379,8 @@ static void handleRouteEvent(NSString *source) {
     } @catch (id e) {}
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    // 开关：设置里"限制铃声/通知音量"
-    if (gLimitAlert && !sAirPodsConnected && !isRingerMuted()) {
+    // v1.9.76：启动时摘下状态 → 通知音确保 100%（常驻，无开关；静音跳过）
+    if (!sAirPodsConnected && !isRingerMuted()) {
         [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
         [avc setVolumeTo:1.0f forCategory:@"Alert"];
     }
