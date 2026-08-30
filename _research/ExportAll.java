@@ -7,7 +7,7 @@ import java.io.*;
 public class ExportAll extends GhidraScript {
     @Override
     public void run() throws Exception {
-        String outPath = "/tmp/decompile_all.txt";
+        String outPath = "/mnt/d/woekbude/airpods-volume/_research/bettercc_decompiled.txt";
         DecompInterface di = new DecompInterface();
         di.openProgram(currentProgram);
         PrintWriter pw = new PrintWriter(new File(outPath));

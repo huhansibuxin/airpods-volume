@@ -1,0 +1,3508 @@
+========== _CCUILayoutSizeMake  @ 00007f24 ==========
+
+void _CCUILayoutSizeMake(void)
+
+{
+  return;
+}
+
+
+========== FUN_00007f28  @ 00007f28 ==========
+
+void FUN_00007f28(undefined8 param_1)
+
+{
+  _objc_getAssociatedObject(param_1,FUN_00007f28);
+  return;
+}
+
+
+========== FUN_00007f34  @ 00007f34 ==========
+
+void FUN_00007f34(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  _objc_setAssociatedObject(param_1,FUN_00007f28,param_3,1);
+  return;
+}
+
+
+========== FUN_00007f44  @ 00007f44 ==========
+
+void FUN_00007f44(undefined8 param_1)
+
+{
+  _objc_getAssociatedObject(param_1,FUN_00007f44);
+  return;
+}
+
+
+========== FUN_00007f50  @ 00007f50 ==========
+
+void FUN_00007f50(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  _objc_setAssociatedObject(param_1,FUN_00007f44,param_3,1);
+  return;
+}
+
+
+========== FUN_00007f60  @ 00007f60 ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+
+void FUN_00007f60(void)
+
+{
+  undefined *puVar1;
+  undefined *puVar2;
+  undefined *puVar3;
+  undefined *puVar4;
+  ID IVar5;
+  ID IVar6;
+  undefined8 uVar7;
+  char *local_570;
+  char *pcStack_568;
+  char *local_560;
+  char *pcStack_558;
+  char *local_550;
+  char *pcStack_548;
+  undefined4 local_470 [256];
+  long local_70;
+  
+  local_70 = *(long *)PTR____stack_chk_guard_00010000;
+  IVar5 = _objc_alloc(PTR__OBJC_CLASS___HBPreferences_00014748);
+  IVar5 = HBPreferences::initWithIdentifier_
+                    (IVar5,PTR_s_initWithIdentifier__000142c0,&cf_com_miguelaka95_betterccprefs);
+  uVar7 = _preferences;
+  puVar1 = PTR_s_registerBool_default_forKey__000142c8;
+  _preferences = IVar5;
+  HBPreferences::registerBool_default_forKey_
+            (IVar5,PTR_s_registerBool_default_forKey__000142c8,uVar7,&_isEnabled,0,&cf_isEnabled);
+  _objc_msgSend(_preferences,puVar1,&_showModules,0,&cf_showModules);
+  _objc_msgSend(_preferences,puVar1,&_customizeConnectivity,0,&cf_customizeConnectivity);
+  _objc_msgSend(_preferences,puVar1,&_rearrangeToggles,0,&cf_rearrangeToggles);
+  _objc_msgSend(_preferences,puVar1,&_customizeMedia,0,&cf_customizeMedia);
+  _objc_msgSend(_preferences,puVar1,&_showMediaArtwork,0,&cf_showMediaArtwork);
+  _objc_msgSend(_preferences,puVar1,&_customizeBrightness,0,&cf_customizeBrightness);
+  _objc_msgSend(_preferences,puVar1,&_customizeVolume,0,&cf_customizeVolume);
+  _objc_msgSend(_preferences,puVar1,&_customizeScreenMirroring,0,&cf_customizeScreenMirroring);
+  _objc_msgSend(_preferences,puVar1,&_showCCWeatherView,0,&cf_showCCWeatherView);
+  _objc_msgSend(_preferences,puVar1,&_showCCWeatherEffects,0,&cf_showCCWeatherEffects);
+  puVar1 = PTR_s_registerInteger_default_forKey__000142d0;
+  _objc_msgSend(_preferences,PTR_s_registerInteger_default_forKey__000142d0,
+                &_connectivityPortraitSize,6,&cf_connectivityPortraitSize);
+  _objc_msgSend(_preferences,puVar1,&_connectivityLandscapeSize,4,&cf_connectivityLandscapeSize);
+  _objc_msgSend(_preferences,puVar1,&_mediaPortraitSize,3,&cf_mediaPortraitSize);
+  _objc_msgSend(_preferences,puVar1,&_mediaLandscapeSize,3,&cf_mediaLandscapeSize);
+  _objc_msgSend(_preferences,puVar1,&_brightnessPortraitSize,2,&cf_brightnessPortraitSize);
+  _objc_msgSend(_preferences,puVar1,&_brightnessLandscapeSize,3,&cf_brightnessLandscapeSize);
+  _objc_msgSend(_preferences,puVar1,&_volumePortraitSize,2,&cf_volumePortraitSize);
+  _objc_msgSend(_preferences,puVar1,&_volumeLandscapeSize,3,&cf_volumeLandscapeSize);
+  _objc_msgSend(_preferences,puVar1,&_screenMirroringModuleSize,2,&cf_screenMirroringModuleSize);
+  _objc_msgSend(_preferences,PTR_s_registerDefaults__000142d8,
+                &PTR__OBJC_CLASS___NSConstantDictionary_000148c8);
+  IVar5 = NSBundle::bundleWithPath_
+                    ((ID)PTR__OBJC_CLASS___NSBundle_00014750,PTR_s_bundleWithPath__000142e0,
+                     &cf__System_Library_ControlCenter_Bundles_ConnectivityModule_bundle);
+  if (_isEnabled != '\0') {
+    IVar6 = NSBundle::isLoaded(IVar5,PTR_s_isLoaded_000142e8);
+    if ((IVar6 & 1) == 0) {
+      NSBundle::load(IVar5,PTR_s_load_000142f0);
+      uVar7 = _objc_getClass("CCUIConnectivityModuleViewController");
+      _MSHookMessageEx(uVar7,PTR_s_viewWillLayoutSubviews_000142f8,FUN_0000894c,&DAT_00014988);
+      local_470[0] = 0x3a4071;
+      _class_addMethod(uVar7,PTR_s_numOfColsCompressed_00014300,FUN_00009498,local_470);
+      local_470[0] = 0x3a4071;
+      _class_addMethod(uVar7,PTR_s_numOfRowsCompressed_00014308,FUN_00009508,local_470);
+    }
+    uVar7 = _objc_getClass("SBMediaController");
+    _MSHookMessageEx(uVar7,PTR_s_setNowPlayingInfo__00014310,FUN_00009578,&DAT_00014990);
+    uVar7 = _objc_getClass("SpringBoard");
+    _MSHookMessageEx(uVar7,PTR_s_applicationDidFinishLaunching__00014318,FUN_000095bc,&DAT_00014998)
+    ;
+    uVar7 = _objc_getClass("CCUIContentModuleContainerViewController");
+    puVar1 = PTR_s_viewWillAppear__00014320;
+    _MSHookMessageEx(uVar7,PTR_s_viewWillAppear__00014320,FUN_00009648,&DAT_000149a0);
+    _MSHookMessageEx(uVar7,PTR_s_setExpanded__00014328,FUN_00009900,&DAT_000149a8);
+    uVar7 = _objc_getClass("CCUIModularControlCenterOverlayViewController");
+    local_570 = "T";
+    pcStack_568 = "@\"WUIGradientLayer\"";
+    local_560 = "&";
+    pcStack_558 = "";
+    local_550 = "N";
+    pcStack_548 = "";
+    _class_addProperty(uVar7,"gradientLayer",&local_570,3);
+    ___sprintf_chk(local_470,0,0x400,"%s@:");
+    _class_addMethod(uVar7,PTR_s_gradientLayer_00014330,FUN_00007f28,local_470);
+    ___sprintf_chk(local_470,0,0x400,"v@:%s");
+    _class_addMethod(uVar7,PTR_s_setGradientLayer__00014338,FUN_00007f34,local_470);
+    local_570 = "T";
+    pcStack_568 = "@\"WUIWeatherCondition\"";
+    local_560 = "&";
+    pcStack_558 = "";
+    local_550 = "N";
+    pcStack_548 = "";
+    _class_addProperty(uVar7,"condition",&local_570,3);
+    ___sprintf_chk(local_470,0,0x400,"%s@:");
+    _class_addMethod(uVar7,PTR_s_condition_00014340,FUN_00007f44,local_470);
+    ___sprintf_chk(local_470,0,0x400,"v@:%s");
+    _class_addMethod(uVar7,PTR_s_setCondition__00014348,FUN_00007f50,local_470);
+    _MSHookMessageEx(uVar7,PTR_s_overlayInterfaceOrientation_00014350,FUN_000099a4,&DAT_000149b0);
+    _MSHookMessageEx(uVar7,puVar1,FUN_000099f0,&DAT_000149b8);
+    _MSHookMessageEx(uVar7,PTR_s__updatePresentationForTransition_00014358,FUN_0000a2cc,
+                     &DAT_000149c0);
+    _MSHookMessageEx(uVar7,PTR_s_viewWillDisappear__00014360,FUN_0000a394,&DAT_000149c8);
+    uVar7 = _objc_getClass("CCUIHeaderPocketView");
+    _MSHookMessageEx(uVar7,PTR_s_setBackgroundAlpha__00014368,FUN_0000a418,&DAT_000149d0);
+    _MSHookMessageEx(uVar7,PTR_s_setChevronAlpha__00014370,FUN_0000a44c,&DAT_000149d8);
+    uVar7 = _objc_getClass("CCUIContentModuleContentContainerView");
+    _MSHookMessageEx(uVar7,PTR_s__configureModuleMaterialViewIfNe_00014378,FUN_0000a480,
+                     &DAT_000149e0);
+    uVar7 = _objc_getClass("CCUIContinuousSliderView");
+    _MSHookMessageEx(uVar7,PTR_s_axis_00014380,FUN_0000a570,&DAT_000149e8);
+    uVar7 = _objc_getClass("CCUIButtonModuleView");
+    _MSHookMessageEx(uVar7,PTR_s_didMoveToWindow_00014388,FUN_0000a704,&DAT_000149f0);
+    uVar7 = _objc_getClass("CCUICAPackageView");
+    puVar1 = PTR_s_setAlpha__00014390;
+    _MSHookMessageEx(uVar7,PTR_s_setAlpha__00014390,FUN_0000aa48,&DAT_000149f8);
+    uVar7 = _objc_getClass("MRUControlCenterViewController");
+    puVar2 = PTR_s_setState__00014398;
+    _MSHookMessageEx(uVar7,PTR_s_setState__00014398,FUN_0000ab1c,&DAT_00014a00);
+    uVar7 = _objc_getClass("MRUControlCenterView");
+    _MSHookMessageEx(uVar7,puVar2,FUN_0000ab28,&DAT_00014a08);
+    uVar7 = _objc_getClass("MRUNowPlayingViewController");
+    puVar2 = PTR_s_updateVisibility_000143a0;
+    _MSHookMessageEx(uVar7,PTR_s_updateVisibility_000143a0,FUN_0000abf4,&DAT_00014a10);
+    uVar7 = _objc_getClass("MRUNowPlayingControlsView");
+    puVar3 = PTR_s_layoutSubviews_000143a8;
+    _MSHookMessageEx(uVar7,PTR_s_layoutSubviews_000143a8,FUN_0000ad4c,&DAT_00014a18);
+    _MSHookMessageEx(uVar7,PTR_s_timeControlsView_000143b0,FUN_0000b07c,&DAT_00014a20);
+    uVar7 = _objc_getClass("MRUNowPlayingTimeControlsView");
+    puVar4 = PTR_s_setFrame__000143b8;
+    _MSHookMessageEx(uVar7,PTR_s_setFrame__000143b8,FUN_0000b270,&DAT_00014a28);
+    uVar7 = _objc_getClass("MRUNowPlayingHeaderView");
+    _MSHookMessageEx(uVar7,puVar2,FUN_0000b3a0,&DAT_00014a30);
+    _MSHookMessageEx(uVar7,PTR_s_setShowPlaceholderText__000143c0,FUN_0000b51c,&DAT_00014a38);
+    _MSHookMessageEx(uVar7,puVar3,FUN_0000b73c,&DAT_00014a40);
+    uVar7 = _objc_getClass("MRUNowPlayingLabelView");
+    _MSHookMessageEx(uVar7,puVar4,FUN_0000b99c,&DAT_00014a48);
+    uVar7 = _objc_getClass("MRUNowPlayingTransportControlsView");
+    _MSHookMessageEx(uVar7,puVar4,FUN_0000bac8,&DAT_00014a50);
+    _MSHookMessageEx(uVar7,puVar3,FUN_0000bb9c,&DAT_00014a58);
+    uVar7 = _objc_getClass("MRUNowPlayingVolumeControlsView");
+    _MSHookMessageEx(uVar7,puVar4,FUN_0000c578,&DAT_00014a60);
+    uVar7 = _objc_getClass("MRUArtworkView");
+    _MSHookMessageEx(uVar7,puVar1,FUN_0000c67c,&DAT_00014a68);
+    _MSHookMessageEx(uVar7,puVar4,FUN_0000c6dc,&DAT_00014a70);
+    uVar7 = _objc_getClass("CCUIModuleSettingsManager");
+    _MSHookMessageEx(uVar7,PTR_s_moduleSettingsForModuleIdentifie_000143c8,FUN_0000c858,
+                     &DAT_00014a78);
+  }
+  if (*(long *)PTR____stack_chk_guard_00010000 == local_70) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail(0);
+}
+
+
+========== FUN_0000894c  @ 0000894c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000894c(undefined1 param_1 [16],double param_2,double param_3,double param_4,ID param_5)
+
+{
+  long lVar1;
+  bool bVar2;
+  undefined *puVar3;
+  undefined *puVar4;
+  undefined *puVar5;
+  undefined *puVar6;
+  ID IVar7;
+  ID IVar8;
+  ID IVar9;
+  ID IVar10;
+  ID IVar11;
+  ID IVar12;
+  ID self;
+  undefined **ppuVar13;
+  long lVar14;
+  ulong uVar15;
+  double extraout_d0;
+  ID local_f0;
+  ID local_e8;
+  ID local_e0;
+  ID local_d8;
+  ID local_d0;
+  ID local_c8;
+  ID local_c0;
+  ID local_b8;
+  ID local_b0;
+  ID local_a8;
+  long local_a0;
+  
+  local_a0 = *(long *)PTR____stack_chk_guard_00010000;
+  (*DAT_00014988)();
+  IVar7 = _objc_msgSend(param_5,PTR_s__isPortrait_000143d0);
+  ppuVar13 = &PTR_s_portraitButtonViewControllers_000143d8;
+  if ((int)IVar7 == 0) {
+    ppuVar13 = &PTR_s_landscapeButtonViewControllers_000143e0;
+  }
+  IVar7 = _objc_msgSend(param_5,*ppuVar13);
+  if ((IVar7 != 0 && _rearrangeToggles != '\0') && _count != 1) {
+    IVar8 = _objc_msgSend(_preferences,PTR_s_objectForKey__000143e8,&cf_connectivityToggles);
+    IVar8 = _objc_msgSend(IVar8,PTR_s_copy_000143f0);
+    IVar9 = _objc_alloc_init(PTR__OBJC_CLASS___NSMutableArray_00014758);
+    puVar3 = PTR_s_count_000143f8;
+    IVar10 = _objc_msgSend(IVar8,PTR_s_count_000143f8);
+    IVar11 = _objc_msgSend(IVar8,puVar3);
+    puVar6 = PTR_s_addObject__00014410;
+    puVar4 = PTR_s_isEqualToString__00014408;
+    puVar5 = PTR_s_objectAtIndexedSubscript__00014400;
+    if (IVar10 == 4) {
+      if (IVar11 != 0) {
+        uVar15 = 0;
+        do {
+          IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+          IVar10 = _objc_msgSend(IVar10,puVar4,&cf_AirplaneMode);
+          ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_000147f8;
+          if ((IVar10 & 1) == 0) {
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_AirDrop);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014810;
+            if ((IVar10 & 1) != 0) goto LAB_00008bb8;
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_Wi_fi);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014828;
+            if ((IVar10 & 1) != 0) goto LAB_00008bb8;
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_Bluetooth);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014840;
+            if ((int)IVar10 != 0) goto LAB_00008bb8;
+          }
+          else {
+LAB_00008bb8:
+            NSMutableArray::addObject_(IVar9,puVar6,ppuVar13);
+          }
+          uVar15 = uVar15 + 1;
+          IVar10 = _objc_msgSend(IVar8,puVar3);
+        } while (uVar15 < IVar10);
+      }
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,0);
+      puVar3 = PTR_s_intValue_00014418;
+      IVar8 = NSMutableArray::intValue(IVar8,PTR_s_intValue_00014418);
+      local_c0 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,1);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_b8 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,2);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_b0 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,3);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_a8 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSArray::arrayWithObjects_count_
+                        ((ID)PTR__OBJC_CLASS___NSArray_00014760,
+                         PTR_s_arrayWithObjects_count__00014420,&local_c0,4);
+    }
+    else {
+      if (IVar11 != 6) goto LAB_000091b0;
+      IVar10 = _objc_msgSend(IVar8,puVar3);
+      puVar6 = PTR_s_addObject__00014410;
+      puVar4 = PTR_s_isEqualToString__00014408;
+      puVar5 = PTR_s_objectAtIndexedSubscript__00014400;
+      if (IVar10 != 0) {
+        uVar15 = 0;
+        do {
+          IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+          IVar10 = _objc_msgSend(IVar10,puVar4,&cf_AirplaneMode);
+          ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_000147f8;
+          if ((IVar10 & 1) == 0) {
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_CellularData);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014810;
+            if ((IVar10 & 1) != 0) goto LAB_00008f00;
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_Wi_fi);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014828;
+            if ((IVar10 & 1) != 0) goto LAB_00008f00;
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_Bluetooth);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014840;
+            if ((IVar10 & 1) != 0) goto LAB_00008f00;
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_AirDrop);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014858;
+            if ((IVar10 & 1) != 0) goto LAB_00008f00;
+            IVar10 = _objc_msgSend(IVar8,puVar5,uVar15);
+            IVar10 = _objc_msgSend(IVar10,puVar4,&cf_PersonalHotspot);
+            ppuVar13 = &PTR__OBJC_CLASS___NSConstantIntegerNumber_00014870;
+            if ((int)IVar10 != 0) goto LAB_00008f00;
+          }
+          else {
+LAB_00008f00:
+            NSMutableArray::addObject_(IVar9,puVar6,ppuVar13);
+          }
+          uVar15 = uVar15 + 1;
+          IVar10 = _objc_msgSend(IVar8,puVar3);
+        } while (uVar15 < IVar10);
+      }
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,0);
+      puVar3 = PTR_s_intValue_00014418;
+      IVar8 = NSMutableArray::intValue(IVar8,PTR_s_intValue_00014418);
+      local_f0 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,1);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_e8 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,2);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_e0 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,3);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_d8 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,4);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_d0 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSMutableArray::objectAtIndexedSubscript_(IVar9,puVar5,5);
+      IVar8 = NSMutableArray::intValue(IVar8,puVar3);
+      local_c8 = _objc_msgSend(IVar7,puVar5,(long)(int)IVar8);
+      IVar8 = NSArray::arrayWithObjects_count_
+                        ((ID)PTR__OBJC_CLASS___NSArray_00014760,
+                         PTR_s_arrayWithObjects_count__00014420,&local_f0,6);
+    }
+    _objc_msgSend(param_5,PTR_s_setPortraitButtonViewControllers_00014428,IVar8);
+    _objc_msgSend(param_5,PTR_s_setLandscapeButtonViewController_00014430,IVar8);
+    _count = 1;
+  }
+LAB_000091b0:
+  if ((_customizeConnectivity != '\0') &&
+     (IVar8 = _objc_msgSend(param_5,PTR_s_isExpanded_00014438), IVar7 != 0 && (int)IVar8 == 0)) {
+    _objc_msgSend(param_5,PTR_s__compressedButtonSize_00014440);
+    IVar8 = _objc_msgSend(param_5,PTR_s_numOfColsCompressed_00014300);
+    puVar3 = PTR_s_count_000143f8;
+    IVar9 = _objc_msgSend(IVar7,PTR_s_count_000143f8);
+    if (IVar9 < IVar8) {
+      IVar8 = _objc_msgSend(IVar7,puVar3);
+    }
+    IVar9 = _objc_msgSend(param_5,PTR_s_numOfRowsCompressed_00014308);
+    puVar5 = PTR_s_view_00014448;
+    IVar10 = _objc_msgSend(param_5,PTR_s_view_00014448);
+    puVar4 = PTR_s_bounds_00014450;
+    _objc_msgSend(IVar10,PTR_s_bounds_00014450);
+    IVar10 = _objc_msgSend(param_5,puVar5);
+    _objc_msgSend(IVar10,puVar4);
+    IVar10 = _objc_msgSend(IVar7,puVar3);
+    if (0 < (long)IVar9) {
+      lVar14 = 0;
+      do {
+        puVar6 = PTR_s_objectAtIndex__00014458;
+        puVar4 = PTR_s_setFrame__000143b8;
+        puVar3 = PTR_s_setAlpha__00014390;
+        if ((long)IVar8 < 1) {
+          bVar2 = false;
+        }
+        else {
+          IVar11 = 0;
+          do {
+            lVar1 = IVar8 * lVar14 + IVar11;
+            if ((long)IVar10 <= lVar1 || (long)(IVar9 * IVar8) <= lVar1) break;
+            IVar12 = _objc_msgSend(IVar7,puVar6,lVar1);
+            self = _objc_msgSend(IVar12,puVar5);
+            IVar12 = IVar11 + 1;
+            if (self != 0) {
+              _objc_msgSend(self,puVar3,0x3ff0000000000000);
+              _objc_msgSend(self,puVar4,
+                            extraout_d0 * (double)(long)IVar11 +
+                            ((param_3 - extraout_d0 * (double)(long)IVar8) /
+                            (double)(long)(IVar8 + 1)) * (double)(long)IVar12,
+                            param_2 * (double)lVar14 +
+                            ((param_4 - param_2 * (double)(long)IVar9) / (double)(long)(IVar9 + 1))
+                            * (double)(lVar14 + 1),extraout_d0,param_2);
+            }
+            IVar11 = IVar12;
+          } while (IVar8 != IVar12);
+          bVar2 = (long)IVar10 <= lVar1 || (long)(IVar9 * IVar8) <= lVar1;
+        }
+        lVar14 = lVar14 + 1;
+      } while ((lVar14 < (long)IVar9) && (!bVar2));
+    }
+  }
+  if (*(long *)PTR____stack_chk_guard_00010000 == local_a0) {
+    return;
+  }
+                    /* WARNING: Subroutine does not return */
+  ___stack_chk_fail(0);
+}
+
+
+========== FUN_00009498  @ 00009498 ==========
+
+undefined8 FUN_00009498(void)
+
+{
+  ulong uVar1;
+  undefined *puVar2;
+  
+  if (_interfaceOrientation == 1) {
+    uVar1 = _connectivityPortraitSize - 1;
+    if (10 < uVar1) {
+      return 2;
+    }
+    puVar2 = &DAT_0000ea18;
+  }
+  else {
+    if (_interfaceOrientation < 3) {
+      return 2;
+    }
+    uVar1 = _connectivityLandscapeSize - 1;
+    if (8 < uVar1) {
+      return 2;
+    }
+    puVar2 = &DAT_0000ea70;
+  }
+  return *(undefined8 *)(puVar2 + uVar1 * 8);
+}
+
+
+========== FUN_00009508  @ 00009508 ==========
+
+undefined8 FUN_00009508(void)
+
+{
+  ulong uVar1;
+  undefined *puVar2;
+  
+  if (_interfaceOrientation == 1) {
+    uVar1 = _connectivityPortraitSize - 1;
+    if (10 < uVar1) {
+      return 2;
+    }
+    puVar2 = &DAT_0000eab8;
+  }
+  else {
+    if (_interfaceOrientation < 3) {
+      return 2;
+    }
+    uVar1 = _connectivityLandscapeSize - 1;
+    if (8 < uVar1) {
+      return 2;
+    }
+    puVar2 = &DAT_0000eb10;
+  }
+  return *(undefined8 *)(puVar2 + uVar1 * 8);
+}
+
+
+========== FUN_00009578  @ 00009578 ==========
+
+void FUN_00009578(void)
+
+{
+  (*DAT_00014990)();
+  if (_showMediaArtwork != '\0') {
+    _MRMediaRemoteGetNowPlayingInfo
+              (PTR___dispatch_main_q_00010008,&PTR___NSConcreteGlobalBlock_00010050);
+    return;
+  }
+  return;
+}
+
+
+========== FUN_000095bc  @ 000095bc ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_000095bc(void)
+
+{
+  undefined8 uVar1;
+  ID IVar2;
+  
+  uVar1 = (*DAT_00014998)();
+  if (_showMediaArtwork != '\0') {
+    if (DAT_00014a80 == 0) {
+      DAT_00014a80 = _objc_getClass("SBMediaController");
+    }
+    IVar2 = _objc_retainAutorelease();
+    IVar2 = _objc_msgSend(IVar2,PTR_s_sharedInstance_00014478);
+    _objc_msgSend(IVar2,PTR_s_setNowPlayingInfo__00014310,0);
+    return 0;
+  }
+  return uVar1;
+}
+
+
+========== FUN_00009648  @ 00009648 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_00009648(ID param_1)
+
+{
+  undefined *op;
+  undefined8 uVar1;
+  ID IVar2;
+  ID IVar3;
+  SEL op_00;
+  undefined8 extraout_d0;
+  
+  uVar1 = (*DAT_000149a0)();
+  if (_showMediaArtwork != '\0') {
+    IVar2 = _objc_msgSend(param_1,PTR_s_moduleIdentifier_00014480);
+    IVar2 = _objc_msgSend(IVar2,PTR_s_isEqual__00014488,
+                          &cf_com_apple_mediaremote_controlcenter_nowplaying);
+    uVar1 = 0;
+    if ((int)IVar2 != 0) {
+      op_00 = PTR_s_view_00014448;
+      if (_artworkImageView == 0) {
+        IVar2 = _objc_alloc(PTR__OBJC_CLASS___UIImageView_00014770);
+        IVar3 = _objc_msgSend(param_1,PTR_s_contentViewController_00014490);
+        op_00 = PTR_s_view_00014448;
+        IVar3 = _objc_msgSend(IVar3,PTR_s_view_00014448);
+        _objc_msgSend(IVar3,PTR_s_bounds_00014450);
+        _artworkImageView = UIImageView::initWithFrame_(IVar2,PTR_s_initWithFrame__00014498);
+      }
+      _objc_msgSend(_artworkImageView,PTR_s_setImage__00014468,_artworkImage);
+      _objc_msgSend(_artworkImageView,PTR_s_setContentMode__000144a0,2);
+      _objc_msgSend(_artworkImageView,PTR_s_setHidden__00014470,(ulong)(_artworkImage == 0));
+      _objc_msgSend(_artworkImageView,PTR_s_setClipsToBounds__000144a8,1);
+      IVar2 = _objc_msgSend(param_1,PTR_s_moduleContentView_000144b0);
+      _objc_msgSend(IVar2,PTR_s_compactContinuousCornerRadius_000144b8);
+      op = PTR_s_layer_000144c0;
+      IVar2 = _objc_msgSend(_artworkImageView,PTR_s_layer_000144c0);
+      _objc_msgSend(IVar2,PTR_s_setCornerRadius__000144c8,extraout_d0);
+      uVar1 = *(undefined8 *)PTR__kCACornerCurveContinuous_00010010;
+      IVar2 = _objc_msgSend(_artworkImageView,op);
+      _objc_msgSend(IVar2,PTR_s_setCornerCurve__000144d0,uVar1);
+      IVar2 = _artworkImageView;
+      IVar3 = _objc_msgSend(param_1,op_00);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_isDescendantOfView__000144d8,IVar3);
+      uVar1 = 0;
+      if ((IVar2 & 1) == 0) {
+        IVar2 = _objc_msgSend(param_1,op_00);
+        _objc_msgSend(IVar2,PTR_s_insertSubview_atIndex__000144e0,_artworkImageView,0);
+        return 0;
+      }
+    }
+  }
+  return uVar1;
+}
+
+
+========== FUN_00009900  @ 00009900 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+ID FUN_00009900(ID param_1,undefined8 param_2,int param_3)
+
+{
+  ID IVar1;
+  ID IVar2;
+  
+  IVar1 = (*DAT_000149a8)();
+  if (_showMediaArtwork != '\0' && param_3 != 0) {
+    IVar1 = _objc_msgSend(param_1,PTR_s_moduleIdentifier_00014480);
+    IVar2 = _objc_msgSend(IVar1,PTR_s_isEqual__00014488,
+                          &cf_com_apple_mediaremote_controlcenter_nowplaying);
+    IVar1 = 0;
+    if ((int)IVar2 != 0) {
+      IVar1 = _objc_msgSend(_artworkImageView,PTR_s_setHidden__00014470,1);
+      return IVar1;
+    }
+  }
+  return IVar1;
+}
+
+
+========== FUN_000099a4  @ 000099a4 ==========
+
+void FUN_000099a4(undefined8 param_1,undefined8 param_2)
+
+{
+  _interfaceOrientation = (*DAT_000149b0)();
+                    /* WARNING: Could not recover jumptable at 0x000099ec. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149b0)(param_1,param_2);
+  return;
+}
+
+
+========== FUN_000099f0  @ 000099f0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_000099f0(undefined1 param_1 [16],undefined8 param_2,undefined8 param_3,undefined8 param_4,
+                 ID param_5,undefined8 param_6,ulong param_7)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  undefined *op_00;
+  undefined *puVar2;
+  undefined *op_01;
+  undefined *op_02;
+  undefined *op_03;
+  ID IVar3;
+  ID IVar4;
+  undefined8 extraout_d0;
+  undefined8 extraout_d0_00;
+  undefined8 extraout_d0_01;
+  
+  puVar2 = PTR_s_sharedInstance_00014478;
+  if (_showCCWeatherEffects != '\0' || _showCCWeatherView != '\0') {
+    IVar3 = WeatherManager::sharedInstance
+                      ((ID)PTR_WeatherManager_00014778,PTR_s_sharedInstance_00014478);
+    WeatherManager::refreshWeatherData(IVar3,PTR_s_refreshWeatherData_000144e8);
+    IVar3 = WeatherManager::sharedInstance((ID)PTR_WeatherManager_00014778,puVar2);
+    WeatherManager::refreshDynamicWeatherView(IVar3,PTR_s_refreshDynamicWeatherView_000144f0);
+    IVar3 = _objc_msgSend(param_5,PTR_s_valueForKey__000144f8,&cf__previousTransitionState);
+    _objc_msgSend(IVar3,PTR_s_presentationProgress_00014500);
+    op_02 = PTR_s_overlayBackgroundView_00014508;
+    IVar3 = _objc_msgSend(param_5,PTR_s_overlayBackgroundView_00014508);
+    _objc_msgSend(IVar3,PTR_s_setAlpha__00014390,extraout_d0);
+    IVar3 = _objc_msgSend(param_5,op_02);
+    _objc_msgSend(IVar3,PTR_s_setShouldCrossfade__00014510,1);
+    if (_showCCWeatherView != '\0') {
+      IVar3 = WeatherManager::sharedInstance((ID)PTR_WeatherManager_00014778,puVar2);
+      puVar1 = PTR_s_gradientLayer_00014330;
+      IVar3 = WeatherManager::gradientLayer(IVar3,PTR_s_gradientLayer_00014330);
+      _objc_msgSend(param_5,PTR_s_setGradientLayer__00014338,IVar3);
+      IVar3 = _objc_msgSend(param_5,PTR_s_view_00014448);
+      _objc_msgSend(IVar3,PTR_s_bounds_00014450);
+      IVar3 = _objc_msgSend(param_5,puVar1);
+      _objc_msgSend(IVar3,PTR_s_setFrame__000143b8,extraout_d0_00,param_2,param_3,param_4);
+      IVar3 = _objc_msgSend(param_5,op_02);
+      IVar3 = _objc_msgSend(IVar3,PTR_s_layer_000144c0);
+      IVar4 = _objc_msgSend(param_5,puVar1);
+      _objc_msgSend(IVar3,PTR_s_addSublayer__00014518,IVar4);
+    }
+    if (_showCCWeatherEffects != '\0') {
+      IVar3 = WeatherManager::sharedInstance((ID)PTR_WeatherManager_00014778,puVar2);
+      puVar1 = PTR_s_condition_00014340;
+      IVar3 = WeatherManager::condition(IVar3,PTR_s_condition_00014340);
+      _objc_msgSend(param_5,PTR_s_setCondition__00014348,IVar3);
+      IVar3 = _objc_msgSend(param_5,PTR_s_view_00014448);
+      _objc_msgSend(IVar3,PTR_s_bounds_00014450);
+      IVar3 = _objc_msgSend(param_5,puVar1);
+      op_01 = PTR_s_layer_000144c0;
+      IVar3 = _objc_msgSend(IVar3,PTR_s_layer_000144c0);
+      op = PTR_s_setFrame__000143b8;
+      _objc_msgSend(IVar3,PTR_s_setFrame__000143b8,extraout_d0_01,param_2,param_3,param_4);
+      IVar3 = _objc_msgSend(param_5,puVar1);
+      IVar3 = _objc_msgSend(IVar3,op_01);
+      _objc_msgSend(IVar3,PTR_s_setGeometryFlipped__00014520,1);
+      IVar3 = _objc_msgSend(param_5,PTR_s_overlayInterfaceOrientation_00014350);
+      if (2 < (long)IVar3) {
+        IVar3 = _objc_msgSend(param_5,puVar1);
+        IVar3 = _objc_msgSend(IVar3,op_01);
+        op_03 = PTR_s_sublayers_00014528;
+        IVar3 = _objc_msgSend(IVar3,PTR_s_sublayers_00014528);
+        op_00 = PTR_s_objectAtIndexedSubscript__00014400;
+        IVar3 = _objc_msgSend(IVar3,PTR_s_objectAtIndexedSubscript__00014400,0);
+        IVar3 = _objc_msgSend(IVar3,op_03);
+        IVar3 = _objc_msgSend(IVar3,op_00,0);
+        if (IVar3 != 0) {
+          IVar3 = _objc_msgSend(param_5,puVar1);
+          IVar3 = _objc_msgSend(IVar3,op_01);
+          IVar3 = _objc_msgSend(IVar3,op_03);
+          IVar3 = _objc_msgSend(IVar3,op_00,0);
+          IVar3 = _objc_msgSend(IVar3,op_03);
+          IVar3 = _objc_msgSend(IVar3,op_00,0);
+          _objc_msgSend(IVar3,PTR_s_setMasksToBounds__00014530,0);
+          IVar3 = _objc_msgSend(param_5,puVar1);
+          IVar3 = _objc_msgSend(IVar3,op_01);
+          IVar3 = _objc_msgSend(IVar3,op_03);
+          IVar3 = _objc_msgSend(IVar3,op_00,0);
+          IVar3 = _objc_msgSend(IVar3,op_03);
+          IVar3 = _objc_msgSend(IVar3,op_00,0);
+          IVar3 = _objc_msgSend(IVar3,op_03);
+          IVar3 = _objc_msgSend(IVar3,op_00,0);
+          if (IVar3 != 0) {
+            IVar3 = _objc_msgSend(param_5,puVar1);
+            IVar3 = _objc_msgSend(IVar3,op_01);
+            IVar3 = _objc_msgSend(IVar3,op_03);
+            IVar3 = _objc_msgSend(IVar3,op_00,0);
+            IVar3 = _objc_msgSend(IVar3,op_03);
+            IVar3 = _objc_msgSend(IVar3,op_00,0);
+            IVar3 = _objc_msgSend(IVar3,op_03);
+            IVar3 = _objc_msgSend(IVar3,op_00,0);
+            _objc_msgSend(IVar3,op,0,0,DAT_0000e9e8,DAT_0000e9e8);
+          }
+        }
+      }
+      IVar3 = _objc_msgSend(param_5,op_02);
+      IVar3 = _objc_msgSend(IVar3,op_01);
+      IVar4 = _objc_msgSend(param_5,puVar1);
+      IVar4 = _objc_msgSend(IVar4,op_01);
+      _objc_msgSend(IVar3,PTR_s_addSublayer__00014518,IVar4);
+      IVar3 = WeatherManager::sharedInstance((ID)PTR_WeatherManager_00014778,puVar2);
+      WeatherManager::resumeConditionView(IVar3,PTR_s_resumeConditionView_00014538);
+      param_7 = param_7 & 0xffffffff;
+    }
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000a2c8. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149b8)(param_5,param_6,param_7);
+  return;
+}
+
+
+========== FUN_0000a2cc  @ 0000a2cc ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_0000a2cc(ID param_1,undefined8 param_2,ID param_3,undefined8 param_4)
+
+{
+  ID self;
+  undefined8 extraout_d0;
+  
+  (*DAT_000149c0)(param_1,param_2,param_3,param_4);
+  if (_showCCWeatherEffects != '\0' || _showCCWeatherView != '\0') {
+    _objc_msgSend(param_3,PTR_s_presentationProgress_00014500);
+    self = _objc_msgSend(param_1,PTR_s_overlayBackgroundView_00014508);
+    _objc_msgSend(self,PTR_s_setAlpha__00014390,extraout_d0);
+  }
+  return 0;
+}
+
+
+========== FUN_0000a394  @ 0000a394 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000a394(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  ID IVar1;
+  
+  if (_showCCWeatherEffects != '\0') {
+    IVar1 = WeatherManager::sharedInstance
+                      ((ID)PTR_WeatherManager_00014778,PTR_s_sharedInstance_00014478);
+    WeatherManager::pauseConditionView(IVar1,PTR_s_pauseConditionView_00014540);
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000a414. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149c8)(param_1,param_2,param_3);
+  return;
+}
+
+
+========== FUN_0000a418  @ 0000a418 ==========
+
+void FUN_0000a418(undefined8 param_1)
+
+{
+  if (_showCCWeatherEffects != '\0' || _showCCWeatherView != '\0') {
+    param_1 = 0;
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000a448. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149d0)(param_1);
+  return;
+}
+
+
+========== FUN_0000a44c  @ 0000a44c ==========
+
+void FUN_0000a44c(undefined8 param_1)
+
+{
+  if (_showCCWeatherEffects != '\0' || _showCCWeatherView != '\0') {
+    param_1 = 0;
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000a47c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149d8)(param_1);
+  return;
+}
+
+
+========== FUN_0000a480  @ 0000a480 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000a480(ID param_1,undefined8 param_2)
+
+{
+  ID self;
+  ID IVar1;
+  
+  if (_showModules == '\0') {
+    self = _objc_msgSend(param_1,PTR_s_valueForKey__000144f8,&cf__moduleMaterialView);
+    IVar1 = _objc_msgSend(param_1,PTR_s__viewControllerForAncestor_00014548);
+    IVar1 = _objc_msgSend(IVar1,PTR_s_moduleIdentifier_00014480);
+    IVar1 = _objc_msgSend(IVar1,PTR_s_containsString__00014550,&cf_com_miguelaka95_betterccmodule);
+    if ((int)IVar1 != 0) {
+      _objc_msgSend(self,PTR_s_setHidden__00014470,1);
+    }
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000a56c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149e0)(param_1,param_2);
+  return;
+}
+
+
+========== FUN_0000a570  @ 0000a570 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_0000a570(ID param_1,undefined8 param_2)
+
+{
+  ID IVar1;
+  undefined8 uVar2;
+  ID IVar3;
+  long *plVar4;
+  ulong uVar5;
+  
+  IVar1 = _objc_msgSend(param_1,PTR_s__viewControllerForAncestor_00014548);
+  if (_customizeBrightness == '\0') {
+LAB_0000a60c:
+    if (_customizeVolume == '\0') goto code_r0x0000a6d0;
+    if (DAT_00014a90 == 0) {
+      DAT_00014a90 = _objc_getClass("MediaControlsVolumeViewController");
+    }
+    uVar2 = _objc_retainAutorelease();
+    IVar1 = _objc_msgSend(IVar1,PTR_s_isMemberOfClass__00014558,uVar2);
+    if ((int)IVar1 == 0) goto code_r0x0000a6d0;
+    if (_interfaceOrientation != 1) {
+      if (_interfaceOrientation < 3) goto code_r0x0000a6d0;
+      plVar4 = &_volumeLandscapeSize;
+      goto LAB_0000a69c;
+    }
+    plVar4 = &_volumePortraitSize;
+LAB_0000a66c:
+    uVar5 = *plVar4 - 5;
+  }
+  else {
+    if (DAT_00014a88 == 0) {
+      DAT_00014a88 = _objc_getClass("CCUIDisplayModuleViewController");
+    }
+    uVar2 = _objc_retainAutorelease();
+    IVar3 = _objc_msgSend(IVar1,PTR_s_isMemberOfClass__00014558,uVar2);
+    if ((int)IVar3 == 0) goto LAB_0000a60c;
+    if (_interfaceOrientation == 1) {
+      plVar4 = &_brightnessPortraitSize;
+      goto LAB_0000a66c;
+    }
+    if (_interfaceOrientation < 3) goto code_r0x0000a6d0;
+    plVar4 = &_brightnessLandscapeSize;
+LAB_0000a69c:
+    uVar5 = *plVar4 - 4;
+  }
+  if (uVar5 < 3) {
+    IVar1 = _objc_msgSend(param_1,PTR_s_isGlyphVisible_00014560);
+    if ((int)IVar1 != 0) {
+      return 1;
+    }
+    return 2;
+  }
+code_r0x0000a6d0:
+  uVar2 = (*DAT_000149e8)(param_1,param_2);
+  return uVar2;
+}
+
+
+========== FUN_0000a704  @ 0000a704 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000a704(ID param_1,undefined8 param_2)
+
+{
+  undefined *op;
+  undefined *op_00;
+  undefined *op_01;
+  undefined *op_02;
+  ID IVar1;
+  ID IVar2;
+  undefined8 uVar3;
+  
+  if (_showModules == '\0') {
+    IVar1 = _objc_msgSend(param_1,PTR_s_valueForKey__000144f8,&cf__highlightedBackgroundView);
+    IVar2 = _objc_msgSend(param_1,PTR_s__viewControllerForAncestor_00014548);
+    if (DAT_00014a98 == 0) {
+      DAT_00014a98 = _objc_getClass("CCUIToggleViewController");
+    }
+    uVar3 = _objc_retainAutorelease();
+    IVar2 = _objc_msgSend(IVar2,PTR_s_isMemberOfClass__00014558,uVar3);
+    if ((int)IVar2 != 0) {
+      IVar2 = _objc_msgSend(param_1,PTR_s_glyphImage_00014568);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_imageAsset_00014570);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_assetName_00014578);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_isEqualToString__00014408,&cf_invisible);
+      if ((int)IVar2 != 0) {
+        _objc_msgSend(param_1,PTR_s_setGlyphImage__00014580,0);
+        _objc_msgSend(param_1,PTR_s_setSelectedGlyphImage__00014588,0);
+        _objc_msgSend(IVar1,PTR_s_setHidden__00014470,1);
+      }
+    }
+  }
+  if (_customizeScreenMirroring != '\0' && _screenMirroringModuleSize == 1) {
+    IVar1 = _objc_msgSend(param_1,PTR_s__viewControllerForAncestor_00014548);
+    if (DAT_00014aa0 == 0) {
+      DAT_00014aa0 = _objc_getClass("MPAVAirPlayMirroringMenuModuleViewController");
+    }
+    uVar3 = _objc_retainAutorelease();
+    op_00 = PTR_s_isMemberOfClass__00014558;
+    IVar1 = _objc_msgSend(IVar1,PTR_s_isMemberOfClass__00014558,uVar3);
+    op_01 = PTR_s_superview_00014590;
+    if ((int)IVar1 != 0) {
+      IVar1 = _objc_msgSend(param_1,PTR_s_superview_00014590);
+      op_02 = PTR_s_subviews_00014598;
+      IVar1 = _objc_msgSend(IVar1,PTR_s_subviews_00014598);
+      op = PTR_s_objectAtIndexedSubscript__00014400;
+      IVar1 = _objc_msgSend(IVar1,PTR_s_objectAtIndexedSubscript__00014400,2);
+      if (DAT_00014aa8 == 0) {
+        DAT_00014aa8 = _objc_getClass("UILabel");
+      }
+      uVar3 = _objc_retainAutorelease();
+      IVar1 = _objc_msgSend(IVar1,op_00,uVar3);
+      if ((int)IVar1 != 0) {
+        IVar1 = _objc_msgSend(param_1,op_01);
+        IVar1 = _objc_msgSend(IVar1,op_02);
+        IVar1 = _objc_msgSend(IVar1,op,2);
+        _objc_msgSend(IVar1,PTR_s_setHidden__00014470,1);
+      }
+    }
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000aa44. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149f0)(param_1,param_2);
+  return;
+}
+
+
+========== FUN_0000aa48  @ 0000aa48 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000aa48(undefined8 param_1,ID param_2,undefined8 param_3)
+
+{
+  ID IVar1;
+  undefined8 uVar2;
+  
+  uVar2 = param_1;
+  if (_customizeScreenMirroring != '\0' && _screenMirroringModuleSize == 1) {
+    IVar1 = _objc_msgSend(param_2,PTR_s__viewControllerForAncestor_00014548);
+    if (DAT_00014aa0 == 0) {
+      DAT_00014aa0 = _objc_getClass("MPAVAirPlayMirroringMenuModuleViewController");
+    }
+    uVar2 = _objc_retainAutorelease();
+    IVar1 = _objc_msgSend(IVar1,PTR_s_isMemberOfClass__00014558,uVar2);
+    uVar2 = 0x3ff0000000000000;
+    if ((int)IVar1 == 0) {
+      uVar2 = param_1;
+    }
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000ab18. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_000149f8)(uVar2,param_2,param_3);
+  return;
+}
+
+
+========== FUN_0000ab1c  @ 0000ab1c ==========
+
+void FUN_0000ab1c(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000ab24. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a00)();
+  return;
+}
+
+
+========== FUN_0000ab28  @ 0000ab28 ==========
+
+void FUN_0000ab28(ID param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  double dVar1;
+  double in_d3;
+  
+  if (_customizeMedia != '\0') {
+    if (_interfaceOrientation == 1) {
+      if (_mediaPortraitSize < 5) goto code_r0x0000abd4;
+      _objc_msgSend(param_1,PTR_s_bounds_00014450);
+      dVar1 = DAT_0000e9f8;
+    }
+    else {
+      if (_interfaceOrientation < 3 || _mediaLandscapeSize < 5) goto code_r0x0000abd4;
+      _objc_msgSend(param_1,PTR_s_bounds_00014450);
+      dVar1 = DAT_0000e9f0;
+    }
+    if (in_d3 < dVar1) {
+      param_3 = 0;
+    }
+  }
+code_r0x0000abd4:
+                    /* WARNING: Could not recover jumptable at 0x0000abf0. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a08)(param_1,param_2,param_3);
+  return;
+}
+
+
+========== FUN_0000abf4  @ 0000abf4 ==========
+
+void FUN_0000abf4(ID param_1,undefined8 param_2)
+
+{
+  ID IVar1;
+  undefined8 uVar2;
+  
+  if (_customizeMedia == '\0') goto code_r0x0000ad34;
+  if (_interfaceOrientation == 1) {
+    if ((long)_mediaPortraitSize < 7) goto code_r0x0000acb0;
+    if (_mediaPortraitSize == 7) {
+code_r0x0000acf8:
+      IVar1 = _objc_msgSend(param_1,PTR_s_supportsHorizontalLayout_000145a0);
+      if (((int)IVar1 == 0) || (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 != 0))
+      goto code_r0x0000ad34;
+      uVar2 = 4;
+    }
+    else {
+      if ((((_mediaPortraitSize & 0xfffffffffffffffe) != 8) ||
+          (IVar1 = _objc_msgSend(param_1,PTR_s_supportsHorizontalLayout_000145a0), (int)IVar1 == 0))
+         || (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 != 0))
+      goto code_r0x0000ad34;
+      uVar2 = 2;
+    }
+  }
+  else {
+    if (_interfaceOrientation < 3) goto code_r0x0000ad34;
+    if (6 < _mediaLandscapeSize) {
+      if (_mediaLandscapeSize != 7) goto code_r0x0000ad34;
+      goto code_r0x0000acf8;
+    }
+code_r0x0000acb0:
+    IVar1 = _objc_msgSend(param_1,PTR_s_supportsHorizontalLayout_000145a0);
+    if (((int)IVar1 == 0) || (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 != 4))
+    goto code_r0x0000ad34;
+    uVar2 = 0;
+  }
+  _objc_msgSend(param_1,PTR_s_setLayout__000145b0,uVar2);
+code_r0x0000ad34:
+                    /* WARNING: Could not recover jumptable at 0x0000ad48. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a10)(param_1,param_2);
+  return;
+}
+
+
+========== FUN_0000ad4c  @ 0000ad4c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+ID FUN_0000ad4c(undefined1 param_1 [16],double param_2,ID param_3)
+
+{
+  ID IVar1;
+  undefined8 extraout_d0;
+  undefined8 extraout_d0_00;
+  
+  IVar1 = (*DAT_00014a18)();
+  if (_customizeMedia == '\0') {
+    return IVar1;
+  }
+  _objc_msgSend(param_3,PTR_s_center_000145b8);
+  IVar1 = _objc_msgSend(param_3,PTR_s_superview_00014590);
+  _objc_msgSend(param_3,PTR_s_convertPoint_fromView__000145c0,extraout_d0,param_2,IVar1);
+  IVar1 = 0;
+  if (_interfaceOrientation == 1) {
+    if ((_mediaPortraitSize < 6 && (1L << (_mediaPortraitSize & 0x3f) & 0x26U) != 0) &&
+       (IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8), IVar1 == 0)) {
+      IVar1 = _objc_msgSend(param_3,PTR_s_transportControlsView_000145c8);
+      _objc_msgSend(IVar1,PTR_s_setCenter__000145d0,extraout_d0_00,param_2);
+      IVar1 = 0;
+    }
+    if ((_mediaPortraitSize == 4) &&
+       (IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8), IVar1 == 0)) {
+      param_2 = param_2 + 10.0;
+      IVar1 = _objc_msgSend(param_3,PTR_s_timeControlsView_000143b0);
+    }
+    else if ((_mediaPortraitSize == 5) &&
+            (IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8), IVar1 == 0)) {
+      IVar1 = _objc_msgSend(param_3,PTR_s_headerView_000145d8);
+    }
+    else {
+      if (_mediaPortraitSize != 6) {
+        return IVar1;
+      }
+      IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8);
+      if (IVar1 != 0) {
+        return IVar1;
+      }
+      IVar1 = _objc_msgSend(param_3,PTR_s_timeControlsView_000143b0);
+    }
+  }
+  else {
+    if (_interfaceOrientation < 3) {
+      return 0;
+    }
+    if ((_mediaLandscapeSize < 6 && (1L << (_mediaLandscapeSize & 0x3f) & 0x26U) != 0) &&
+       (IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8), IVar1 == 0)) {
+      IVar1 = _objc_msgSend(param_3,PTR_s_transportControlsView_000145c8);
+      _objc_msgSend(IVar1,PTR_s_setCenter__000145d0,extraout_d0_00,param_2);
+      IVar1 = 0;
+    }
+    if ((_mediaLandscapeSize == 4) &&
+       (IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8), IVar1 == 0)) {
+      param_2 = param_2 + 10.0;
+      IVar1 = _objc_msgSend(param_3,PTR_s_timeControlsView_000143b0);
+    }
+    else if ((_mediaLandscapeSize == 5) &&
+            (IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8), IVar1 == 0)) {
+      IVar1 = _objc_msgSend(param_3,PTR_s_headerView_000145d8);
+    }
+    else {
+      if (_mediaLandscapeSize != 6) {
+        return IVar1;
+      }
+      IVar1 = _objc_msgSend(param_3,PTR_s_layout_000145a8);
+      if (IVar1 != 0) {
+        return IVar1;
+      }
+      IVar1 = _objc_msgSend(param_3,PTR_s_timeControlsView_000143b0);
+    }
+  }
+  _objc_msgSend(IVar1,PTR_s_setCenter__000145d0,extraout_d0_00,param_2);
+  return 0;
+}
+
+
+========== FUN_0000b07c  @ 0000b07c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000b07c(ID param_1,undefined8 param_2)
+
+{
+  ID IVar1;
+  undefined8 uVar2;
+  
+  if (_customizeMedia == '\0') goto LAB_0000b254;
+  if (_interfaceOrientation == 1) {
+    if ((_mediaPortraitSize < 4) &&
+       (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 == 0)) {
+      IVar1 = (*DAT_00014a20)(param_1,param_2);
+      goto LAB_0000b208;
+    }
+    if ((_mediaPortraitSize == 4) &&
+       (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 == 0)) {
+      IVar1 = (*DAT_00014a20)(param_1,param_2);
+    }
+    else {
+      if ((_mediaPortraitSize != 6) ||
+         (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 != 0)) goto LAB_0000b254;
+      IVar1 = (*DAT_00014a20)(param_1,param_2);
+    }
+LAB_0000b234:
+    uVar2 = 0x3ff0000000000000;
+  }
+  else {
+    if (_interfaceOrientation < 3) goto LAB_0000b254;
+    if ((3 < _mediaLandscapeSize) ||
+       (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 != 0)) {
+      if ((_mediaLandscapeSize == 4) &&
+         (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 == 0)) {
+        IVar1 = (*DAT_00014a20)(param_1,param_2);
+      }
+      else {
+        if ((_mediaLandscapeSize != 6) ||
+           (IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8), IVar1 != 0)) goto LAB_0000b254;
+        IVar1 = (*DAT_00014a20)(param_1,param_2);
+      }
+      goto LAB_0000b234;
+    }
+    IVar1 = (*DAT_00014a20)(param_1,param_2);
+LAB_0000b208:
+    uVar2 = 0;
+  }
+  _objc_msgSend(IVar1,PTR_s_setAlpha__00014390,uVar2);
+LAB_0000b254:
+                    /* WARNING: Could not recover jumptable at 0x0000b26c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a20)(param_1,param_2);
+  return;
+}
+
+
+========== FUN_0000b270  @ 0000b270 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000b270(undefined8 param_1,undefined8 param_2,double param_3,undefined8 param_4,ID param_5
+                 ,undefined8 param_6)
+
+{
+  ID IVar1;
+  long *plVar2;
+  double dVar3;
+  
+  if (_customizeMedia != '\0') {
+    IVar1 = _objc_msgSend(param_5,PTR_s__viewControllerForAncestor_00014548);
+    if (_interfaceOrientation == 1) {
+      plVar2 = &_mediaPortraitSize;
+    }
+    else {
+      if (_interfaceOrientation < 3) goto code_r0x0000b36c;
+      plVar2 = &_mediaLandscapeSize;
+    }
+    if (*plVar2 == 6) {
+      IVar1 = _objc_msgSend(IVar1,PTR_s_layout_000145a8);
+      if (IVar1 != 0) goto code_r0x0000b36c;
+      dVar3 = -40.0;
+    }
+    else {
+      if ((*plVar2 != 4) || (IVar1 = _objc_msgSend(IVar1,PTR_s_layout_000145a8), IVar1 != 0))
+      goto code_r0x0000b36c;
+      dVar3 = -30.0;
+    }
+    param_3 = param_3 + dVar3;
+    _objc_msgSend(param_5,PTR_s_setOnScreen__000145e0,1);
+  }
+code_r0x0000b36c:
+                    /* WARNING: Could not recover jumptable at 0x0000b39c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a28)(param_1,param_2,param_3,param_4,param_5,param_6);
+  return;
+}
+
+
+========== FUN_0000b3a0  @ 0000b3a0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_0000b3a0(ID param_1)
+
+{
+  undefined8 uVar1;
+  ID IVar2;
+  ID IVar3;
+  
+  uVar1 = (*DAT_00014a30)();
+  if (_customizeMedia != '\0') {
+    if (_interfaceOrientation == 1) {
+      if (_mediaPortraitSize < 6 && (1L << (_mediaPortraitSize & 0x3f) & 0x26U) != 0) {
+        IVar2 = _objc_msgSend(param_1,PTR_s_layout_000145a8);
+        IVar3 = _objc_msgSend(param_1,PTR_s_subviews_00014598);
+        IVar3 = _objc_msgSend(IVar3,PTR_s_objectAtIndexedSubscript__00014400,2);
+LAB_0000b4c8:
+        if (IVar2 == 0) {
+          uVar1 = 0;
+        }
+        else {
+          uVar1 = 0x3ff0000000000000;
+        }
+        _objc_msgSend(IVar3,PTR_s_setAlpha__00014390,uVar1);
+        return 0;
+      }
+    }
+    else if ((2 < _interfaceOrientation) &&
+            (_mediaLandscapeSize < 6 && (1L << (_mediaLandscapeSize & 0x3f) & 0x26U) != 0)) {
+      IVar2 = _objc_msgSend(param_1,PTR_s_layout_000145a8);
+      IVar3 = _objc_msgSend(param_1,PTR_s_subviews_00014598);
+      IVar3 = _objc_msgSend(IVar3,PTR_s_objectAtIndexedSubscript__00014400,2);
+      goto LAB_0000b4c8;
+    }
+  }
+  return uVar1;
+}
+
+
+========== FUN_0000b51c  @ 0000b51c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000b51c(ID param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  undefined *op;
+  ID IVar1;
+  ID self;
+  double extraout_d0;
+  double extraout_d0_00;
+  
+  op = PTR_s_labelView_000145e8;
+  if (_customizeMedia == '\0') goto code_r0x0000b70c;
+  if (_interfaceOrientation == 1) {
+    if (_mediaPortraitSize - 1U < 2) {
+      IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8);
+      self = _objc_msgSend(param_1,PTR_s_labelView_000145e8);
+LAB_0000b5f0:
+      if (IVar1 == 0) {
+        _objc_msgSend(self,PTR_s_setAlpha__00014390,0);
+        param_3 = 0;
+        goto code_r0x0000b70c;
+      }
+    }
+    else {
+      if (_mediaPortraitSize < 3) goto code_r0x0000b70c;
+      if ((int)param_3 != 0) {
+        IVar1 = _objc_msgSend(param_1,PTR_s_labelView_000145e8);
+        _objc_msgSend(IVar1,PTR_s_alpha_000145f0);
+        if (extraout_d0 != 0.0) {
+LAB_0000b734:
+          param_3 = 1;
+          goto code_r0x0000b70c;
+        }
+      }
+      self = _objc_msgSend(param_1,op);
+    }
+  }
+  else {
+    if (_interfaceOrientation < 3) goto code_r0x0000b70c;
+    if (_mediaLandscapeSize - 1U < 2) {
+      IVar1 = _objc_msgSend(param_1,PTR_s_layout_000145a8);
+      self = _objc_msgSend(param_1,PTR_s_labelView_000145e8);
+      goto LAB_0000b5f0;
+    }
+    if (_mediaLandscapeSize < 3) goto code_r0x0000b70c;
+    if ((int)param_3 != 0) {
+      IVar1 = _objc_msgSend(param_1,PTR_s_labelView_000145e8);
+      _objc_msgSend(IVar1,PTR_s_alpha_000145f0);
+      if (extraout_d0_00 != 0.0) goto LAB_0000b734;
+    }
+    self = _objc_msgSend(param_1,op);
+  }
+  _objc_msgSend(self,PTR_s_setAlpha__00014390,0x3ff0000000000000);
+code_r0x0000b70c:
+                    /* WARNING: Could not recover jumptable at 0x0000b730. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a38)(param_1,param_2,param_3);
+  return;
+}
+
+
+========== FUN_0000b73c  @ 0000b73c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+ID FUN_0000b73c(undefined1 param_1 [16],undefined8 param_2,ID param_3)
+
+{
+  undefined *op;
+  undefined *puVar1;
+  ID IVar2;
+  undefined8 extraout_d0;
+  undefined8 extraout_d0_00;
+  undefined8 extraout_d0_01;
+  undefined8 extraout_d0_02;
+  undefined8 uVar3;
+  
+  IVar2 = (*DAT_00014a40)();
+  op = PTR_s_center_000145b8;
+  if (_customizeMedia == '\0') {
+    return IVar2;
+  }
+  _objc_msgSend(param_3,PTR_s_center_000145b8);
+  IVar2 = _objc_msgSend(param_3,PTR_s_superview_00014590);
+  _objc_msgSend(param_3,PTR_s_convertPoint_fromView__000145c0,extraout_d0,param_2,IVar2);
+  IVar2 = 0;
+  if (_interfaceOrientation == 1) {
+    if ((_mediaPortraitSize == 5) &&
+       (IVar2 = _objc_msgSend(param_3,PTR_s_layout_000145a8), puVar1 = PTR_s_artworkView_000145f8,
+       IVar2 == 0)) {
+      IVar2 = _objc_msgSend(param_3,PTR_s_artworkView_000145f8);
+      _objc_msgSend(IVar2,op);
+      IVar2 = _objc_msgSend(param_3,puVar1);
+      uVar3 = extraout_d0_01;
+LAB_0000b928:
+      _objc_msgSend(IVar2,PTR_s_setCenter__000145d0,uVar3,param_2);
+      return 0;
+    }
+    if (_mediaPortraitSize != 6) {
+      return IVar2;
+    }
+    IVar2 = _objc_msgSend(param_3,PTR_s_layout_000145a8);
+    if (IVar2 != 0) {
+      return IVar2;
+    }
+    IVar2 = _objc_msgSend(param_3,PTR_s_labelView_000145e8);
+  }
+  else {
+    if (_interfaceOrientation < 3) {
+      return 0;
+    }
+    if ((_mediaLandscapeSize == 5) &&
+       (IVar2 = _objc_msgSend(param_3,PTR_s_layout_000145a8), puVar1 = PTR_s_artworkView_000145f8,
+       IVar2 == 0)) {
+      IVar2 = _objc_msgSend(param_3,PTR_s_artworkView_000145f8);
+      _objc_msgSend(IVar2,op);
+      IVar2 = _objc_msgSend(param_3,puVar1);
+      uVar3 = extraout_d0_02;
+      goto LAB_0000b928;
+    }
+    if (_mediaLandscapeSize != 6) {
+      return IVar2;
+    }
+    IVar2 = _objc_msgSend(param_3,PTR_s_layout_000145a8);
+    if (IVar2 != 0) {
+      return IVar2;
+    }
+    IVar2 = _objc_msgSend(param_3,PTR_s_labelView_000145e8);
+  }
+  _objc_msgSend(IVar2,PTR_s_setCenter__000145d0,extraout_d0_00,param_2);
+  return 0;
+}
+
+
+========== FUN_0000b99c  @ 0000b99c ==========
+
+void FUN_0000b99c(double param_1,double param_2,double param_3,undefined8 param_4,ID param_5,
+                 undefined8 param_6)
+
+{
+  ID IVar1;
+  long lVar2;
+  long *plVar3;
+  double dVar4;
+  
+  dVar4 = param_3;
+  if (_customizeMedia != '\0') {
+    if (_interfaceOrientation == 1) {
+      plVar3 = &_mediaPortraitSize;
+    }
+    else {
+      if (_interfaceOrientation < 3) goto code_r0x0000ba94;
+      plVar3 = &_mediaLandscapeSize;
+    }
+    lVar2 = *plVar3;
+    if (lVar2 == 5) {
+      IVar1 = _objc_msgSend(param_5,PTR_s_layout_000145a8);
+      if (IVar1 == 0) {
+        if (param_1 != 0.0) {
+          dVar4 = param_3 + -200.0;
+          param_2 = param_2 + 10.0;
+          param_1 = param_1 + 60.0;
+        }
+        goto code_r0x0000ba94;
+      }
+      lVar2 = *plVar3;
+    }
+    if (lVar2 == 6) {
+      IVar1 = _objc_msgSend(param_5,PTR_s_layout_000145a8);
+      dVar4 = param_3 + DAT_0000ea00;
+      if (IVar1 != 0) {
+        dVar4 = param_3;
+      }
+    }
+  }
+code_r0x0000ba94:
+                    /* WARNING: Could not recover jumptable at 0x0000bac4. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a48)(param_1,param_2,dVar4,param_4,param_5,param_6);
+  return;
+}
+
+
+========== FUN_0000bac8  @ 0000bac8 ==========
+
+void FUN_0000bac8(undefined8 param_1,double param_2,undefined8 param_3,undefined8 param_4,ID param_5
+                 ,undefined8 param_6)
+
+{
+  ID IVar1;
+  double dVar2;
+  
+  dVar2 = param_2;
+  if (_customizeMedia != '\0') {
+    if (_interfaceOrientation == 1) {
+      if (_mediaPortraitSize != 4) goto code_r0x0000bb6c;
+    }
+    else if (_interfaceOrientation < 3 || _mediaLandscapeSize != 4) goto code_r0x0000bb6c;
+    IVar1 = _objc_msgSend(param_5,PTR_s_layout_000145a8);
+    dVar2 = param_2 + 15.0;
+    if (IVar1 != 0) {
+      dVar2 = param_2;
+    }
+  }
+code_r0x0000bb6c:
+                    /* WARNING: Could not recover jumptable at 0x0000bb98. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a50)(param_1,dVar2,param_3,param_4,param_5,param_6);
+  return;
+}
+
+
+========== FUN_0000bb9c  @ 0000bb9c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+ID FUN_0000bb9c(undefined1 param_1 [16],undefined1 param_2 [16],undefined8 param_3,
+               undefined8 param_4,ID param_5)
+
+{
+  undefined *puVar1;
+  undefined *puVar2;
+  ID IVar3;
+  ID IVar4;
+  SEL pcVar5;
+  SEL pcVar6;
+  undefined8 uVar7;
+  double extraout_d0;
+  double extraout_d0_00;
+  double extraout_d0_01;
+  double extraout_d0_02;
+  double extraout_d0_03;
+  double extraout_d0_04;
+  double extraout_d0_05;
+  double extraout_d0_06;
+  double extraout_d0_07;
+  double extraout_d0_08;
+  double dVar8;
+  double dVar9;
+  
+  IVar3 = (*DAT_00014a58)();
+  pcVar6 = PTR_s_leftButton_00014600;
+  if (_customizeMedia == '\0') {
+    return IVar3;
+  }
+  if (_interfaceOrientation != 1) {
+    if (_interfaceOrientation < 3) {
+      return IVar3;
+    }
+    if (_mediaLandscapeSize == 1) {
+      IVar3 = _objc_msgSend(param_5,PTR_s_layout_000145a8);
+      pcVar6 = PTR_s_leftButton_00014600;
+      IVar4 = _objc_msgSend(param_5,PTR_s_leftButton_00014600);
+      pcVar5 = PTR_s_setAlpha__00014390;
+      if (IVar3 == 0) {
+        _objc_msgSend(IVar4,PTR_s_setAlpha__00014390,0);
+        IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+        uVar7 = 0;
+      }
+      else {
+        _objc_msgSend(IVar4,PTR_s_setAlpha__00014390,0x3ff0000000000000);
+        IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+        uVar7 = 0x3ff0000000000000;
+      }
+LAB_0000c220:
+      _objc_msgSend(IVar3,pcVar5,uVar7);
+    }
+    else {
+      if (_mediaLandscapeSize < 2) {
+        return IVar3;
+      }
+      IVar3 = _objc_msgSend(param_5,PTR_s_leftButton_00014600);
+      puVar1 = PTR_s_alpha_000145f0;
+      _objc_msgSend(IVar3,PTR_s_alpha_000145f0);
+      puVar2 = PTR_s_rightButton_00014608;
+      if (extraout_d0_01 == 0.0) {
+        IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+        _objc_msgSend(IVar3,puVar1);
+        if (extraout_d0_02 == 0.0) {
+          IVar3 = _objc_msgSend(param_5,pcVar6);
+          pcVar5 = PTR_s_setAlpha__00014390;
+          _objc_msgSend(IVar3,PTR_s_setAlpha__00014390,0x3ff0000000000000);
+          IVar3 = _objc_msgSend(param_5,puVar2);
+          uVar7 = 0x3ff0000000000000;
+          goto LAB_0000c220;
+        }
+      }
+    }
+    if (_mediaLandscapeSize != 5) {
+      return 0;
+    }
+    IVar3 = _objc_msgSend(param_5,PTR_s_layout_000145a8);
+    if (IVar3 != 0) {
+      return IVar3;
+    }
+    IVar3 = _objc_msgSend(param_5,pcVar6);
+    puVar2 = PTR_s_frame_00014610;
+    _objc_msgSend(IVar3,PTR_s_frame_00014610);
+    dVar9 = extraout_d0_06 + DAT_0000ea08;
+    dVar8 = DAT_0000ea08;
+    IVar3 = _objc_msgSend(param_5,pcVar6);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,pcVar6);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,pcVar6);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,pcVar6);
+    pcVar6 = PTR_s_setFrame__000143b8;
+    _objc_msgSend(IVar3,PTR_s_setFrame__000143b8,dVar9,dVar8,param_3,param_4);
+    puVar1 = PTR_s_middleButton_00014618;
+    IVar3 = _objc_msgSend(param_5,PTR_s_middleButton_00014618);
+    _objc_msgSend(IVar3,puVar2);
+    dVar9 = extraout_d0_07 + DAT_0000ea10;
+    dVar8 = DAT_0000ea10;
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,pcVar6,dVar9,dVar8,param_3,param_4);
+    puVar1 = PTR_s_rightButton_00014608;
+    IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+    _objc_msgSend(IVar3,puVar2);
+    uVar7 = 0x4049000000000000;
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    _objc_msgSend(IVar3,puVar2);
+    IVar3 = _objc_msgSend(param_5,puVar1);
+    dVar8 = extraout_d0_08;
+    goto LAB_0000c514;
+  }
+  if (_mediaPortraitSize == 1) {
+    IVar3 = _objc_msgSend(param_5,PTR_s_layout_000145a8);
+    pcVar6 = PTR_s_leftButton_00014600;
+    IVar4 = _objc_msgSend(param_5,PTR_s_leftButton_00014600);
+    pcVar5 = PTR_s_setAlpha__00014390;
+    if (IVar3 == 0) {
+      _objc_msgSend(IVar4,PTR_s_setAlpha__00014390,0);
+      IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+      uVar7 = 0;
+    }
+    else {
+      _objc_msgSend(IVar4,PTR_s_setAlpha__00014390,0x3ff0000000000000);
+      IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+      uVar7 = 0x3ff0000000000000;
+    }
+LAB_0000bf0c:
+    _objc_msgSend(IVar3,pcVar5,uVar7);
+  }
+  else {
+    if (_mediaPortraitSize < 2) {
+      return IVar3;
+    }
+    IVar3 = _objc_msgSend(param_5,PTR_s_leftButton_00014600);
+    puVar1 = PTR_s_alpha_000145f0;
+    _objc_msgSend(IVar3,PTR_s_alpha_000145f0);
+    puVar2 = PTR_s_rightButton_00014608;
+    if (extraout_d0 == 0.0) {
+      IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+      _objc_msgSend(IVar3,puVar1);
+      if (extraout_d0_00 == 0.0) {
+        IVar3 = _objc_msgSend(param_5,pcVar6);
+        pcVar5 = PTR_s_setAlpha__00014390;
+        _objc_msgSend(IVar3,PTR_s_setAlpha__00014390,0x3ff0000000000000);
+        IVar3 = _objc_msgSend(param_5,puVar2);
+        uVar7 = 0x3ff0000000000000;
+        goto LAB_0000bf0c;
+      }
+    }
+  }
+  IVar3 = 0;
+  if ((_mediaPortraitSize != 5) ||
+     (IVar3 = _objc_msgSend(param_5,PTR_s_layout_000145a8), IVar3 != 0)) {
+    return IVar3;
+  }
+  IVar3 = _objc_msgSend(param_5,pcVar6);
+  puVar2 = PTR_s_frame_00014610;
+  _objc_msgSend(IVar3,PTR_s_frame_00014610);
+  dVar9 = extraout_d0_03 + DAT_0000ea08;
+  dVar8 = DAT_0000ea08;
+  IVar3 = _objc_msgSend(param_5,pcVar6);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,pcVar6);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,pcVar6);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,pcVar6);
+  pcVar6 = PTR_s_setFrame__000143b8;
+  _objc_msgSend(IVar3,PTR_s_setFrame__000143b8,dVar9,dVar8,param_3,param_4);
+  puVar1 = PTR_s_middleButton_00014618;
+  IVar3 = _objc_msgSend(param_5,PTR_s_middleButton_00014618);
+  _objc_msgSend(IVar3,puVar2);
+  dVar9 = extraout_d0_04 + DAT_0000ea10;
+  dVar8 = DAT_0000ea10;
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,pcVar6,dVar9,dVar8,param_3,param_4);
+  puVar1 = PTR_s_rightButton_00014608;
+  IVar3 = _objc_msgSend(param_5,PTR_s_rightButton_00014608);
+  _objc_msgSend(IVar3,puVar2);
+  uVar7 = 0x4049000000000000;
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  _objc_msgSend(IVar3,puVar2);
+  IVar3 = _objc_msgSend(param_5,puVar1);
+  dVar8 = extraout_d0_05;
+LAB_0000c514:
+  _objc_msgSend(IVar3,pcVar6,dVar8 + 50.0,uVar7,param_3,param_4);
+  return 0;
+}
+
+
+========== FUN_0000c578  @ 0000c578 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+void FUN_0000c578(undefined8 param_1,double param_2,undefined8 param_3,undefined8 param_4,ID param_5
+                 ,undefined8 param_6)
+
+{
+  ID IVar1;
+  ID IVar2;
+  double dVar3;
+  
+  dVar3 = param_2;
+  if ((_customizeMedia != '\0' && 0 < _interfaceOrientation) &&
+     (_mediaPortraitSize == 7 || _mediaLandscapeSize == 7)) {
+    IVar1 = _objc_msgSend(param_5,PTR_s__viewControllerForAncestor_00014548);
+    IVar2 = _objc_msgSend(IVar1,PTR_s_supportsHorizontalLayout_000145a0);
+    if ((int)IVar2 != 0) {
+      IVar1 = _objc_msgSend(IVar1,PTR_s_layout_000145a8);
+      dVar3 = param_2 + 15.0;
+      if (IVar1 != 4) {
+        dVar3 = param_2;
+      }
+    }
+  }
+                    /* WARNING: Could not recover jumptable at 0x0000c678. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a60)(param_1,dVar3,param_3,param_4,param_5,param_6);
+  return;
+}
+
+
+========== FUN_0000c67c  @ 0000c67c ==========
+
+void FUN_0000c67c(undefined8 param_1)
+
+{
+  long *plVar1;
+  undefined8 uVar2;
+  
+  uVar2 = param_1;
+  if (_customizeMedia != '\0') {
+    if (_interfaceOrientation == 1) {
+      plVar1 = &_mediaPortraitSize;
+    }
+    else {
+      if (_interfaceOrientation < 3) goto code_r0x0000c6d4;
+      plVar1 = &_mediaLandscapeSize;
+    }
+    uVar2 = 0x3ff0000000000000;
+    if (1 < *plVar1 - 5U) {
+      uVar2 = param_1;
+    }
+  }
+code_r0x0000c6d4:
+                    /* WARNING: Could not recover jumptable at 0x0000c6d8. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a68)(uVar2);
+  return;
+}
+
+
+========== FUN_0000c6dc  @ 0000c6dc ==========
+
+void FUN_0000c6dc(double param_1,undefined8 param_2,double param_3,double param_4,ID param_5,
+                 undefined8 param_6)
+
+{
+  ID IVar1;
+  double dVar2;
+  undefined8 uVar3;
+  
+  dVar2 = param_1;
+  uVar3 = param_2;
+  if (_customizeMedia == '\0') goto code_r0x0000c824;
+  if (_interfaceOrientation == 1) {
+    if ((_mediaPortraitSize != 5) ||
+       (IVar1 = _objc_msgSend(param_5,PTR_s_style_00014620), IVar1 != 0)) {
+      if ((_mediaPortraitSize == 6) &&
+         (IVar1 = _objc_msgSend(param_5,PTR_s_style_00014620), IVar1 == 0)) {
+        dVar2 = 20.0;
+        uVar3 = 0x4022000000000000;
+      }
+      else if ((param_1 != 0.0) && (_mediaPortraitSize == 8)) {
+        param_3 = param_3 + 20.0;
+        param_4 = param_4 + 20.0;
+      }
+      goto code_r0x0000c824;
+    }
+  }
+  else {
+    if (_interfaceOrientation < 3) goto code_r0x0000c824;
+    if ((_mediaLandscapeSize != 5) ||
+       (IVar1 = _objc_msgSend(param_5,PTR_s_style_00014620), IVar1 != 0)) {
+      if (_mediaLandscapeSize == 6) {
+        IVar1 = _objc_msgSend(param_5,PTR_s_style_00014620);
+        dVar2 = 20.0;
+        if (IVar1 != 0) {
+          dVar2 = param_1;
+        }
+        uVar3 = 0x4022000000000000;
+        if (IVar1 != 0) {
+          uVar3 = param_2;
+        }
+      }
+      goto code_r0x0000c824;
+    }
+  }
+  param_3 = param_3 + -10.0;
+  param_4 = param_4 + -10.0;
+  dVar2 = 9.0;
+  uVar3 = 0x4022000000000000;
+code_r0x0000c824:
+                    /* WARNING: Could not recover jumptable at 0x0000c854. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*DAT_00014a70)(dVar2,uVar3,param_3,param_4,param_5,param_6);
+  return;
+}
+
+
+========== FUN_0000c858  @ 0000c858 ==========
+
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+
+ID FUN_0000c858(undefined8 param_1,undefined8 param_2,ID param_3,undefined8 param_4,
+               undefined8 param_5)
+
+{
+  ID IVar1;
+  undefined8 uVar2;
+  undefined8 uVar3;
+  undefined8 uVar4;
+  undefined8 uVar5;
+  
+  if (param_3 == 0) {
+code_r0x0000caa8:
+    IVar1 = (*DAT_00014a78)(param_1,param_2,param_3,param_4,param_5);
+    return IVar1;
+  }
+  if ((_customizeConnectivity != '\0') &&
+     (IVar1 = _objc_msgSend(param_3,PTR_s_isEqualToString__00014408,
+                            &cf_com_apple_control_center_ConnectivityModule), (int)IVar1 != 0)) {
+    uVar3 = 1;
+    uVar2 = 1;
+    switch(_connectivityPortraitSize) {
+    case 1:
+      break;
+    case 2:
+      uVar2 = 3;
+      goto LAB_0000cae4;
+    case 3:
+      uVar2 = 4;
+      goto LAB_0000cae4;
+    case 4:
+      uVar2 = 5;
+LAB_0000cae4:
+      uVar3 = 1;
+      break;
+    case 5:
+      uVar2 = 1;
+      goto LAB_0000cb04;
+    default:
+      uVar3 = 2;
+      uVar2 = 2;
+      break;
+    case 7:
+      uVar2 = 3;
+LAB_0000cb04:
+      uVar3 = 2;
+      break;
+    case 8:
+      uVar2 = 1;
+      goto LAB_0000cb18;
+    case 9:
+      uVar2 = 2;
+LAB_0000cb18:
+      uVar3 = 3;
+      break;
+    case 10:
+    case 0xb:
+      uVar2 = 1;
+      uVar3 = 4;
+    }
+    uVar5 = 1;
+    uVar4 = 1;
+    switch(_connectivityLandscapeSize) {
+    case 1:
+      break;
+    case 2:
+switchD_0000cb50_caseD_2:
+      uVar4 = 3;
+LAB_0000cd2c:
+      uVar5 = 1;
+      break;
+    case 3:
+switchD_0000cb50_caseD_3:
+      uVar4 = 1;
+      goto LAB_0000cd38;
+    default:
+      uVar5 = 2;
+      uVar4 = 2;
+      break;
+    case 5:
+      uVar4 = 3;
+LAB_0000cd38:
+      uVar5 = 2;
+      break;
+    case 6:
+switchD_0000cb50_caseD_6:
+      uVar4 = 1;
+      goto LAB_0000cd44;
+    case 7:
+      uVar4 = 2;
+LAB_0000cd44:
+      uVar5 = 3;
+      break;
+    case 8:
+    case 9:
+switchD_0000cb50_caseD_8:
+      uVar4 = 1;
+      uVar5 = 4;
+    }
+switchD_0000cb50_caseD_1:
+    _NSClassFromString(&cf_CCUIModuleSettings);
+    IVar1 = _objc_alloc();
+    goto LAB_0000cd70;
+  }
+  if ((_customizeMedia == '\0') ||
+     (IVar1 = _objc_msgSend(param_3,PTR_s_isEqualToString__00014408,
+                            &cf_com_apple_mediaremote_controlcenter_nowplaying), (int)IVar1 == 0)) {
+    if ((_customizeBrightness == '\0') ||
+       (IVar1 = _objc_msgSend(param_3,PTR_s_isEqualToString__00014408,
+                              &cf_com_apple_control_center_DisplayModule), (int)IVar1 == 0)) {
+      if ((_customizeVolume == '\0') ||
+         (IVar1 = _objc_msgSend(param_3,PTR_s_isEqualToString__00014408,
+                                &cf_com_apple_mediaremote_controlcenter_audio), (int)IVar1 == 0)) {
+        if ((_customizeScreenMirroring == '\0') ||
+           (IVar1 = _objc_msgSend(param_3,PTR_s_isEqualToString__00014408,
+                                  &cf_com_apple_mediaremote_controlcenter_airplaymirroring),
+           (int)IVar1 == 0)) goto code_r0x0000caa8;
+        uVar3 = 1;
+        if (_screenMirroringModuleSize != 1) {
+          uVar3 = 2;
+        }
+        _NSClassFromString(&cf_CCUIModuleSettings);
+        IVar1 = _objc_alloc();
+        uVar2 = 1;
+        uVar4 = 1;
+        uVar5 = uVar3;
+        goto LAB_0000cd70;
+      }
+      uVar3 = 1;
+      uVar2 = 1;
+      switch(_volumePortraitSize) {
+      case 1:
+        break;
+      default:
+        uVar2 = 2;
+        goto LAB_0000ccb4;
+      case 3:
+        uVar2 = 3;
+        goto LAB_0000ccb4;
+      case 4:
+        uVar2 = 4;
+LAB_0000ccb4:
+        uVar3 = 1;
+        break;
+      case 5:
+        uVar2 = 1;
+        uVar3 = 2;
+        break;
+      case 6:
+        uVar2 = 1;
+        uVar3 = 3;
+        break;
+      case 7:
+        uVar2 = 1;
+        uVar3 = 4;
+      }
+      uVar5 = 1;
+      uVar4 = 1;
+      switch(_volumeLandscapeSize) {
+      case 1:
+        goto switchD_0000cb50_caseD_1;
+      case 2:
+        goto switchD_0000cca4_caseD_2;
+      default:
+        goto switchD_0000cb50_caseD_2;
+      case 4:
+        goto switchD_0000cb50_caseD_3;
+      case 5:
+        goto switchD_0000cb50_caseD_6;
+      case 6:
+        goto switchD_0000cb50_caseD_8;
+      }
+    }
+    uVar3 = 1;
+    uVar2 = 1;
+    switch(_brightnessPortraitSize) {
+    case 1:
+      break;
+    default:
+      uVar2 = 2;
+      goto LAB_0000cc48;
+    case 3:
+      uVar2 = 3;
+      goto LAB_0000cc48;
+    case 4:
+      uVar2 = 4;
+LAB_0000cc48:
+      uVar3 = 1;
+      break;
+    case 5:
+      uVar2 = 1;
+      uVar3 = 2;
+      break;
+    case 6:
+      uVar2 = 1;
+      uVar3 = 3;
+      break;
+    case 7:
+      uVar2 = 1;
+      uVar3 = 4;
+    }
+    uVar5 = 1;
+    uVar4 = 1;
+    switch(_brightnessLandscapeSize) {
+    case 1:
+      goto switchD_0000cb50_caseD_1;
+    case 2:
+switchD_0000cca4_caseD_2:
+      uVar4 = 2;
+      goto LAB_0000cd2c;
+    default:
+      goto switchD_0000cb50_caseD_2;
+    case 4:
+      goto switchD_0000cb50_caseD_3;
+    case 5:
+      goto switchD_0000cb50_caseD_6;
+    case 6:
+      goto switchD_0000cb50_caseD_8;
+    }
+  }
+  uVar3 = 1;
+  uVar2 = 1;
+  switch(_mediaPortraitSize) {
+  case 1:
+    break;
+  case 2:
+    uVar2 = 1;
+    uVar3 = 2;
+    break;
+  default:
+    uVar3 = 2;
+    uVar2 = 2;
+    break;
+  case 5:
+    uVar2 = 1;
+    goto LAB_0000cba4;
+  case 6:
+    uVar2 = 2;
+    goto LAB_0000cba4;
+  case 7:
+    uVar2 = 3;
+    goto LAB_0000cba4;
+  case 8:
+    uVar3 = 4;
+    uVar2 = 4;
+    break;
+  case 9:
+    uVar2 = 6;
+LAB_0000cba4:
+    uVar3 = 4;
+  }
+  uVar5 = 1;
+  uVar4 = 1;
+  switch(_mediaLandscapeSize) {
+  case 1:
+    break;
+  case 2:
+    uVar4 = 1;
+    uVar5 = 2;
+    break;
+  default:
+    uVar5 = 2;
+    uVar4 = 2;
+    break;
+  case 5:
+    uVar4 = 1;
+    goto LAB_0000cc0c;
+  case 6:
+    uVar4 = 2;
+    goto LAB_0000cc0c;
+  case 7:
+    uVar4 = 3;
+LAB_0000cc0c:
+    uVar5 = 4;
+  }
+  _NSClassFromString(&cf_CCUIModuleSettings);
+  IVar1 = _objc_alloc();
+LAB_0000cd70:
+  IVar1 = _objc_msgSend(IVar1,PTR_s_initWithPortraitLayoutSize_lands_00014628,uVar3,uVar2,uVar5,
+                        uVar4);
+  return IVar1;
+}
+
+
+========== FUN_0000ce90  @ 0000ce90 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+ID FUN_0000ce90(undefined8 param_1,ID param_2)
+
+{
+  undefined *self;
+  undefined8 uVar1;
+  ID IVar2;
+  
+  self = PTR__OBJC_CLASS___UIImage_00014768;
+  if (param_2 == 0) {
+    _artworkImage = 0;
+    _objc_msgSend(_artworkImageView,PTR_s_setImage__00014468,0);
+    IVar2 = _objc_msgSend(_artworkImageView,PTR_s_setHidden__00014470,1);
+    return IVar2;
+  }
+  IVar2 = _objc_msgSend(param_2,PTR_s_objectForKey__000143e8,
+                        *(undefined8 *)PTR__kMRMediaRemoteNowPlayingInfoArtworkData_00010018);
+  IVar2 = UIImage::imageWithData_((ID)self,PTR_s_imageWithData__00014460,IVar2);
+  uVar1 = _artworkImage;
+  _artworkImage = IVar2;
+  if (IVar2 != 0) {
+    IVar2 = _objc_msgSend(_artworkImageView,PTR_s_setImage__00014468,uVar1);
+    return IVar2;
+  }
+  return 0;
+}
+
+
+========== sharedInstance  @ 0000cf80 ==========
+
+/* WARNING: Function: _objc_retainAutoreleaseReturnValue replaced with injection: _objc_retain_fixup
+    */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::sharedInstance(ID param_1,SEL param_2)
+
+{
+  if (DAT_00014ab0 != -1) {
+    _dispatch_once(&DAT_00014ab0,&PTR___NSConcreteGlobalBlock_00010090);
+  }
+  return DAT_00014ab8;
+}
+
+
+========== FUN_0000cfc0  @ 0000cfc0 ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+
+undefined8 FUN_0000cfc0(void)
+
+{
+  DAT_00014ab8 = _objc_alloc_init(PTR_WeatherManager_00014778);
+  return 0;
+}
+
+
+========== widgetViewController  @ 0000cfec ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::widgetViewController(ID param_1,SEL param_2)
+
+{
+  ID IVar1;
+  
+  IVar1 = *(ID *)(param_1 + 8);
+  if (IVar1 == 0) {
+    _NSClassFromString(&cf_WALockscreenWidgetViewController);
+    IVar1 = _objc_alloc_init();
+    *(ID *)(param_1 + 8) = IVar1;
+  }
+  return IVar1;
+}
+
+
+========== dynamicWeatherView  @ 0000d038 ==========
+
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_retain replaced with injection: _objc_retain_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::dynamicWeatherView(ID param_1,SEL param_2)
+
+{
+  ID IVar1;
+  undefined8 uVar2;
+  
+  IVar1 = *(ID *)(param_1 + 0x10);
+  if (IVar1 == 0) {
+    _NSClassFromString(&cf_WUIDynamicWeatherBackground);
+    uVar2 = _objc_alloc_init();
+    *(undefined8 *)(param_1 + 0x10) = uVar2;
+    IVar1 = *(ID *)(param_1 + 0x10);
+  }
+  return IVar1;
+}
+
+
+========== refreshWeatherData  @ 0000d084 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void WeatherManager::refreshWeatherData(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *puVar2;
+  undefined *puVar3;
+  ID IVar4;
+  ulong uVar5;
+  ID IVar6;
+  undefined8 uVar7;
+  SEL op;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar4 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  if (IVar4 == 0) {
+    _NSClassFromString(&cf_WALockscreenWidgetViewController);
+    IVar4 = _objc_alloc_init();
+    setWidgetViewController_(param_1,PTR_s_setWidgetViewController__00014638,IVar4);
+    IVar4 = widgetViewController(param_1,puVar1);
+    puVar2 = PTR_s__setupWeatherModel_00014640;
+    uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s__setupWeatherModel_00014640);
+    if ((uVar5 & 1) != 0) {
+      IVar4 = widgetViewController(param_1,puVar1);
+      _objc_msgSend(IVar4,puVar2);
+    }
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  puVar2 = PTR_s_updateWeather_00014648;
+  uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s_updateWeather_00014648);
+  if ((uVar5 & 1) != 0) {
+    IVar4 = widgetViewController(param_1,puVar1);
+    _objc_msgSend(IVar4,puVar2);
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  puVar2 = PTR_s__updateTodayView_00014650;
+  uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s__updateTodayView_00014650);
+  if ((uVar5 & 1) != 0) {
+    IVar4 = widgetViewController(param_1,puVar1);
+    _objc_msgSend(IVar4,puVar2);
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  puVar2 = PTR_s__updateWithReason__00014658;
+  uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s__updateWithReason__00014658);
+  if ((uVar5 & 1) != 0) {
+    IVar4 = widgetViewController(param_1,puVar1);
+    _objc_msgSend(IVar4,puVar2,0);
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  puVar2 = PTR_s_todayModelWantsUpdate__00014660;
+  uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s_todayModelWantsUpdate__00014660);
+  if ((uVar5 & 1) != 0) {
+    IVar4 = widgetViewController(param_1,puVar1);
+    puVar3 = PTR_s_todayModel_00014668;
+    IVar4 = _objc_msgSend(IVar4,PTR_s_todayModel_00014668);
+    if (IVar4 != 0) {
+      IVar4 = widgetViewController(param_1,puVar1);
+      IVar6 = widgetViewController(param_1,puVar1);
+      IVar6 = _objc_msgSend(IVar6,puVar3);
+      _objc_msgSend(IVar4,puVar2,IVar6);
+    }
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  op = PTR_s_todayModel_00014668;
+  if (IVar4 != 0) {
+    IVar4 = widgetViewController(param_1,puVar1);
+    op = PTR_s_todayModel_00014668;
+    IVar4 = _objc_msgSend(IVar4,PTR_s_todayModel_00014668);
+    puVar2 = PTR_s_executeModelUpdateWithCompletion_00014670;
+    uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s_executeModelUpdateWithCompletion_00014670);
+    if ((uVar5 & 1) != 0) {
+      IVar4 = widgetViewController(param_1,puVar1);
+      IVar4 = _objc_msgSend(IVar4,op);
+      uVar7 = _objc_opt_class(PTR__OBJC_CLASS___WATodayAutoupdatingLocationModel_00014780);
+      uVar5 = _objc_opt_isKindOfClass(IVar4,uVar7);
+      if ((uVar5 & 1) != 0) {
+        IVar4 = widgetViewController(param_1,puVar1);
+        IVar4 = _objc_msgSend(IVar4,op);
+        puVar3 = PTR_s_updateLocationTrackingStatus_00014678;
+        uVar5 = _objc_opt_respondsToSelector(IVar4,PTR_s_updateLocationTrackingStatus_00014678);
+        if ((uVar5 & 1) != 0) {
+          _objc_msgSend(IVar4,puVar3);
+        }
+      }
+      IVar4 = widgetViewController(param_1,puVar1);
+      IVar4 = _objc_msgSend(IVar4,op);
+      _objc_msgSend(IVar4,puVar2,0);
+    }
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  IVar4 = _objc_msgSend(IVar4,op);
+  puVar2 = PTR_s_forecastModel_00014680;
+  IVar4 = _objc_msgSend(IVar4,PTR_s_forecastModel_00014680);
+  puVar3 = PTR_s_city_00014688;
+  IVar4 = city(IVar4,PTR_s_city_00014688);
+  if (IVar4 == 0) {
+    return;
+  }
+  IVar4 = widgetViewController(param_1,puVar1);
+  IVar4 = _objc_msgSend(IVar4,op);
+  IVar4 = _objc_msgSend(IVar4,puVar2);
+  IVar4 = city(IVar4,puVar3);
+  setCity_(param_1,PTR_s_setCity__00014690,IVar4);
+  return;
+}
+
+
+========== refreshDynamicWeatherView  @ 0000d624 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void WeatherManager::refreshDynamicWeatherView(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *puVar2;
+  ID IVar3;
+  ID IVar4;
+  
+  puVar2 = PTR_s_dynamicWeatherView_00014698;
+  IVar3 = dynamicWeatherView(param_1,PTR_s_dynamicWeatherView_00014698);
+  if (IVar3 != 0) {
+    IVar3 = dynamicWeatherView(param_1,puVar2);
+    puVar1 = PTR_s_city_00014688;
+    IVar4 = city(param_1,PTR_s_city_00014688);
+    _objc_msgSend(IVar3,PTR_s_setCity_animate__000146a0,IVar4,1);
+    IVar3 = dynamicWeatherView(param_1,puVar2);
+    IVar3 = condition(IVar3,PTR_s_condition_00014340);
+    IVar4 = city(param_1,puVar1);
+    _objc_msgSend(IVar3,PTR_s_setCity_animationDuration__000146a8,0x4000000000000000,IVar4);
+    return;
+  }
+  return;
+}
+
+
+========== currentLocation  @ 0000d75c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::currentLocation(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  cfstringStruct *pcVar4;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s__locationName_000146b0;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s__locationName_000146b0);
+  if ((uVar3 & 1) == 0) {
+    pcVar4 = &cf_N_A;
+  }
+  else {
+    IVar2 = widgetViewController(param_1,puVar1);
+    pcVar4 = (cfstringStruct *)_objc_msgSend(IVar2,op);
+  }
+  return (ID)pcVar4;
+}
+
+
+========== currentTemperatureIn:  @ 0000d808 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x14 bytes */
+
+ID WeatherManager::currentTemperatureIn_(ID param_1,SEL param_2,int param_3)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  undefined *puVar2;
+  ID IVar3;
+  ulong uVar4;
+  cfstringStruct *pcVar5;
+  undefined **ppuVar6;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar3 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  IVar3 = _objc_msgSend(IVar3,PTR_s_currentForecastModel_000146b8);
+  puVar2 = PTR_s_currentConditions_000146c0;
+  uVar4 = _objc_opt_respondsToSelector(IVar3,PTR_s_currentConditions_000146c0);
+  if ((uVar4 & 1) == 0) {
+    pcVar5 = &cf_N_A;
+  }
+  else {
+    IVar3 = widgetViewController(param_1,puVar1);
+    IVar3 = _objc_msgSend(IVar3,op);
+    IVar3 = currentConditions(IVar3,puVar2);
+    puVar1 = PTR__OBJC_CLASS___NSString_00014788;
+    if (param_3 == 2) {
+      IVar3 = _objc_msgSend(IVar3,PTR_s_temperature_000146c8);
+      ppuVar6 = &PTR_s_kelvin_000146e8;
+    }
+    else if (param_3 == 1) {
+      IVar3 = _objc_msgSend(IVar3,PTR_s_temperature_000146c8);
+      ppuVar6 = &PTR_s_fahrenheit_000146e0;
+    }
+    else {
+      if (param_3 != 0) {
+        return (ID)&cf_N_A;
+      }
+      IVar3 = _objc_msgSend(IVar3,PTR_s_temperature_000146c8);
+      ppuVar6 = &PTR_s_celsius_000146d0;
+    }
+    _objc_msgSend(IVar3,*ppuVar6);
+    pcVar5 = (cfstringStruct *)
+             NSString::stringWithFormat_((ID)puVar1,PTR_s_stringWithFormat__000146d8,&cf__);
+  }
+  return (ID)pcVar5;
+}
+
+
+========== currentConditions  @ 0000d9e0 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::currentConditions(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  cfstringStruct *pcVar4;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s__conditionsLine_000146f0;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s__conditionsLine_000146f0);
+  if ((uVar3 & 1) == 0) {
+    pcVar4 = &cf_N_A;
+  }
+  else {
+    IVar2 = widgetViewController(param_1,puVar1);
+    pcVar4 = (cfstringStruct *)_objc_msgSend(IVar2,op);
+  }
+  return (ID)pcVar4;
+}
+
+
+========== currentConditionsImage  @ 0000da8c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::currentConditionsImage(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s__conditionsImage_000146f8;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s__conditionsImage_000146f8);
+  if ((uVar3 & 1) == 0) {
+    IVar2 = 0;
+  }
+  else {
+    IVar2 = widgetViewController(param_1,puVar1);
+    IVar2 = _objc_msgSend(IVar2,op);
+  }
+  return IVar2;
+}
+
+
+========== sunrise  @ 0000db34 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::sunrise(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s_currentForecastModel_000146b8);
+  if ((uVar3 & 1) != 0) {
+    IVar2 = widgetViewController(param_1,puVar1);
+    IVar2 = _objc_msgSend(IVar2,op);
+    if (IVar2 != 0) {
+      IVar2 = widgetViewController(param_1,puVar1);
+      IVar2 = _objc_msgSend(IVar2,op);
+      IVar2 = sunrise(IVar2,PTR_s_sunrise_00014700);
+      return IVar2;
+    }
+  }
+  return 0;
+}
+
+
+========== sunset  @ 0000dc38 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::sunset(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s_currentForecastModel_000146b8);
+  if ((uVar3 & 1) != 0) {
+    IVar2 = widgetViewController(param_1,puVar1);
+    IVar2 = _objc_msgSend(IVar2,op);
+    if (IVar2 != 0) {
+      IVar2 = widgetViewController(param_1,puVar1);
+      IVar2 = _objc_msgSend(IVar2,op);
+      IVar2 = sunset(IVar2,PTR_s_sunset_00014708);
+      return IVar2;
+    }
+  }
+  return 0;
+}
+
+
+========== highestTemperatureIn:  @ 0000dd3c ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x14 bytes */
+
+ID WeatherManager::highestTemperatureIn_(ID param_1,SEL param_2,int param_3)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  undefined **ppuVar4;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s_currentForecastModel_000146b8);
+  if ((uVar3 & 1) != 0) {
+    IVar2 = widgetViewController(param_1,puVar1);
+    IVar2 = _objc_msgSend(IVar2,op);
+    if (IVar2 != 0) {
+      IVar2 = widgetViewController(param_1,puVar1);
+      IVar2 = _objc_msgSend(IVar2,op);
+      IVar2 = dailyForecasts(IVar2,PTR_s_dailyForecasts_00014710);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_objectAtIndexedSubscript__00014400,0);
+      puVar1 = PTR__OBJC_CLASS___NSString_00014788;
+      if (param_3 == 2) {
+        IVar2 = _objc_msgSend(IVar2,PTR_s_high_00014718);
+        ppuVar4 = &PTR_s_kelvin_000146e8;
+      }
+      else if (param_3 == 1) {
+        IVar2 = _objc_msgSend(IVar2,PTR_s_high_00014718);
+        ppuVar4 = &PTR_s_fahrenheit_000146e0;
+      }
+      else {
+        if (param_3 != 0) goto LAB_0000df24;
+        IVar2 = _objc_msgSend(IVar2,PTR_s_high_00014718);
+        ppuVar4 = &PTR_s_celsius_000146d0;
+      }
+      _objc_msgSend(IVar2,*ppuVar4);
+      IVar2 = NSString::stringWithFormat_((ID)puVar1,PTR_s_stringWithFormat__000146d8,&cf__);
+      return IVar2;
+    }
+  }
+LAB_0000df24:
+  return (ID)&cf_N_A;
+}
+
+
+========== lowestTemperatureIn:  @ 0000df48 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x14 bytes */
+
+ID WeatherManager::lowestTemperatureIn_(ID param_1,SEL param_2,int param_3)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  ID IVar2;
+  ulong uVar3;
+  undefined **ppuVar4;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar2 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  uVar3 = _objc_opt_respondsToSelector(IVar2,PTR_s_currentForecastModel_000146b8);
+  if ((uVar3 & 1) != 0) {
+    IVar2 = widgetViewController(param_1,puVar1);
+    IVar2 = _objc_msgSend(IVar2,op);
+    if (IVar2 != 0) {
+      IVar2 = widgetViewController(param_1,puVar1);
+      IVar2 = _objc_msgSend(IVar2,op);
+      IVar2 = dailyForecasts(IVar2,PTR_s_dailyForecasts_00014710);
+      IVar2 = _objc_msgSend(IVar2,PTR_s_objectAtIndexedSubscript__00014400,0);
+      puVar1 = PTR__OBJC_CLASS___NSString_00014788;
+      if (param_3 == 2) {
+        IVar2 = _objc_msgSend(IVar2,PTR_s_low_00014720);
+        ppuVar4 = &PTR_s_kelvin_000146e8;
+      }
+      else if (param_3 == 1) {
+        IVar2 = _objc_msgSend(IVar2,PTR_s_low_00014720);
+        ppuVar4 = &PTR_s_fahrenheit_000146e0;
+      }
+      else {
+        if (param_3 != 0) goto LAB_0000e130;
+        IVar2 = _objc_msgSend(IVar2,PTR_s_low_00014720);
+        ppuVar4 = &PTR_s_celsius_000146d0;
+      }
+      _objc_msgSend(IVar2,*ppuVar4);
+      IVar2 = NSString::stringWithFormat_((ID)puVar1,PTR_s_stringWithFormat__000146d8,&cf__);
+      return IVar2;
+    }
+  }
+LAB_0000e130:
+  return (ID)&cf_N_A;
+}
+
+
+========== hourlyForecasts  @ 0000e154 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::hourlyForecasts(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  undefined *puVar2;
+  ID IVar3;
+  ulong uVar4;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar3 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  IVar3 = _objc_msgSend(IVar3,PTR_s_currentForecastModel_000146b8);
+  puVar2 = PTR_s_hourlyForecasts_00014728;
+  uVar4 = _objc_opt_respondsToSelector(IVar3,PTR_s_hourlyForecasts_00014728);
+  if ((uVar4 & 1) == 0) {
+    IVar3 = 0;
+  }
+  else {
+    IVar3 = widgetViewController(param_1,puVar1);
+    IVar3 = _objc_msgSend(IVar3,op);
+    IVar3 = hourlyForecasts(IVar3,puVar2);
+  }
+  return IVar3;
+}
+
+
+========== dailyForecasts  @ 0000e244 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::dailyForecasts(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *op;
+  undefined *puVar2;
+  ID IVar3;
+  ulong uVar4;
+  
+  puVar1 = PTR_s_widgetViewController_00014630;
+  IVar3 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  op = PTR_s_currentForecastModel_000146b8;
+  IVar3 = _objc_msgSend(IVar3,PTR_s_currentForecastModel_000146b8);
+  puVar2 = PTR_s_dailyForecasts_00014710;
+  uVar4 = _objc_opt_respondsToSelector(IVar3,PTR_s_dailyForecasts_00014710);
+  if ((uVar4 & 1) == 0) {
+    IVar3 = 0;
+  }
+  else {
+    IVar3 = widgetViewController(param_1,puVar1);
+    IVar3 = _objc_msgSend(IVar3,op);
+    IVar3 = dailyForecasts(IVar3,puVar2);
+  }
+  return IVar3;
+}
+
+
+========== gradientLayer  @ 0000e334 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::gradientLayer(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *puVar2;
+  ID IVar3;
+  ulong uVar4;
+  
+  puVar2 = PTR_s_dynamicWeatherView_00014698;
+  IVar3 = dynamicWeatherView(param_1,PTR_s_dynamicWeatherView_00014698);
+  puVar1 = PTR_s_gradientLayer_00014330;
+  uVar4 = _objc_opt_respondsToSelector(IVar3,PTR_s_gradientLayer_00014330);
+  if ((uVar4 & 1) == 0) {
+    IVar3 = 0;
+  }
+  else {
+    IVar3 = dynamicWeatherView(param_1,puVar2);
+    IVar3 = gradientLayer(IVar3,puVar1);
+  }
+  return IVar3;
+}
+
+
+========== condition  @ 0000e3dc ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::condition(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  undefined *puVar2;
+  ID IVar3;
+  ulong uVar4;
+  
+  puVar2 = PTR_s_dynamicWeatherView_00014698;
+  IVar3 = dynamicWeatherView(param_1,PTR_s_dynamicWeatherView_00014698);
+  puVar1 = PTR_s_condition_00014340;
+  uVar4 = _objc_opt_respondsToSelector(IVar3,PTR_s_condition_00014340);
+  if ((uVar4 & 1) == 0) {
+    IVar3 = 0;
+  }
+  else {
+    IVar3 = dynamicWeatherView(param_1,puVar2);
+    IVar3 = condition(IVar3,puVar1);
+  }
+  return IVar3;
+}
+
+
+========== resumeConditionView  @ 0000e484 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void WeatherManager::resumeConditionView(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  ID IVar2;
+  
+  puVar1 = PTR_s_condition_00014340;
+  IVar2 = condition(param_1,PTR_s_condition_00014340);
+  if (IVar2 != 0) {
+    IVar2 = condition(param_1,puVar1);
+    _objc_msgSend(IVar2,PTR_s_resume_00014730);
+    return;
+  }
+  return;
+}
+
+
+========== pauseConditionView  @ 0000e504 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void WeatherManager::pauseConditionView(ID param_1,SEL param_2)
+
+{
+  undefined *puVar1;
+  ID IVar2;
+  
+  puVar1 = PTR_s_condition_00014340;
+  IVar2 = condition(param_1,PTR_s_condition_00014340);
+  if (IVar2 != 0) {
+    IVar2 = condition(param_1,puVar1);
+    _objc_msgSend(IVar2,PTR_s_pause_00014738);
+    return;
+  }
+  return;
+}
+
+
+========== getImageForCondition:  @ 0000e584 ==========
+
+/* WARNING: Function: _objc_retainAutoreleasedReturnValue replaced with injection:
+   _objc_retain_fixup */
+/* WARNING: Function: _objc_release replaced with injection: _objc_release_fixup */
+/* WARNING: Function: _objc_autoreleaseReturnValue replaced with injection: _objc_retain_fixup */
+/* Function Stack Size: 0x14 bytes */
+
+ID WeatherManager::getImageForCondition_(ID param_1,SEL param_2,int param_3)
+
+{
+  ID IVar1;
+  
+  IVar1 = widgetViewController(param_1,PTR_s_widgetViewController_00014630);
+  if (IVar1 == 0) {
+    IVar1 = 0;
+  }
+  else {
+    IVar1 = WeatherImageLoader::conditionImageWithConditionIndex_
+                      ((ID)PTR__OBJC_CLASS___WeatherImageLoader_00014790,
+                       PTR_s_conditionImageWithConditionIndex_00014740,(long)(int)param_3);
+  }
+  return IVar1;
+}
+
+
+========== setWidgetViewController:  @ 0000e5e8 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void WeatherManager::setWidgetViewController_(ID param_1,SEL param_2,ID param_3)
+
+{
+  *(ID *)(param_1 + 8) = param_3;
+  return;
+}
+
+
+========== setDynamicWeatherView:  @ 0000e5f4 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void WeatherManager::setDynamicWeatherView_(ID param_1,SEL param_2,ID param_3)
+
+{
+  *(ID *)(param_1 + 0x10) = param_3;
+  return;
+}
+
+
+========== city  @ 0000e600 ==========
+
+/* Function Stack Size: 0x10 bytes */
+
+ID WeatherManager::city(ID param_1,SEL param_2)
+
+{
+  return *(ID *)(param_1 + 0x18);
+}
+
+
+========== setCity:  @ 0000e608 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x18 bytes */
+
+void WeatherManager::setCity_(ID param_1,SEL param_2,ID param_3)
+
+{
+  *(ID *)(param_1 + 0x18) = param_3;
+  return;
+}
+
+
+========== .cxx_destruct  @ 0000e614 ==========
+
+/* WARNING: Function: _objc_storeStrong replaced with injection: _objc_store_fixup */
+/* Function Stack Size: 0x10 bytes */
+
+void WeatherManager::_cxx_destruct(ID param_1,SEL param_2)
+
+{
+  *(undefined8 *)(param_1 + 0x18) = 0;
+  *(undefined8 *)(param_1 + 0x10) = 0;
+  *(undefined8 *)(param_1 + 8) = 0;
+  return;
+}
+
+
+========== _MRMediaRemoteGetNowPlayingInfo  @ 0000e650 ==========
+
+void _MRMediaRemoteGetNowPlayingInfo(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e658. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__MRMediaRemoteGetNowPlayingInfo_00014000)();
+  return;
+}
+
+
+========== _MSHookMessageEx  @ 0000e65c ==========
+
+void _MSHookMessageEx(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e664. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__MSHookMessageEx_00014008)();
+  return;
+}
+
+
+========== _NSClassFromString  @ 0000e668 ==========
+
+void _NSClassFromString(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e670. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__NSClassFromString_00014010)();
+  return;
+}
+
+
+========== ___sprintf_chk  @ 0000e674 ==========
+
+void ___sprintf_chk(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e67c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR____sprintf_chk_00014018)();
+  return;
+}
+
+
+========== ___stack_chk_fail  @ 0000e680 ==========
+
+void ___stack_chk_fail(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e688. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR____stack_chk_fail_00014020)();
+  return;
+}
+
+
+========== _class_addMethod  @ 0000e68c ==========
+
+void _class_addMethod(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e694. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__class_addMethod_00014028)();
+  return;
+}
+
+
+========== _class_addProperty  @ 0000e698 ==========
+
+void _class_addProperty(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6a0. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__class_addProperty_00014030)();
+  return;
+}
+
+
+========== _dispatch_once  @ 0000e6a4 ==========
+
+void _dispatch_once(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6ac. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__dispatch_once_00014038)();
+  return;
+}
+
+
+========== _objc_alloc  @ 0000e6b0 ==========
+
+void _objc_alloc(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6b8. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_alloc_00014040)();
+  return;
+}
+
+
+========== _objc_alloc_init  @ 0000e6bc ==========
+
+void _objc_alloc_init(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6c4. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_alloc_init_00014048)();
+  return;
+}
+
+
+========== _objc_autoreleaseReturnValue  @ 0000e6c8 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_autoreleaseReturnValue(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6d0. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_autoreleaseReturnValue_00014050)();
+  return;
+}
+
+
+========== _objc_getAssociatedObject  @ 0000e6d4 ==========
+
+void _objc_getAssociatedObject(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6dc. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_getAssociatedObject_00014058)();
+  return;
+}
+
+
+========== _objc_getClass  @ 0000e6e0 ==========
+
+void _objc_getClass(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e6e8. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_getClass_00014060)();
+  return;
+}
+
+
+========== _objc_msgSend  @ 0000e6ec ==========
+
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+ID _objc_msgSend(ID self,SEL op,...)
+
+{
+  ID IVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x0000e6f4. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  IVar1 = (*(code *)PTR__objc_msgSend_00014068)();
+  return IVar1;
+}
+
+
+========== _objc_opt_class  @ 0000e6f8 ==========
+
+void _objc_opt_class(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e700. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_opt_class_00014070)();
+  return;
+}
+
+
+========== _objc_opt_isKindOfClass  @ 0000e704 ==========
+
+void _objc_opt_isKindOfClass(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e70c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_opt_isKindOfClass_00014078)();
+  return;
+}
+
+
+========== _objc_opt_respondsToSelector  @ 0000e710 ==========
+
+void _objc_opt_respondsToSelector(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e718. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_opt_respondsToSelector_00014080)();
+  return;
+}
+
+
+========== _objc_release  @ 0000e71c ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_release(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e724. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_release_00014088)();
+  return;
+}
+
+
+========== _objc_retain  @ 0000e728 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_retain(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e730. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retain_00014090)();
+  return;
+}
+
+
+========== _objc_retainAutorelease  @ 0000e734 ==========
+
+void _objc_retainAutorelease(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e73c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retainAutorelease_00014098)();
+  return;
+}
+
+
+========== _objc_retainAutoreleaseReturnValue  @ 0000e740 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_retainAutoreleaseReturnValue(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e748. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retainAutoreleaseReturnValue_000140a0)();
+  return;
+}
+
+
+========== _objc_retainAutoreleasedReturnValue  @ 0000e74c ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_retainAutoreleasedReturnValue(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e754. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_retainAutoreleasedReturnValue_000140a8)();
+  return;
+}
+
+
+========== _objc_setAssociatedObject  @ 0000e758 ==========
+
+void _objc_setAssociatedObject(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e760. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_setAssociatedObject_000140b0)();
+  return;
+}
+
+
+========== _objc_storeStrong  @ 0000e764 ==========
+
+/* WARNING: This is an inlined function */
+
+void _objc_storeStrong(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x0000e76c. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  (*(code *)PTR__objc_storeStrong_000140b8)();
+  return;
+}
+
+
+========== initWithIdentifier:  @ 0001c001 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID HBPreferences::initWithIdentifier_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== registerBool:default:forKey:  @ 0001c002 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID HBPreferences::registerBool_default_forKey_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== arrayWithObjects:count:  @ 0001c101 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSArray::arrayWithObjects_count_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== bundleWithPath:  @ 0001c201 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSBundle::bundleWithPath_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== isLoaded  @ 0001c202 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSBundle::isLoaded(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== load  @ 0001c203 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSBundle::load(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== addObject:  @ 0001c501 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSMutableArray::addObject_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== objectAtIndexedSubscript:  @ 0001c502 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSMutableArray::objectAtIndexedSubscript_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== intValue  @ 0001c503 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSMutableArray::intValue(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== stringWithFormat:  @ 0001c701 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID NSString::stringWithFormat_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== imageWithData:  @ 0001c801 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIImage::imageWithData_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== initWithFrame:  @ 0001c901 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID UIImageView::initWithFrame_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+
+========== conditionImageWithConditionIndex:  @ 0001cb01 ==========
+
+/* WARNING: Control flow encountered bad instruction data */
+
+ID WeatherImageLoader::conditionImageWithConditionIndex_(ID self,SEL op,...)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}
+
+

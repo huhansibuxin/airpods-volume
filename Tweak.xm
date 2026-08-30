@@ -3,6 +3,60 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <dlfcn.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+
+// ============================================================
+// 偏好设置（TGK 风格 plist）
+// layout/Library/PreferenceLoader/Preferences/AirPodsVolume/Preferences.plist
+// domain = com.huhansibuxin.airpodsvolume
+// PostNotification = com.huhansibuxin.airpodsvolume-updated
+// ============================================================
+
+static NSString * const kAPVDomain = @"com.huhansibuxin.airpodsvolume";
+static NSString * const kAPVChanged = @"com.huhansibuxin.airpodsvolume-updated";
+
+// 读 BOOL（直连 cfprefsd 取新鲜值）
+static BOOL apv_bool(NSString *key, BOOL def) {
+    Boolean valid = false;
+    Boolean v = CFPreferencesGetAppBooleanValue((CFStringRef)key,
+                                                (CFStringRef)kAPVDomain, &valid);
+    return valid ? (BOOL)v : def;
+}
+
+// 读数值（用户清空输入框会得到空串/0 → 必须回退默认，否则按钮尺寸崩坏）
+static CGFloat apv_float(NSString *key, CGFloat def) {
+    @try {
+        NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kAPVDomain];
+        id v = [d objectForKey:key];
+        if (v) {
+            CGFloat f = [v floatValue];
+            if (f > 0.0) return f;
+        }
+    } @catch (NSException *e) {}
+    return def;
+}
+
+// 缓存（启动 + 设置变更通知时刷新，避免每个事件都读 pref）
+static BOOL gAutoRoute = YES, gStealBack = YES, gStealHFP = YES;
+static BOOL gLimitAlert = YES, gHideReplayKit = YES;
+static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES, gHideSubtitle = YES;
+static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
+static CGFloat gPlayBtnScale = 0.75;
+
+static void apv_refresh(void) {
+    gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
+    gStealBack = apv_bool(@"stealBackFromCar", YES);
+    gStealHFP = apv_bool(@"stealBackHFPCalls", YES);
+    gLimitAlert = apv_bool(@"limitAlertVolume", YES);
+    gHideReplayKit = apv_bool(@"hideReplayKitCCModules", YES);
+    gShrinkNowPlaying = apv_bool(@"shrinkNowPlayingCCModule", YES);
+    gHidePrevNext = apv_bool(@"hideNowPlayingPrevNext", YES);
+    gHideSubtitle = apv_bool(@"hideNowPlayingSubtitle", YES);
+    gBlockPopup = apv_bool(@"blockAirPodsPopup", YES);
+    gBlockShortcuts = apv_bool(@"blockShortcutsNotifications", YES);
+    gPlayBtnScale = apv_float(@"nowPlayingButtonScale", 0.75);
+}
 
 @interface AVSystemController : NSObject
 + (id)sharedAVSystemController;
@@ -157,6 +211,8 @@ static float capForCategory(id cat) {
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
+    // 开关：设置里"限制铃声/通知音量"关闭 → 完全不介入音量
+    if (!gLimitAlert) return %orig(vol, cat);
     float cap = capForCategory(cat);
     // 摘下时通知音强制 100%（静音跳过）；戴上时各类音量按 cap 封顶
     // （媒体 70%/通知 40%——hook 层兜底，控制中心滑动条走 MediaRemote
@@ -168,6 +224,7 @@ static float capForCategory(id cat) {
     return %orig(vol, cat);
 }
 - (BOOL)changeVolumeBy:(float)delta forCategory:(id)cat {
+    if (!gLimitAlert) return %orig;
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
         return [self setVolumeTo:1.0f forCategory:cat];
     float cap = capForCategory(cat);
@@ -181,7 +238,7 @@ static float capForCategory(id cat) {
 }
 - (BOOL)getVolume:(float *)vol forCategory:(id)cat {
     BOOL r = %orig(vol, cat);
-    if (r) {
+    if (r && gLimitAlert) {
         float cap = capForCategory(cat);
         if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
             *vol = 1.0f;
@@ -220,6 +277,8 @@ static float capForCategory(id cat) {
 
 %hook NSBundle
 - (Class)principalClass {
+    // 开关：设置里"隐藏视频通话重复模块"
+    if (!gHideReplayKit) return %orig;
     NSString *bid = [self bundleIdentifier];
     if (bid && [bid hasPrefix:@"com.apple.replaykit."]) {
         if ([bid isEqualToString:@"com.apple.replaykit.AudioConferenceControlCenterModule"] ||
@@ -314,6 +373,11 @@ static id replModuleSettingsForModule(id self, SEL _cmd, NSString *identifier, C
 }
 
 static void installNowPlaying1x1(void) {
+    // 开关：设置里"音乐模块压缩成 1×1"
+    if (!gShrinkNowPlaying) {
+        ccLog(@"设置已关闭 shrinkNowPlayingCCModule，不装 1×1 hook");
+        return;
+    }
     // 系统框架只在 dyld 缓存里（文件系统里已无二进制），先强制加载再取类
     dlopen("/System/Library/PrivateFrameworks/ControlCenterUI.framework/ControlCenterUI", RTLD_NOW);
     Class mgrCls = NSClassFromString(@"CCUIModuleSettingsManager");
@@ -328,6 +392,127 @@ static void installNowPlaying1x1(void) {
     }
     MSHookMessageEx(mgrCls, sel, (IMP)replModuleSettingsForModule, (IMP *)&origModuleSettingsForModule);
     ccLog(@"hook 装载完成: CCUIModuleSettingsManager -moduleSettingsForModuleIdentifier:prototypeSize:");
+}
+
+// ============================================================
+// 控制中心 1×1 音乐模块：内部布局调整
+// 隐藏上一首/下一首 + 隐藏副标题 + 放大播放键
+// ============================================================
+// hook 点来自逆向 BetterCC 0.0.55（Ghidra 反编译 + 方法名静态提取）：
+//   MRUNowPlayingControlsView          -layoutSubviews → 调整内部子视图位置
+//   MRUNowPlayingTransportControlsView -layoutSubviews → leftButton/rightButton alpha 归零
+//   MRUNowPlayingLabelView             -layoutSubviews → 隐藏第 2 个及以后的 UILabel
+// BetterCC 在 _mediaPortraitSize==1 的分支就是"左右按钮 alpha=0，只留 middleButton"。
+// ⚠️ 只在 compact（layout==0，即 1×1 未展开）生效；长按展开后恢复系统原样。
+// ============================================================
+
+static void (*origMRUControlsLayout)(id, SEL) = NULL;
+static void (*origMRUTransportLayout)(id, SEL) = NULL;
+static void (*origMRULabelLayout)(id, SEL) = NULL;
+
+// layout 属性：0 = compact(1×1)，非 0 = 已展开
+static NSInteger mru_layoutOf(id view) {
+    if (!view) return -1;
+    SEL s = NSSelectorFromString(@"layout");
+    if (![view respondsToSelector:s]) return -1;
+    return ((NSInteger (*)(id, SEL))objc_msgSend)(view, s);
+}
+
+static id mru_obj(id view, NSString *selName) {
+    if (!view) return nil;
+    SEL s = NSSelectorFromString(selName);
+    if (![view respondsToSelector:s]) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)(view, s);
+}
+
+// 隐藏副标题：LabelView 里第 2 个及以后的 UILabel
+static void hideSecondaryLabels(id labelView) {
+    NSArray *subs = ((NSArray *(*)(id, SEL))objc_msgSend)(labelView, @selector(subviews));
+    int n = 0;
+    for (UIView *v in subs) {
+        if ([v isKindOfClass:[UILabel class]]) {
+            n++;
+            if (n >= 2) v.hidden = YES;
+        }
+    }
+}
+
+static void replMRULabelLayout(id self, SEL _cmd) {
+    if (origMRULabelLayout) origMRULabelLayout(self, _cmd);
+    @try {
+        if (!gShrinkNowPlaying || !gHideSubtitle) return;
+        if (mru_layoutOf(self) != 0) return;
+        hideSecondaryLabels(self);
+    } @catch (NSException *e) {}
+}
+
+static void replMRUTransportLayout(id self, SEL _cmd) {
+    if (origMRUTransportLayout) origMRUTransportLayout(self, _cmd);
+    @try {
+        if (!gShrinkNowPlaying || !gHidePrevNext) return;
+        if (mru_layoutOf(self) != 0) return;
+
+        [mru_obj(self, @"leftButton") setAlpha:0.0];
+        [mru_obj(self, @"rightButton") setAlpha:0.0];
+
+        // 播放键按 gPlayBtnScale 放大（宽度 = 模块宽 × scale）
+        UIView *middle = (UIView *)mru_obj(self, @"middleButton");
+        if (middle) {
+            CGRect f = middle.frame;
+            CGFloat moduleW = middle.superview ? middle.superview.bounds.size.width : f.size.width;
+            CGFloat targetW = moduleW * gPlayBtnScale;
+            if (targetW > f.size.width + 0.5) {
+                CGFloat cx = CGRectGetMidX(f);
+                f.size.width = targetW;
+                f.size.height = MAX(f.size.height, targetW * 0.42);
+                f.origin.x = cx - targetW / 2.0;
+                middle.frame = f;
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
+static void replMRUControlsLayout(id self, SEL _cmd) {
+    if (origMRUControlsLayout) origMRUControlsLayout(self, _cmd);
+    @try {
+        if (!gShrinkNowPlaying) return;
+        if (mru_layoutOf(self) != 0) return;
+        // 把 transportControlsView 压到底部（给放大的播放键腾位置）
+        UIView *tv = (UIView *)mru_obj(self, @"transportControlsView");
+        if (!tv) return;
+        CGRect b = ((UIView *)self).bounds;
+        CGFloat h = 46.0;
+        tv.frame = CGRectMake(0, b.size.height - h, b.size.width, h);
+    } @catch (NSException *e) {}
+}
+
+static void installNowPlayingLayoutTweaks(void) {
+    // MRUNowPlaying* 在 MediaRemoteUI 私有框架（系统框架只在 dyld 缓存里）
+    dlopen("/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI", RTLD_NOW);
+
+    struct { const char *cls; const char *sel; IMP repl; void **orig; } hooks[] = {
+        { "MRUNowPlayingControlsView", "layoutSubviews",
+          (IMP)replMRUControlsLayout, (void **)&origMRUControlsLayout },
+        { "MRUNowPlayingTransportControlsView", "layoutSubviews",
+          (IMP)replMRUTransportLayout, (void **)&origMRUTransportLayout },
+        { "MRUNowPlayingLabelView", "layoutSubviews",
+          (IMP)replMRULabelLayout, (void **)&origMRULabelLayout },
+    };
+
+    for (int i = 0; i < 3; i++) {
+        Class c = NSClassFromString([NSString stringWithUTF8String:hooks[i].cls]);
+        if (!c) {
+            ccLog([NSString stringWithFormat:@"%s 类未找到，跳过", hooks[i].cls]);
+            continue;
+        }
+        SEL s = NSSelectorFromString([NSString stringWithUTF8String:hooks[i].sel]);
+        if (![c instancesRespondToSelector:s]) {
+            ccLog([NSString stringWithFormat:@"%s 不响应 %s，跳过", hooks[i].cls, hooks[i].sel]);
+            continue;
+        }
+        MSHookMessageEx(c, s, hooks[i].repl, (IMP *)hooks[i].orig);
+        ccLog([NSString stringWithFormat:@"hook 装载: %s -%s", hooks[i].cls, hooks[i].sel]);
+    }
 }
 
 // ============================================================
@@ -352,13 +537,14 @@ static id (*origDispatcherPost)(id, SEL, id) = NULL;
 static id (*origDispatcherModify)(id, SEL, id) = NULL;
 
 static id replDispatcherPost(id self, SEL _cmd, id req) {
-    if (isShortcutsRequest(req)) return nil;
+    // 开关：设置里"拦截 Shortcuts 自动化通知"
+    if (gBlockShortcuts && isShortcutsRequest(req)) return nil;
     if (origDispatcherPost) return origDispatcherPost(self, _cmd, req);
     return nil;
 }
 
 static id replDispatcherModify(id self, SEL _cmd, id req) {
-    if (isShortcutsRequest(req)) return nil;
+    if (gBlockShortcuts && isShortcutsRequest(req)) return nil;
     if (origDispatcherModify) return origDispatcherModify(self, _cmd, req);
     return nil;
 }
@@ -385,13 +571,16 @@ static id replDispatcherModify(id self, SEL _cmd, id req) {
 static BOOL (*origPerformPresentationRequest)(id, SEL, id, id) = NULL;
 static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id request) {
     @try {
-        id def = [session definition];
-        NSString *svc = [def serviceName];
-        NSString *vc = [def viewControllerClassName];
-        if (svc && vc &&
-            [svc isEqualToString:@"com.apple.SharingViewService"] &&
-            [vc isEqualToString:@"SharingViewService.HeadphoneFlowViewController"]) {
-            return NO; // 拦截 AirPods 开盒/连接弹窗
+        // 开关：设置里"拦截 AirPods 开盒弹窗"
+        if (gBlockPopup) {
+            id def = [session definition];
+            NSString *svc = [def serviceName];
+            NSString *vc = [def viewControllerClassName];
+            if (svc && vc &&
+                [svc isEqualToString:@"com.apple.SharingViewService"] &&
+                [vc isEqualToString:@"SharingViewService.HeadphoneFlowViewController"]) {
+                return NO; // 拦截 AirPods 开盒/连接弹窗
+            }
         }
     } @catch (id e) {}
     if (origPerformPresentationRequest)
@@ -697,6 +886,9 @@ static void stopPoll(void) {
 //   手动切喇叭连点 2 次 → 3s 逃生通道保留
 static void enforceAirPodsRoute(void) {
     @try {
+        // 设置开关：三个路由功能全都关掉时完全不介入
+        if (!gAutoRoute && !gStealBack && !gStealHFP) return;
+
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
@@ -721,7 +913,8 @@ static void enforceAirPodsRoute(void) {
         sOutputWasAirPods = outIsAP;
         if (outIsAP) {
             // 输出已是 AirPods（系统切的）：仅当刚变成时我们也 attached 切一次（幂等）
-            if (!wasAP) {
+            // 开关：autoRouteToAirPods
+            if (!wasAP && gAutoRoute) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     forceRouteToAirPods("attached");
@@ -730,20 +923,24 @@ static void enforceAirPodsRoute(void) {
         } else {
             // 输出非 AirPods：上次输出是 AirPods（被切走）→ stolen（3s 冷却）；
             // 上次输出非 AirPods（戴上/刚连）→ attached（免冷却必切）
+            // 开关：被抢走 → stealBackFromCar；刚连上 → autoRouteToAirPods
             const char *why = wasAP ? "stolen" : "attached";
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                forceRouteToAirPods(why);
-            });
-            // 被抢/戴上需要切 → 重启 1 分钟轮询窗口（车载再开、系统抖动都能兜底；
-            // 系统稳定后窗口到期自动停，平时零轮询）
-            startPollWindow();
+            BOOL allow = wasAP ? gStealBack : gAutoRoute;
+            if (allow) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    forceRouteToAirPods(why);
+                });
+                // 被抢/戴上需要切 → 重启 1 分钟轮询窗口（车载再开、系统抖动都能兜底；
+                // 系统稳定后窗口到期自动停，平时零轮询）
+                startPollWindow();
+            }
         }
         // ⚠️ HFP 通话路由盲区（2026-08-23 老板实测）：视频/语音通话时系统把
         // HFP 通话路由单独切到车载（车载免提优先），而 A2DP 媒体输出可能还在
         // AirPods（抖音在放）→ 上面 outIsAP=YES 误判"输出是 AirPods"不抢。
         // 综合检测 carOwnsCall（HFP 输出/输入/系统输出任一为车载）→ 多策略抢回。
-        if (carOwnsCall()) {
+        if (carOwnsCall() && gStealHFP) {
             routeLog(@"enforce carOwnsCall=1 -> forceCallToAirPods");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
@@ -773,10 +970,13 @@ static void handleRouteEvent(NSString *source) {
         }
         if (sAirPodsConnected) {
             float cur;
-            if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
-                [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
-            if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
-                [avc setVolumeTo:0.4f forCategory:@"Alert"];
+            // 开关：设置里"音量保护"关闭时不改任何音量
+            if (gLimitAlert) {
+                if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
+                    [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
+                if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
+                    [avc setVolumeTo:0.4f forCategory:@"Alert"];
+            }
             // 媒体音量：只在"新戴上"（conn 0→1 跳变）时压到 70（v1.9.27）。
             // ⚠️ 关键时序修复：**绝不立即压**——btconnect 瞬间输出还在喇叭，
             // setVolumeTo(0.7) 会改喇叭音量+污染喇叭记忆（摘下后系统恢复的
@@ -785,7 +985,8 @@ static void handleRouteEvent(NSString *source) {
             // 只改 AirPods 音量/记忆，喇叭记忆不碰，摘下后系统正常恢复。
             // 压三次（0.8s/2.0s/3.2s，输出是 AirPods 才压）：覆盖系统经
             // MediaRemote 路径的延迟音量设置。getVolume 恒假值不读取。
-            BOOL newlyAttached = !sPrevAttached;
+            // 开关：音量保护关掉时不压媒体音量
+            BOOL newlyAttached = !sPrevAttached && gLimitAlert;
             if (newlyAttached) {
                 if (currentOutputIsAirPods()) {
                     [avc setVolumeTo:0.7f forCategory:@"Audio/Video"];
@@ -814,7 +1015,7 @@ static void handleRouteEvent(NSString *source) {
             // 缓存假值 0.70，>0.7 判断不会误压；真 100 能读到并压回。
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
-                if (sAirPodsConnected && currentOutputIsAirPods()) {
+                if (sAirPodsConnected && currentOutputIsAirPods() && gLimitAlert) {
                     id avc2 = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
                     float mv = -1.0f;
                     if ([avc2 getVolume:&mv forCategory:@"Audio/Video"] && mv > 0.7f) {
@@ -825,7 +1026,7 @@ static void handleRouteEvent(NSString *source) {
             });
         } else {
             // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%，静音模式下不强制
-            if (!isRingerMuted()) {
+            if (!isRingerMuted() && gLimitAlert) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
             }
@@ -843,6 +1044,7 @@ static void handleRouteEvent(NSString *source) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
 
+    apv_refresh(); // 启动时读一次设置开关（TGK 风格 plist）
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
     // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
@@ -854,7 +1056,8 @@ static void handleRouteEvent(NSString *source) {
     } @catch (id e) {}
 
     id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    if (!sAirPodsConnected && !isRingerMuted()) {
+    // 开关：设置里"限制铃声/通知音量"
+    if (gLimitAlert && !sAirPodsConnected && !isRingerMuted()) {
         [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
         [avc setVolumeTo:1.0f forCategory:@"Alert"];
     }
@@ -922,6 +1125,15 @@ static void handleRouteEvent(NSString *source) {
 
     // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
     installNowPlaying1x1();
+    // 1×1 模块内部布局：隐藏上/下一首 + 副标题，放大播放键
+    installNowPlayingLayoutTweaks();
+
+    // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
+    [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
+        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        apv_refresh();
+        ccLog(@"设置开关已刷新");
+    }];
 
     // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
     dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
