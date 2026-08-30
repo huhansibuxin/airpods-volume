@@ -1290,31 +1290,27 @@ static void apv_queryRealMediaVolume(void (^done)(float)) {
     } @catch (id e) {}
 }
 
-// 跨进程设置真实媒体播放音量（MediaRemote 路径，系统级生效）。
-// 关键：WeChat 在自己进程里改的音量，AVSystemController(SpringBoard 进程实例) 压不回去，
-// 必须走 MediaRemote 这条跨进程通道才能真正覆盖。
-static void (*sMRSetMediaPlaybackVolume)(float, dispatch_queue_t, void (^)(BOOL)) = NULL;
+// 设置媒体播放音量。
+// ⚠️ v1.9.73 铁律：禁止调用 MRMediaRemoteSetMediaPlaybackVolume！
+// iOS16 SpringBoard 里该私有 API 一调必崩（EXC_BAD_ACCESS PAC failure，
+// _MRServiceCreateErrorHandlerBlock 内部 block 拷贝时指针认证失败），
+// 已实测安全模式（SpringBoard-2026-08-31-071255.ips，触发点=真值 0.761>cap 压回）。
+// 改回 AVSystemController setVolumeTo:（SpringBoard 进程实例，安全不崩；
+// 对微信 in-app 经 MediaRemote 设的值可能压不完全，但 HFP 结束复查会补刀，且绝不崩）。
 static void apv_setRealMediaVolume(float vol) {
     @try {
-        if (!sMRSetMediaPlaybackVolume) {
-            dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW);
-            sMRSetMediaPlaybackVolume = (void (*)(float, dispatch_queue_t, void (^)(BOOL)))
-                dlsym(RTLD_DEFAULT, "MRMediaRemoteSetMediaPlaybackVolume");
-            if (gVolDiag) volLog(sMRSetMediaPlaybackVolume ?
-                @"MRMediaRemoteSetMediaPlaybackVolume 符号已解析" :
-                @"MRMediaRemoteSetMediaPlaybackVolume 符号未找到");
-        }
-        if (!sMRSetMediaPlaybackVolume) return;
         float v = fmaxf(0.0f, fminf(1.0f, vol));
-        sMRSetMediaPlaybackVolume(v, dispatch_get_main_queue(), ^(BOOL success){
-            if (gVolDiag) volLog([NSString stringWithFormat:@"MR 设媒体音量 %.2f 结果=%d", v, success]);
-        });
+        id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+        if (avc && [avc respondsToSelector:@selector(setVolumeTo:forCategory:)]) {
+            [avc setVolumeTo:v forCategory:@"Audio/Video"];
+            if (gVolDiag) volLog([NSString stringWithFormat:@"avc 设媒体音量 %.2f", v]);
+        }
     } @catch (id e) {}
 }
 
 // 通话/HFP 边界处用 MediaRemote 真值复查媒体音量（事件触发，非轮询）。
 // 始终记录真实值（不再受 gVolDiag 门控）——这是判断"弹 100% 究竟是媒体音量还是通话音量"的关键证据。
-// 超 cap 则跨进程压回 0.7（1.5s 防抖避免与别处重复写）。
+// 超 cap 则用 AVSystemController 压回 0.7（1.5s 防抖避免与别处重复写；禁止 MR setter，见 apv_setRealMediaVolume）。
 static void apv_pressMediaIfOverCap(NSString *why) {
     if (!apv_mediaShouldCap()) return;
     float cap = apv_mediaCap();
@@ -1358,15 +1354,25 @@ static void apv_mrVolNotifCb(CFNotificationCenterRef center, void *observer,
     } @catch (id e) {}
 }
 
-// Darwin 通知名诊断回调：记录所有含 Volume/Media 的系统通知，定位微信 in-app 改音量的真实广播名
+// Darwin 通知名诊断回调：记录所有含 Volume/Media 的系统通知，定位微信 in-app 改音量的真实广播名。
+// 限流：同一通知名只记第一次；不同名字 1s 内最多 1 条（防 catch-all 高频刷日志拖慢 SpringBoard）。
+static NSMutableSet *sMRDiagSeen = nil;
+static NSTimeInterval sMRDiagLastLog = 0;
 static void apv_mrVolDiagCb(CFNotificationCenterRef center, void *observer,
                             CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     @try {
         NSString *n = (__bridge NSString *)name;
-        if ([n rangeOfString:@"Volume" options:NSCaseInsensitiveSearch].length ||
-            [n rangeOfString:@"Media" options:NSCaseInsensitiveSearch].length) {
-            volLog([NSString stringWithFormat:@"[Darwin通知] %@", n]);
-        }
+        if (!n) return;
+        BOOL hit = ([n rangeOfString:@"Volume" options:NSCaseInsensitiveSearch].length ||
+                    [n rangeOfString:@"Media" options:NSCaseInsensitiveSearch].length);
+        if (!hit) return;
+        if (!sMRDiagSeen) sMRDiagSeen = [NSMutableSet set];
+        if ([sMRDiagSeen containsObject:n]) return;   // 已见过，不再刷
+        [sMRDiagSeen addObject:n];
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if (now - sMRDiagLastLog < 1.0) return;       // 1s 限流
+        sMRDiagLastLog = now;
+        volLog([NSString stringWithFormat:@"[Darwin通知] %@", n]);
     } @catch (id e) {}
 }
 
