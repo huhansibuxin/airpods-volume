@@ -331,35 +331,55 @@ typedef struct { unsigned long long width; unsigned long long height; } CCUILayo
 // 控制中心音乐模块（nowplaying）的 identifier
 static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcenter.nowplaying";
 
-// 控制中心模块诊断日志
-// ⚠️ v1.9.57 已静默（CC_DEBUG 0）。1×1 模块功能已验证正常，
-// 之前 "隐藏副标题 N 个" 每个 layoutSubviews 都 fopen/fclose 写一次文件，
-// 是实测到的 CPU 大头（老板要求的 CPU 审计里揪出来的）。要排查模块时再置 1。
-#define CC_DEBUG 0
-static void ccLog(NSString *msg) {
-#if CC_DEBUG
-    FILE *f = fopen("/var/jb/tmp/airpods_cc.log", "a");
-    if (f) {
-        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    }
-#else
-    (void)msg; // 静默时消掉 unused parameter 警告
-#endif
+// ============================================================
+// 日志系统（v1.9.58 重构，老板要求）
+//
+// **全部日志由设置里那一个开关「诊断日志」控制**（gVolDiag），不再有
+// 独立的编译期宏。开 = 全开，关 = 一个字节都不写。
+// 全部写进同一个文件 /var/jb/tmp/airpods_vol.log，方便 tail -f 一次看全。
+//
+// 三档频率（老板要求：刷屏的降频，音量的盯紧）：
+//   [VOL]   音量重点日志 —— **不限流**，每次音量设置全记（类别/请求值/
+//           实际值/是否被封顶/调用栈），只对"完全相同且 1s 内重复"去重。
+//   [ROUTE] 路由事件日志 —— 中等。路由事件本身高频，同类消息 5s 一条。
+//   [CC]    控制中心模块 —— 低频。下拉一次控制中心会刷 6 条同样的
+//           "nowplaying -> 1x1"，同类消息 30s 一条。
+//
+// 关掉开关时：三个函数都在第一行 return，连字符串都不拼，零开销。
+// ============================================================
+
+static NSString * const kAPVLogPath = @"/var/jb/tmp/airpods_vol.log";
+
+// 节流：同一个 key 在 interval 秒内只放行一次（返回 NO = 抑制）
+static BOOL apv_throttle(NSString *key, NSTimeInterval interval) {
+    @try {
+        static NSMutableDictionary *last = nil;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ last = [[NSMutableDictionary alloc] init]; });
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        NSNumber *prev = [last objectForKey:key];
+        if (prev && (now - [prev doubleValue]) < interval) return NO;
+        [last setObject:[NSNumber numberWithDouble:now] forKey:key];
+        return YES;
+    } @catch (id e) { return YES; }
 }
 
-// 音量诊断日志：**由设置开关控制，默认关**。
-// 用途：排查"戴 AirPods 听抖音时打微信视频，媒体音量弹到 100%"——
-// 记录每一次 setVolumeTo:forCategory: 的类别/原始值/是否被封顶 + 调用栈，
-// 用来判断 100% 是系统、微信还是 MediaRemote 路径设的，以及走没走我们的 hook。
-static void volLog(NSString *msg) {
-    if (!gVolDiag) return; // 关掉时零开销，连字符串都不拼（调用方也要用同样守卫）
-    FILE *f = fopen("/var/jb/tmp/airpods_vol.log", "a");
-    if (f) {
-        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    }
+static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
+    if (!gVolDiag) return;
+    if (throttle > 0.0 && !apv_throttle(msg, throttle)) return;
+    FILE *f = fopen([kAPVLogPath UTF8String], "a");
+    if (!f) return;
+    fprintf(f, "[%s] %s %s\n", [[[NSDate date] description] UTF8String],
+            [tag UTF8String], [msg UTF8String]);
+    fclose(f);
 }
+
+// 音量重点日志：**盯紧**，只做 1s 内完全相同消息的去重
+static void volLog(NSString *msg)   { apvWrite(@"[VOL]", msg, 1.0); }
+// 路由事件日志：同类 5s 一条
+static void routeLogImpl(NSString *msg) { apvWrite(@"[ROUTE]", msg, 5.0); }
+// 控制中心模块日志：同类 30s 一条（下拉控制中心会连刷 6 条一样的）
+static void ccLog(NSString *msg)    { apvWrite(@"[CC]", msg, 30.0); }
 
 // 调用栈前 N 帧（只在开诊断时才调用，别放进热路径）
 static NSString *volStack(NSUInteger n) {
@@ -735,10 +755,12 @@ static BOOL carOwnsCall(void) {
     return carHFPActive() || carHFPInputActive() || carInSystemOutput();
 }
 
-// 路由事件日志（v1.9.50 生产静默：不写文件，零 IO；排查时恢复函数体）
+// 路由事件日志
+// v1.9.50 起生产静默（空函数体），v1.9.58 恢复：改由设置里那一个「诊断日志」
+// 开关控制，写同一个文件，同类消息 5s 一条。
 // ⚠️ 调试基准 = v1.9.46（19dd6db，日志开启）
 static void routeLog(NSString *msg) {
-    (void)msg;
+    routeLogImpl(msg);
 }
 
 // 强制切到 AirPods（MPAVRoutingController 版）
@@ -1040,7 +1062,10 @@ static void handleRouteEvent(NSString *source) {
 
         // 通话音量兜底窗口：HFP 端口 0→1 跳变（打视频/接电话）时启动。
         // 事件驱动，不是常驻轮询——挂断后 tick 自己到期停表。
-        if (gVolDiag || gCallVolumeGuard) {
+        // ⚠️ 这里只能用 gCallVolumeGuard 作门控：诊断开关(gVolDiag)单独开、
+        // 兜底关时，绝不能因为日志开着就误触发 startCallVolumeGuard()。
+        // 日志由内部的 if (gVolDiag) 单独门控。
+        if (gCallVolumeGuard) {
             BOOL hfpNow = hfpCallActive();
             if (hfpNow != sPrevHFP) {
                 if (gVolDiag) {

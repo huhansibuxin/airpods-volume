@@ -99,7 +99,7 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>音量诊断日志（排查用）</string>
+			<string>诊断日志（排查用）</string>
 			<key>key</key>
 			<string>volumeDiagLog</string>
 			<key>default</key>
@@ -114,7 +114,12 @@
 			<string>PSGroupCell</string>
 			<key>footerText</key>
 			<string>通话期间音量兜底：打视频/语音时按音量走 MediaRemote 路径，不走我们唯一能拦的 AVSystemController，封顶会失效 → 通话期间每 2 秒兜底压回 70%（只在输出是 AirPods 时压，不污染喇叭记忆），挂断 12 秒后自动停。
-音量诊断日志：排查用，开后每次音量设置都记类别/数值/调用栈到 /var/jb/tmp/airpods_vol.log，平时请关闭。</string>
+
+诊断日志（总开关）：开后「全部日志」统一写入 /var/jb/tmp/airpods_vol.log，包括——
+• 控制中心模块日志（下拉控制中心刷屏的那种）30 秒最多 1 条；
+• 路由事件日志 5 秒最多 1 条；
+• 音量设置日志「盯得紧」：每次 setVolumeTo 都记（类别/请求值/实际值/是否被封顶/调用栈），凡系统或微信试图把音量设到 100% 被我们压回 70% 都会逐条留下证据。
+平时请关闭，排查时再开。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
