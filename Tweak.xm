@@ -383,6 +383,18 @@ static void routeLogImpl(NSString *msg) { apvWrite(@"[ROUTE]", msg, 5.0); }
 // 控制中心模块日志：同类 30s 一条（下拉控制中心会连刷 6 条一样的）
 static void ccLog(NSString *msg)    { apvWrite(@"[CC]", msg, 30.0); }
 
+// 不受 gVolDiag 门控的启动/装载日志：写独立文件，关诊断也能确认 hook 是否真生效。
+// 用于排查铃声音量双滑块——诊断关时 apvWrite 一行都不写，无从定位。
+static NSString * const kAPVBootLogPath = @"/var/jb/tmp/airpods_boot.log";
+static void apvBootLog(NSString *msg) {
+    @try {
+        FILE *f = fopen([kAPVBootLogPath UTF8String], "a");
+        if (!f) return;
+        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    } @catch (id e) {}
+}
+
 // 调用栈前 N 帧（只在开诊断时才调用，别放进热路径）
 static NSString *volStack(NSUInteger n) {
     NSArray *syms = [NSThread callStackSymbols];
@@ -647,16 +659,28 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
         if (![view isKindOfClass:[UIView class]]) return;
         UIView *moduleView = (UIView *)view;
 
+        // isExpanded 是 MRUVolumeViewController（控制器）的属性，
+        // 不是 view 的属性（UIView 无此方法）——之前错发给 view 导致恒 NO、滑块永不显示。
+        // 实锤见 Ring 反编译 ring_decompiled.txt:723 / :4118（isExpanded 发在 self 上）。
         SEL expandedSel = NSSelectorFromString(@"isExpanded");
-        BOOL expanded = NO;
-        if ([moduleView respondsToSelector:expandedSel]) {
-            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(moduleView, expandedSel);
+        BOOL expanded = YES;  // 控制器不响应 isExpanded 时按"展开"处理，避免又恒 NO
+        if ([self respondsToSelector:expandedSel]) {
+            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(self, expandedSel);
         }
 
         SEL sliderSel = NSSelectorFromString(@"primarySlider");
         id slider = ((id (*)(id, SEL))objc_msgSend)(self, sliderSel);
         if (![slider isKindOfClass:[UIView class]]) return;
         UIView *primarySlider = (UIView *)slider;
+
+        // 一次性启动日志（不受诊断门控）：确认 hook 真在跑 + expanded 取值 + primarySlider 类
+        static BOOL didRingerBootLog = NO;
+        if (!didRingerBootLog) {
+            didRingerBootLog = YES;
+            apvBootLog([NSString stringWithFormat:
+                @"replMRUVolumeLayout 首次触发: expanded=%d primarySliderCls=%@",
+                expanded, [slider class]]);
+        }
 
         APVRingerSliderView *ringer = objc_getAssociatedObject(self, kRingerSliderKey);
         UIImageView *bell = objc_getAssociatedObject(self, kRingerBellKey);
@@ -735,23 +759,24 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
 }
 
 static void installRingerSlider(void) {
+    // 不受诊断门控：装没装上第一时间可见
     if (!gShowRingerSlider) {
-        ccLog(@"设置已关闭 showRingerSlider，不装铃声音量 hook");
+        apvBootLog(@"showRingerSlider 关闭，跳过铃声音量 hook");
         return;
     }
     dlopen("/System/Library/PrivateFrameworks/MediaRemoteUI.framework/MediaRemoteUI", RTLD_NOW);
     Class c = NSClassFromString(@"MRUVolumeViewController");
     if (!c) {
-        ccLog(@"MRUVolumeViewController 未找到，跳过铃声音量");
+        apvBootLog(@"MRUVolumeViewController 未找到，跳过铃声音量（dlopen MediaRemoteUI 可能失败 / 类未加载）");
         return;
     }
     SEL s = NSSelectorFromString(@"viewDidLayoutSubviews");
     if (![c instancesRespondToSelector:s]) {
-        ccLog(@"MRUVolumeViewController 不响应 viewDidLayoutSubviews，跳过铃声音量");
+        apvBootLog(@"MRUVolumeViewController 不响应 viewDidLayoutSubviews，跳过铃声音量");
         return;
     }
     MSHookMessageEx(c, s, (IMP)replMRUVolumeLayout, (IMP *)&origMRUVolumeLayout);
-    ccLog(@"hook 装载: MRUVolumeViewController -viewDidLayoutSubviews (铃声音量双滑块)");
+    apvBootLog(@"hook 装载成功: MRUVolumeViewController -viewDidLayoutSubviews (铃声音量双滑块)");
 }
 
 // ============================================================
