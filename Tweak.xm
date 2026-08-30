@@ -42,6 +42,7 @@ static BOOL gAutoRoute = YES, gStealBack = YES, gStealHFP = YES;
 static BOOL gLimitAlert = YES, gHideReplayKit = YES;
 static BOOL gShrinkNowPlaying = YES, gHidePrevNext = YES, gHideSubtitle = YES;
 static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
+static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
 static CGFloat gPlayBtnScale = 0.75;
 
 static void apv_refresh(void) {
@@ -55,6 +56,8 @@ static void apv_refresh(void) {
     gHideSubtitle = apv_bool(@"hideNowPlayingSubtitle", YES);
     gBlockPopup = apv_bool(@"blockAirPodsPopup", YES);
     gBlockShortcuts = apv_bool(@"blockShortcutsNotifications", YES);
+    gMiniVolumeHUD = apv_bool(@"miniVolumeHUD", YES);
+    gDisableHUDTouch = apv_bool(@"disableVolumeHUDTouch", YES);
     gPlayBtnScale = apv_float(@"nowPlayingButtonScale", 0.75);
 }
 
@@ -200,6 +203,8 @@ static float capForCategory(id cat) {
 
 %hook SBElasticVolumeViewController
 - (void)_updateSliderViewMetricsForState:(long long)state bounds:(CGRect)bounds integralized:(BOOL)integralized useSizeSpringData:(BOOL)useSizeSpringData useCenterSpringData:(BOOL)useCenterSpringData {
+    // 开关：设置里"音量条永远小条"；关掉就完全走系统（先大条再转小条）
+    if (!gMiniVolumeHUD) { %orig; return; }
     // 强制 state=2（mini 小条）：永远直接小条，跳过大条过渡
     %orig(2, bounds, integralized, useSizeSpringData, useCenterSpringData);
 }
@@ -256,7 +261,8 @@ static float capForCategory(id cat) {
 
 %hook SBHUDWindow
 - (void)addSubview:(UIView *)view {
-    view.userInteractionEnabled = NO;
+    // 开关：设置里"音量条禁用触摸"
+    if (gDisableHUDTouch) view.userInteractionEnabled = NO;
     %orig;
 }
 %end
@@ -266,7 +272,7 @@ static float capForCategory(id cat) {
 %hook SBElasticVolumeSliderView
 - (id)initWithFrame:(CGRect)frame {
     self = %orig;
-    self.userInteractionEnabled = NO;
+    if (gDisableHUDTouch) self.userInteractionEnabled = NO;
     return self;
 }
 %end
