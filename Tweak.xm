@@ -1312,10 +1312,12 @@ static void apv_setRealMediaVolume(float vol) {
 // 始终记录真实值（不再受 gVolDiag 门控）——这是判断"弹 100% 究竟是媒体音量还是通话音量"的关键证据。
 // 超 cap 则用 AVSystemController 压回 0.7（1.5s 防抖避免与别处重复写；禁止 MR setter，见 apv_setRealMediaVolume）。
 static void apv_pressMediaIfOverCap(NSString *why) {
-    if (!apv_mediaShouldCap()) return;
     float cap = apv_mediaCap();
     apv_queryRealMediaVolume(^(float rv) {
+        // 始终记录真实媒体音量（只读，不依赖开关）——这是验证"微信来视频/挂断是否污染媒体记忆"的证据。
         volLog([NSString stringWithFormat:@"%@ 真值复查 media=%.3f cap=%.2f", why, rv, cap]);
+        // 压制才看开关：开关全关时只记录不写入（老板实测：零干预时系统音量记忆完全正常）
+        if (!apv_mediaShouldCap()) return;
         if (rv > cap + 0.001f) {
             NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
             if (now - sLastRealtimePress >= 1.5) {
