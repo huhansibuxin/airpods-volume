@@ -541,88 +541,7 @@ static void installNowPlayingLayoutTweaks(void) {
 }
 
 // ============================================================
-// 控制中心音量模块长按展开后显示「铃声音量」双滑块
-// 逆向 Ring.dylib（com.yan.ring 1.0.2）实锤：
-//   主功能不是百分比，而是展开 MRUVolumeViewController 后在右侧加一个
-//   MediaControlsVolumeRingerSliderView（自定义类），左侧保留媒体音量滑块，
-//   顶部放铃铛图标。Ring 通过 AVSystemController 的 Ringtone 类别读写铃声音量。
-// 这里用更简单的 APVRingerSliderView（UIView + pan 手势 + fillView）复刻核心功能，
-// 不引入 Ring 的完整自定义类体系，避免过度复杂。
-// ============================================================
-
-@interface APVRingerSliderView : UIView
-@property (nonatomic, assign) float value;
-@property (nonatomic, copy) void (^valueChanged)(float value);
-- (void)setValue:(float)value animated:(BOOL)animated;
-@end
-
-@implementation APVRingerSliderView {
-    UIView *_bgView;
-    UIView *_fillView;
-}
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.userInteractionEnabled = YES;
-        _bgView = [[UIView alloc] initWithFrame:self.bounds];
-        _bgView.backgroundColor = [UIColor colorWithWhite:1.0f alpha:0.15f];
-        _bgView.layer.cornerRadius = frame.size.width * 0.5f;
-        _bgView.layer.masksToBounds = YES;
-        _bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [self addSubview:_bgView];
-
-        _fillView = [[UIView alloc] initWithFrame:CGRectZero];
-        _fillView.backgroundColor = [UIColor whiteColor];
-        _fillView.layer.cornerRadius = frame.size.width * 0.5f;
-        _fillView.layer.masksToBounds = YES;
-        [self addSubview:_fillView];
-
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self addGestureRecognizer:pan];
-
-        [self setValue:0.5f animated:NO];
-    }
-    return self;
-}
-
-- (void)layoutFill {
-    CGFloat h = self.bounds.size.height * _value;
-    _fillView.frame = CGRectMake(0, self.bounds.size.height - h, self.bounds.size.width, h);
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    [self layoutFill];
-}
-
-- (void)setValue:(float)value {
-    [self setValue:value animated:NO];
-}
-
-- (void)setValue:(float)value animated:(BOOL)animated {
-    _value = fmaxf(0.0f, fminf(1.0f, value));
-    if (animated) {
-        [UIView animateWithDuration:0.05 animations:^{ [self layoutFill]; }];
-    } else {
-        [self layoutFill];
-    }
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)pan {
-    CGPoint loc = [pan locationInView:self];
-    CGFloat h = self.bounds.size.height;
-    if (h <= 0) return;
-    float value = 1.0f - (float)(loc.y / h);
-    value = fmaxf(0.0f, fminf(1.0f, value));
-    self.value = value;
-    if (self.valueChanged) self.valueChanged(value);
-}
-
-@end
-
-// ============================================================
-// 铃声音量滑块（Ring 复刻版）
+// 铃声音量滑块（Ring 复刻版，v1.9.69 清理后唯一定位路径）
 // Ring 反编译实锤（ring_decompiled.txt:1320-1834）：
 //   MediaControlsVolumeRingerSliderView 是 Ring 自写的 UIView 子类，不是系统类！
 //   它的"原生观感"来自系统同款毛玻璃材质 MTMaterialView（MaterialKit.framework）：
@@ -632,6 +551,8 @@ static void installNowPlayingLayoutTweaks(void) {
 //     容器     = cornerCurve=continuous + cornerRadius=42 + clipsToBounds
 //   setCurrentValue: 内部直接写 AVSystemController Ringtone。
 //   左边 primarySlider 内部同为 MTMaterialView 体系 → 两边观感天然一致。
+// （2026-08-31 实机验证：MTMaterialView 在 iOS16 SpringBoard 必可用，
+//   旧的 APVRingerSliderView 自绘降级类已删——永远走不到的代码就是冗余）
 // ============================================================
 
 static void apv_setRingerVolume(float vol);  // 定义在下方，先声明避免 C 编译报错
@@ -685,40 +606,27 @@ static UIView *apv_createRingerSlider(CGRect frame, float value, double cornerRa
     UIView *container = [[UIView alloc] initWithFrame:frame];
     container.backgroundColor = [UIColor clearColor];
     container.layer.cornerRadius = cornerRadius > 0 ? cornerRadius : 42.0;
-    if (@available(iOS 13.0, *)) {
-        container.layer.cornerCurve = kCACornerCurveContinuous;
-    }
+    container.layer.cornerCurve = kCACornerCurveContinuous;
     container.clipsToBounds = YES;
     container.tag = 0xA9B0;
     container.userInteractionEnabled = YES;
 
     // MTMaterialView（MaterialKit.framework）= 控制中心音量条同款毛玻璃材质
+    // iOS16 SpringBoard 实锤必可用；取不到时用普通 UIView 兜底（功能不受影响）
     dlopen("/System/Library/PrivateFrameworks/MaterialKit.framework/MaterialKit", RTLD_NOW);
     Class mtk = NSClassFromString(@"MTMaterialView");
-    UIView *background = nil, *fill = nil;
     SEL recipeSel = NSSelectorFromString(@"materialViewWithRecipe:options:");
+    UIView *background = nil, *fill = nil;
     if (mtk && [mtk respondsToSelector:recipeSel]) {
         @try {
             background = ((id (*)(id, SEL, long, long))objc_msgSend)(mtk, recipeSel, 4, 0);
             fill       = ((id (*)(id, SEL, long, long))objc_msgSend)(mtk, recipeSel, 0, 0);
         } @catch (id e) {}
     }
-    if (!background) {
-        background = [[UIView alloc] init];
-        background.backgroundColor = [UIColor colorWithWhite:0.20 alpha:0.55];
-        apvBootLog(@"MTMaterialView 不可用，背景降级纯色");
-    } else {
-        apvBootLog(@"背景 = MTMaterialView recipe=4 options=0");
-    }
-    if (!fill) {
-        fill = [[UIView alloc] init];
-        fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.92];
-        apvBootLog(@"fill 降级纯色白");
-    } else {
-        // Ring createFillLayer 分支1：recipe 0 材质 + 白色底色
-        fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.90];
-        apvBootLog(@"填充 = MTMaterialView recipe=0 + 白色");
-    }
+    if (!background) background = [[UIView alloc] init];
+    if (!fill) fill = [[UIView alloc] init];
+    // Ring createFillLayer 分支1：fill 材质 + 白色底色
+    fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.90];
     UIViewAutoresizing mask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     background.autoresizingMask = mask;
     fill.autoresizingMask = mask;
@@ -735,12 +643,8 @@ static UIView *apv_createRingerSlider(CGRect frame, float value, double cornerRa
     return container;
 }
 
-// ============================================================
-// （v1.9.68 已删除旧的 MRUContinuousSliderView 方案）
-// v1.9.66 boot log 实锤该类没有 stylingProvider/visualStylingProvider/delegate/
-// updateVisualStyling 任何样式接口，无法让它渲染填充——方向本身就是错的。
-// Ring 根本不用系统滑块类，见上方 Ring 复刻版实现。
-// ============================================================
+// （历史备注：v1.9.62-65 曾走 MRUContinuousSliderView 系统类路线，boot log 实锤
+//   该类无任何样式接口无法渲染填充，v1.9.68 起改用上方 Ring 复刻版，旧路已删。）
 
 static float apv_ringerVolume(void) {
     @try {
@@ -849,12 +753,6 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
                 cornerRadius = ((double (*)(id, SEL))objc_msgSend)(primarySlider, crSel);
             }
             ringer = apv_createRingerSlider(rFrame, apv_ringerVolume(), cornerRadius);
-            if (!ringer) {
-                // 兜底：自绘版（理论上不会走到，UIView 容器必创建成功）
-                APVRingerSliderView *custom = [[APVRingerSliderView alloc] initWithFrame:rFrame];
-                custom.valueChanged = ^(float value) { apv_setRingerVolume(value); };
-                ringer = custom;
-            }
             objc_setAssociatedObject(self, kRingerSliderKey, ringer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [moduleView addSubview:ringer];
 
