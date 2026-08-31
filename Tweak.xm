@@ -570,8 +570,8 @@ static const void *kRingerHandlerKey = &kRingerHandlerKey;
     if (h <= 0) return;
     float value = 1.0f - (float)(loc.y / h);
     value = fmaxf(0.0f, fminf(1.0f, value));
-    // 戴 AirPods 时铃声音量封顶 40%（实时查当前输出，比全局 sAirPodsConnected 更准）
-    float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
+    // 戴 AirPods 时铃声音量封顶 40%（受「戴耳机限制铃声音量」开关控制，v1.9.78 修复：之前硬编码没读开关）
+    float cap = (gLimitRinger && currentOutputIsAirPods()) ? 0.4f : 1.0f;
     if (value > cap) value = cap;
     apv_setRingerVolume(value);
     apv_ringerApplyValue(slider, value); // 拖动实时反映填充高度
@@ -585,8 +585,8 @@ static void apv_ringerApplyValue(UIView *container, float value) {
         if (!fill) return;
         CGRect b = container.bounds;
         if (b.size.height <= 0) return;
-        float cap = currentOutputIsAirPods() ? 0.4f : 1.0f;
-        if (value > cap) value = cap; // 戴耳机显示也封顶
+        float cap = (gLimitRinger && currentOutputIsAirPods()) ? 0.4f : 1.0f;
+        if (value > cap) value = cap; // 戴耳机显示也封顶（受开关控制）
         CGFloat fillH = b.size.height * (CGFloat)value;
         CGRect nf = CGRectMake(0, b.size.height - fillH, b.size.width, fillH);
         [UIView animateWithDuration:0.25 animations:^{ fill.frame = nf; }];
