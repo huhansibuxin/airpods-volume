@@ -597,11 +597,12 @@ static const void *kRingerHandlerKey = &kRingerHandlerKey;
     CGFloat h = slider.bounds.size.height;
     if (h <= 0) return;
     CGPoint loc = [pan locationInView:slider];
-    // v1.9.85：相对拖动 + 0.6 灵敏度阻尼。原实现是**绝对定位**（value=1-y/h），
-    // 滑块矮时手指动一点点音量就涨很多，老板反馈太灵敏。现改为：
+    // v1.9.85 起：相对拖动 + 阻尼。原实现是**绝对定位**（value=1-y/h），
+    // 滑块矮时手指动一点点音量就涨很多。现改为：
     //   起点 = 按下瞬间的 Ringtone 真值（apv_realVolume 绕开 cap 改写）；
-    //   之后 value = 起点 + (按下y - 当前y)/h * 0.6，滑动更钝更跟手。
-    // 0.6 = 阻尼系数（<1 降低灵敏度，改这里即可微调，1.0 = 1:1 跟手）。
+    //   之后 value = 起点 + (按下y - 当前y)/h * 阻尼，更跟手。
+    // 阻尼系数（<1 降低灵敏度，改这里即可微调，1.0 = 1:1 跟手）：
+    //   v1.9.85 = 0.6（老板嫌太慢）→ v1.9.86 = 0.8
     static float sPanStartVol = -1.0f;
     static CGFloat sPanStartY = 0;
     if (pan.state == UIGestureRecognizerStateBegan) {
@@ -613,7 +614,7 @@ static const void *kRingerHandlerKey = &kRingerHandlerKey;
     } else if (pan.state == UIGestureRecognizerStateChanged) {
         if (sPanStartVol < 0) { sPanStartVol = 0.5f; sPanStartY = loc.y; }
         float dy = (float)(sPanStartY - loc.y); // 上滑为正
-        float value = sPanStartVol + dy / h * 0.6f;
+        float value = sPanStartVol + dy / h * 0.8f;
         value = fmaxf(0.0f, fminf(1.0f, value));
         // 戴 AirPods 时铃声音量封顶（档位 40%/30%，受开关控制，统一走 apv_notifyCap）
         float cap = currentOutputIsAirPods() ? apv_notifyCap() : 1.0f;
@@ -663,9 +664,9 @@ static UIView *apv_createRingerSlider(CGRect frame, float value, double cornerRa
     }
     if (!background) background = [[UIView alloc] init];
     if (!fill) fill = [[UIView alloc] init];
-    // Ring createFillLayer 分支1：fill 材质 + 白色底色（v1.9.85：0.90 偏暗、
-    // 1.0 纯白又偏亮，老板实测原生介于两者之间 → white:0.95 不透明）
-    fill.backgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
+    // Ring createFillLayer 分支1：fill 材质 + 白色底色（v1.9.86：原生滑块颜色
+    // 会随材质/亮度自己变，追不齐；老板定稿 0.9 白色 → white:0.9 不透明）
+    fill.backgroundColor = [UIColor colorWithWhite:0.9 alpha:1.0];
     UIViewAutoresizing mask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     background.autoresizingMask = mask;
     fill.autoresizingMask = mask;
