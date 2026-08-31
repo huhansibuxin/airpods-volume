@@ -1536,6 +1536,13 @@ static void handleRouteEvent(NSString *source) {
     [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         apv_refresh();
+        // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
+        // 修复：以前压制只在路由事件/%ctor 里跑，设置里切 40%/30% 档要 respring 才生效。
+        // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
+        if (sAirPodsConnected) {
+            apv_clampNotifyVolume(
+                [NSClassFromString(@"AVSystemController") sharedAVSystemController]);
+        }
         ccLog(@"设置开关已刷新");
     }];
 
