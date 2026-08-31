@@ -646,8 +646,9 @@ static UIView *apv_createRingerSlider(CGRect frame, float value, double cornerRa
     }
     if (!background) background = [[UIView alloc] init];
     if (!fill) fill = [[UIView alloc] init];
-    // Ring createFillLayer 分支1：fill 材质 + 白色底色
-    fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.90];
+    // Ring createFillLayer 分支1：fill 材质 + 纯白底色（v1.9.84：原 0.90 alpha 与
+    // 系统原版白色有可见色差，老板要求一致→改成完全不透明 whiteColor）
+    fill.backgroundColor = [UIColor whiteColor];
     UIViewAutoresizing mask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     background.autoresizingMask = mask;
     fill.autoresizingMask = mask;
