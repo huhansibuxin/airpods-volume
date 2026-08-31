@@ -410,14 +410,8 @@ static void apvObsLog(NSString *msg) {
     } @catch (id e) {}
 }
 // 延迟读一次媒体音量真值并记 [OBS] 日志（事件驱动：仅来电/挂断边界调用）
-static void apv_obsMedia(double delay, NSString *tag) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        apv_queryRealMediaVolume(^(float v) {
-            apvObsLog([NSString stringWithFormat:@"%@ media=%.3f", tag, v]);
-        });
-    });
-}
+// （v1.9.80：旧的 apv_obsMedia 已由下方 apv_snapAfter/apvSnapshot 取代并删除——
+//   注意本项目开了 -Werror，留着没人调用的 static 函数会直接编译失败。）
 
 // ============================================================
 // v1.9.80 全类别音量快照：一次读 Ringtone/Alert/MediaPlayback/Audio-Video/Call
