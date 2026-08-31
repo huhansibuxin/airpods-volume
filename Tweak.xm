@@ -375,6 +375,45 @@ static void routeLogImpl(NSString *msg) { apvWrite(@"[ROUTE]", msg, 5.0); }
 // 控制中心模块日志：同类 30s 一条（下拉控制中心会连刷 6 条一样的）
 static void ccLog(NSString *msg)    { apvWrite(@"[CC]", msg, 30.0); }
 
+// ============================================================
+// v1.9.79 只读观察日志：来电/挂断时读媒体音量真值（纯观察，绝不写音量）
+// 背景：老板实测"respring 后第一次微信来电媒体音量必跳 100%，手动滑档后
+// 第二次来电不变 100%"——需实锤这个 100% 到底是媒体音量(MediaPlaybackVolume)
+// 还是通话音量（控制中心通话中显示通话音量，微信拉满 100 是正常行为）。
+// 用 MRMediaRemoteGetMediaPlaybackVolume 读真值（已实证安全可用，media=0.633 那种）。
+// 始终记录（不受 gVolDiag 门控），每次来电/挂断仅 3-4 条，量小不刷屏。
+// ============================================================
+static void (*sMRGetMediaPlaybackVolume)(dispatch_queue_t, void (^)(float)) = NULL;
+static void apv_queryRealMediaVolume(void (^done)(float)) {
+    @try {
+        if (!sMRGetMediaPlaybackVolume) {
+            dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW);
+            sMRGetMediaPlaybackVolume = (void (*)(dispatch_queue_t, void (^)(float)))
+                dlsym(RTLD_DEFAULT, "MRMediaRemoteGetMediaPlaybackVolume");
+        }
+        if (!sMRGetMediaPlaybackVolume) return;
+        sMRGetMediaPlaybackVolume(dispatch_get_main_queue(), ^(float v) { done(v); });
+    } @catch (id e) {}
+}
+static void apvObsLog(NSString *msg) {
+    @try {
+        FILE *f = fopen([kAPVLogPath UTF8String], "a");
+        if (!f) return;
+        fprintf(f, "[%s] [OBS] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
+        fclose(f);
+    } @catch (id e) {}
+}
+// 延迟读一次媒体音量真值并记 [OBS] 日志（事件驱动：仅来电/挂断边界调用）
+static void apv_obsMedia(double delay, NSString *tag) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        apv_queryRealMediaVolume(^(float v) {
+            apvObsLog([NSString stringWithFormat:@"%@ media=%.3f", tag, v]);
+        });
+    });
+}
+static BOOL sPrevHFP = NO;
+
 // 不受 gVolDiag 门控的启动/装载日志：写独立文件，关诊断也能确认 hook 是否真生效。
 // 用于排查铃声音量双滑块——诊断关时 apvWrite 一行都不写，无从定位。
 static NSString * const kAPVBootLogPath = @"/var/jb/tmp/airpods_boot.log";
@@ -1338,6 +1377,20 @@ static void handleRouteEvent(NSString *source) {
             sLastEvtState = state;
             routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
                       source, airInRoute, airInBT, sAirPodsConnected]);
+        }
+
+        // v1.9.79 只读观察：HFP 0→1（来电响铃/接听）和 1→0（挂断）时读媒体音量真值记 [OBS] 日志。
+        // 纯观察不干预——验证"第一次来电跳 100%"到底是媒体音量还是通话音量。
+        BOOL hfpNow = hfpCallActive();
+        if (hfpNow != sPrevHFP) {
+            sPrevHFP = hfpNow;
+            if (hfpNow) {
+                apv_obsMedia(0.5, @"来电+0.5s");
+                apv_obsMedia(1.5, @"来电+1.5s");
+                apv_obsMedia(3.0, @"来电+3.0s");
+            } else {
+                apv_obsMedia(0.8, @"挂断+0.8s");
+            }
         }
 
         if (sAirPodsConnected) {
