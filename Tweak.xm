@@ -213,6 +213,17 @@ static float capForCategory(id cat) {
 // 永远只能读到被我们压过的 0.400 假值，排查"到底哪个类别跳 100%"会得出错误结论。
 static BOOL gBypassGetCap = NO;
 
+// 读某个类别的**真值**（绕开下面 getVolume hook 的 cap 改写）。
+// 凡是需要"先看真实音量、再决定要不要压"的地方，必须走这里。直接调 getVolume
+// 拿到的恒是被 cap 过的假值（戴耳机时 Ringtone/Alert 恒为 0.4），会让判断条件
+// 永远不成立——v1.9.80 的 [SNAP] 日志实锤了这个 bug（见下方 apv_clampNotifyVolume）。
+static BOOL apv_realVolume(id avc, id cat, float *out) {
+    gBypassGetCap = YES;
+    BOOL r = [avc getVolume:out forCategory:cat];
+    gBypassGetCap = NO;
+    return r;
+}
+
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
     // v1.9.77：摘下时通知音强制 100%（常驻硬需求，静音跳过）；戴上时通知音
@@ -236,7 +247,8 @@ static BOOL gBypassGetCap = NO;
     float cap = capForCategory(cat);
     if (cap >= 1.0f) return %orig;
     float cur;
-    if ([self getVolume:&cur forCategory:cat] && (cur + delta) > cap) {
+    // v1.9.81：读真值判断。用被 cap 过的假值会让 delta 判断失真。
+    if (apv_realVolume(self, cat, &cur) && (cur + delta) > cap) {
         if (cur >= cap) return YES;
         return [self setVolumeTo:cap forCategory:cat];
     }
@@ -1425,6 +1437,37 @@ static void enforceAirPodsRoute(void) {
 
 static int sLastEvtState = -1; // 日志限流：AirPods 在场状态 0/1，变化才写日志
 
+// ============================================================
+// v1.9.81：把通知音(Ringtone/Alert)主动压到 cap（戴耳机且开关开时 = 0.4）。
+//
+// ⚠️ 修的是 v1.9.80 [SNAP] 日志实锤的 bug：
+//   老代码 `if ([avc getVolume:&cur ...] && cur > 0.4f)` 读的是**被自己 hook cap 过的
+//   假值**（戴耳机时恒为 0.4）→ 条件永远为假 → **这段压制逻辑从来没执行过一次**。
+//   后果：respring 后 Ringtone 真值一直晾在 1.000，直到用户手动滑一次音量条走
+//   setVolumeTo 才被 cap 成 0.4 —— 这正是老板观察到的"respring 后第一次来电
+//   音量条显示 100%，手动滑一下变 40%，之后来电都不再跳"。
+//   （讽刺的是老代码注释早已写明"getVolume 被 hook 也会 cap 到 0.4"，但没照它实现。）
+//
+// 实测数据（v1.9.80）：戴上+1.0s 与开机+10s 时 Ringtone=1.000 Alert=1.000 纹丝不动，
+// 挂断+0.8s（手动滑过）才变 0.400，第二次来电起稳定 0.400。
+//
+// 修法：用 apv_realVolume 绕开 hook 读真值再判断；cap 统一取 capForCategory，
+// 开关关闭/摘下时 cap=1.0 自动跳过。
+// ============================================================
+static void apv_clampNotifyVolume(id avc) {
+    if (!avc) return;
+    @try {
+        float capR = capForCategory(@"Ringtone");
+        float capA = capForCategory(@"Alert");
+        if (capR >= 1.0f && capA >= 1.0f) return; // 摘下 / 开关关闭 → 不压
+        float curR = 0.0f, curA = 0.0f;
+        BOOL hasR = apv_realVolume(avc, @"Ringtone", &curR);
+        BOOL hasA = apv_realVolume(avc, @"Alert", &curA);
+        if (hasR && capR < 1.0f && curR > capR) [avc setVolumeTo:capR forCategory:@"Ringtone"];
+        if (hasA && capA < 1.0f && curA > capA) [avc setVolumeTo:capA forCategory:@"Alert"];
+    } @catch (id e) {}
+}
+
 static void handleRouteEvent(NSString *source) {
     @try {
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
@@ -1457,15 +1500,10 @@ static void handleRouteEvent(NSString *source) {
         }
 
         if (sAirPodsConnected) {
-            // v1.9.77：戴上时铃声/通知限 40%（受「戴耳机限制铃声音量」开关控制，默认开）。
-            // getVolume 被 hook 也会 cap 到 0.4，这里用 hook 前真实值判断主动压一次。
-            if (gLimitRinger) {
-                float cur;
-                if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
-                    [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
-                if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
-                    [avc setVolumeTo:0.4f forCategory:@"Alert"];
-            }
+            // v1.9.81：戴上时铃声/通知限 40%（受「戴耳机限制铃声音量」开关控制，默认开）。
+            // 老代码在这里读 getVolume 的**假值**判断，导致这段压制从未生效过
+            // （详见 apv_clampNotifyVolume 注释）。现改为内部读真值。
+            apv_clampNotifyVolume(avc);
             // v1.9.75：媒体音量完全不管——系统对每个输出设备独立记忆音量，
             // 微信来视频/挂断时 MediaPlaybackVolume 自管理正常（v1.9.74 零干预实测 0.700 纹丝不动）。
         } else {
@@ -1507,6 +1545,19 @@ static void handleRouteEvent(NSString *source) {
     if (!sAirPodsConnected && !isRingerMuted()) {
         [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
         [avc setVolumeTo:1.0f forCategory:@"Alert"];
+    }
+    // v1.9.81：respring 后戴耳机 → 主动压一次通知音（延迟 3s 等音频服务就绪）。
+    // 光修好 apv_clampNotifyVolume 的假值 bug 还不够：那段只在 handleRouteEvent 里跑，
+    // 而 respring 后路由事件可能迟迟不来（耳机一直戴着、状态无变化），这段空窗期
+    // 来电就会看到 Ringtone 真值 1.000 的 100% 条。这里主动兜底一次。
+    if (sAirPodsConnected) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try {
+                apv_clampNotifyVolume(
+                    [NSClassFromString(@"AVSystemController") sharedAVSystemController]);
+            } @catch (id e) {}
+        });
     }
 
     [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
