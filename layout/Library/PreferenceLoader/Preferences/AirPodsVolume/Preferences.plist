@@ -71,6 +71,20 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
+			<string>戴耳机限制铃声音量 40%</string>
+			<key>key</key>
+			<string>limitRingerWhenConnected</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
 			<string>诊断日志（排查用）</string>
 			<key>key</key>
 			<string>volumeDiagLog</string>
@@ -85,7 +99,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>铃声管理常驻（无开关）：戴上 AirPods 时铃声/通知音量限制 40%，摘下后恢复 100%（静音模式跳过）。戴 AirPods 时音量键禁用，媒体音量完全不管（系统自管理）。
+			<string>「戴耳机限制铃声音量 40%」开关控制戴上时的限制；摘下后强制恢复铃声 100%（常驻硬需求，静音模式跳过）。戴 AirPods 时音量键禁用，媒体音量完全不管（系统自管理）。
 
 诊断日志（总开关）：开后「全部日志」统一写入 /var/jb/tmp/airpods_vol.log，包括——
 • 控制中心模块日志（下拉控制中心刷屏的那种）30 秒最多 1 条；

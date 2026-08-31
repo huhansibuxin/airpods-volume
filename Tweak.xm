@@ -32,6 +32,7 @@ static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
 static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVolumeTo 都记，排查用）
 static BOOL gShowRingerSlider = YES; // 控制中心音量模块展开后显示铃声音量滑块（默认开）
+static BOOL gLimitRinger = YES;      // 戴 AirPods 时限制铃声音量 40%（v1.9.77 开关，默认开；摘下强制 100% 常驻不受此开关影响）
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -46,6 +47,7 @@ static void apv_refresh(void) {
     gDisableHUDTouch = apv_bool(@"disableVolumeHUDTouch", YES);
     gVolDiag = apv_bool(@"volumeDiagLog", NO);
     gShowRingerSlider = apv_bool(@"showRingerSlider", YES);
+    gLimitRinger = apv_bool(@"limitRingerWhenConnected", YES);
 }
 
 @interface AVSystemController : NSObject
@@ -156,8 +158,8 @@ static BOOL isRingerMuted(void) {
 
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
-    if (isNotificationCategory(cat)) return 0.4f;
-    return 1.0f; // v1.9.75: 媒体音量完全不管（系统自管理已验证正常），只压铃声/通知 40%
+    if (isNotificationCategory(cat)) return gLimitRinger ? 0.4f : 1.0f;
+    return 1.0f; // v1.9.75: 媒体音量完全不管（系统自管理已验证正常）
 }
 
 // ============================================================
@@ -207,8 +209,8 @@ static float capForCategory(id cat) {
 
 %hook AVSystemController
 - (BOOL)setVolumeTo:(float)vol forCategory:(id)cat {
-    // v1.9.76：铃声管理常驻（无开关）——摘下时通知音强制 100%（静音跳过），
-    // 戴上时通知音按 cap 0.4 封顶；媒体音量完全不管（capForCategory 返回 1.0）。
+    // v1.9.77：摘下时通知音强制 100%（常驻硬需求，静音跳过）；戴上时通知音
+    // 按 cap（受「戴耳机限制铃声音量」开关控制，开=0.4 关=1.0）；媒体音量完全不管。
     float vol_orig = vol; // 原始请求值（诊断用：看系统/App 到底想要多少）
     float cap = capForCategory(cat);
     if (!sAirPodsConnected && isNotificationCategory(cat) && !isRingerMuted())
@@ -1339,17 +1341,19 @@ static void handleRouteEvent(NSString *source) {
         }
 
         if (sAirPodsConnected) {
-            // v1.9.76：戴上时铃声/通知限 40%（常驻，无开关）。
+            // v1.9.77：戴上时铃声/通知限 40%（受「戴耳机限制铃声音量」开关控制，默认开）。
             // getVolume 被 hook 也会 cap 到 0.4，这里用 hook 前真实值判断主动压一次。
-            float cur;
-            if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
-                [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
-            if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
-                [avc setVolumeTo:0.4f forCategory:@"Alert"];
+            if (gLimitRinger) {
+                float cur;
+                if ([avc getVolume:&cur forCategory:@"Ringtone"] && cur > 0.4f)
+                    [avc setVolumeTo:0.4f forCategory:@"Ringtone"];
+                if ([avc getVolume:&cur forCategory:@"Alert"] && cur > 0.4f)
+                    [avc setVolumeTo:0.4f forCategory:@"Alert"];
+            }
             // v1.9.75：媒体音量完全不管——系统对每个输出设备独立记忆音量，
             // 微信来视频/挂断时 MediaPlaybackVolume 自管理正常（v1.9.74 零干预实测 0.700 纹丝不动）。
         } else {
-            // 摘下 AirPods（不管车载是否还在）：恢复通知音 100%（v1.9.76 常驻，无开关），静音模式下不强制
+            // 摘下 AirPods（不管车载是否还在）：强制恢复通知音 100%（常驻硬需求，不受开关影响），静音模式下不强制
             if (!isRingerMuted()) {
                 [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
                 [avc setVolumeTo:1.0f forCategory:@"Alert"];
