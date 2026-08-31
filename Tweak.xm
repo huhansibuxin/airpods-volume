@@ -32,7 +32,17 @@ static BOOL gBlockPopup = YES, gBlockShortcuts = YES;
 static BOOL gMiniVolumeHUD = YES, gDisableHUDTouch = YES;
 static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVolumeTo 都记，排查用）
 static BOOL gShowRingerSlider = YES; // 控制中心音量模块展开后显示铃声音量滑块（默认开）
-static BOOL gLimitRinger = YES;      // 戴 AirPods 时限制铃声音量 40%（v1.9.77 开关，默认开；摘下强制 100% 常驻不受此开关影响）
+static BOOL gLimitRinger = YES;      // 戴 AirPods 时限制铃声音量（v1.9.77 开关，默认开；摘下强制 100% 常驻不受此开关影响）
+static BOOL gRingerCap30 = NO;       // v1.9.82：铃封顶档位——关=40%，开=30%（仅在 gLimitRinger 打开时有效）
+
+// 戴耳机时通知音(Ringtone/Alert)的封顶值，全局唯一出口，禁止再散落硬编码 0.4/0.3：
+//   gLimitRinger 关           → 1.0（不限制）
+//   gLimitRinger 开 + 档位 40% → 0.4
+//   gLimitRinger 开 + 档位 30% → 0.3
+static float apv_notifyCap(void) {
+    if (!gLimitRinger) return 1.0f;
+    return gRingerCap30 ? 0.3f : 0.4f;
+}
 
 static void apv_refresh(void) {
     gAutoRoute = apv_bool(@"autoRouteToAirPods", YES);
@@ -48,6 +58,7 @@ static void apv_refresh(void) {
     gVolDiag = apv_bool(@"volumeDiagLog", NO);
     gShowRingerSlider = apv_bool(@"showRingerSlider", YES);
     gLimitRinger = apv_bool(@"limitRingerWhenConnected", YES);
+    gRingerCap30 = apv_bool(@"ringerCap30", NO);
 }
 
 @interface AVSystemController : NSObject
@@ -158,7 +169,7 @@ static BOOL isRingerMuted(void) {
 
 static float capForCategory(id cat) {
     if (!sAirPodsConnected) return 1.0f;
-    if (isNotificationCategory(cat)) return gLimitRinger ? 0.4f : 1.0f;
+    if (isNotificationCategory(cat)) return apv_notifyCap();
     return 1.0f; // v1.9.75: 媒体音量完全不管（系统自管理已验证正常）
 }
 
@@ -394,109 +405,16 @@ static void routeLogImpl(NSString *msg) { apvWrite(@"[ROUTE]", msg, 5.0); }
 static void ccLog(NSString *msg)    { apvWrite(@"[CC]", msg, 30.0); }
 
 // ============================================================
-// v1.9.79 只读观察日志：来电/挂断时读媒体音量真值（纯观察，绝不写音量）
-// 背景：老板实测"respring 后第一次微信来电媒体音量必跳 100%，手动滑档后
-// 第二次来电不变 100%"——需实锤这个 100% 到底是媒体音量(MediaPlaybackVolume)
-// 还是通话音量（控制中心通话中显示通话音量，微信拉满 100 是正常行为）。
-// 用 MRMediaRemoteGetMediaPlaybackVolume 读真值（已实证安全可用，media=0.633 那种）。
-// 始终记录（不受 gVolDiag 门控），每次来电/挂断仅 3-4 条，量小不刷屏。
+// v1.9.82：v1.9.79~1.9.81 的 [OBS]/[SNAP] 观察探针已全部移除。
+// 它们的使命（实锤"respring 后首次来电 100% 是 Ringtone 真值没被压"）已完成，
+// 修复落在 apv_clampNotifyVolume（读真值再压）与 gBypassGetCap 机制。
+// 诊断日志统一受「诊断日志」开关（gVolDiag）门控：关闭后一行都不写。
 // ============================================================
-static void (*sMRGetMediaPlaybackVolume)(dispatch_queue_t, void (^)(float)) = NULL;
-static void apv_queryRealMediaVolume(void (^done)(float)) {
-    @try {
-        if (!sMRGetMediaPlaybackVolume) {
-            dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW);
-            sMRGetMediaPlaybackVolume = (void (*)(dispatch_queue_t, void (^)(float)))
-                dlsym(RTLD_DEFAULT, "MRMediaRemoteGetMediaPlaybackVolume");
-        }
-        if (!sMRGetMediaPlaybackVolume) return;
-        sMRGetMediaPlaybackVolume(dispatch_get_main_queue(), ^(float v) { done(v); });
-    } @catch (id e) {}
-}
-static void apvObsLog(NSString *msg) {
-    @try {
-        FILE *f = fopen([kAPVLogPath UTF8String], "a");
-        if (!f) return;
-        fprintf(f, "[%s] [OBS] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    } @catch (id e) {}
-}
-// 延迟读一次媒体音量真值并记 [OBS] 日志（事件驱动：仅来电/挂断边界调用）
-// （v1.9.80：旧的 apv_obsMedia 已由下方 apv_snapAfter/apvSnapshot 取代并删除——
-//   注意本项目开了 -Werror，留着没人调用的 static 函数会直接编译失败。）
 
-// ============================================================
-// v1.9.80 全类别音量快照：一次读 Ringtone/Alert/MediaPlayback/Audio-Video/Call
-// 五个类别的真值 + MRMediaRemote 媒体真值，输出单行 [SNAP]，按 cause 对齐比较。
-//
-// 为什么不再只看 media（v1.9.79 的结论不够用）：
-//   老板实测两条决定性事实——
-//     1) respring 后第一次来视频"变 100%"，手动调档后后续不再变；
-//     2) **手动杀掉微信进程不会复现**。
-//   第 2 条直接推翻"微信进程重启后首次设 1.0"的假说（杀进程也是进程重启），
-//   说明变量在**只有 respring 才重置的系统层**（SpringBoard/音量服务缓存），
-//   不在微信进程。所以必须看清 respring 后哪个类别默认就是 1.000、来电时哪个在动。
-//
-// 实现要点：读之前置 gBypassGetCap=YES，绕开 getVolume hook 的 cap 改写，
-// 否则戴耳机时 Ringtone/Alert 永远只读到被我们压过的 0.400 假值，会得出错误结论。
-// 量极小（来电/挂断/戴上/摘下/开机各 1 行），始终记录，不受 gVolDiag 门控。
-// ============================================================
-static NSString * const kSnapCats[] = {@"Ringtone", @"Alert", @"MediaPlayback",
-                                       @"Audio/Video", @"Call"};
-static void apvSnapshot(NSString *cause) {
-    @try {
-        Class cls = NSClassFromString(@"AVSystemController");
-        id avc = cls ? [cls sharedAVSystemController] : nil;
-        SEL gsel = NSSelectorFromString(@"getVolume:forCategory:");
-        if (!avc || ![avc respondsToSelector:gsel]) {
-            apvObsLog([NSString stringWithFormat:@"[SNAP] %@ AVC不可用", cause]);
-            return;
-        }
-        NSMutableString *line = [NSMutableString stringWithFormat:@"[SNAP] %@ ", cause];
-        gBypassGetCap = YES; // 关键：绕开 cap 改写，拿真值
-        for (int i = 0; i < 5; i++) {
-            float v = -1.0f;
-            BOOL ok = ((BOOL (*)(id, SEL, float *, id))objc_msgSend)(avc, gsel, &v, kSnapCats[i]);
-            [line appendFormat:@"%@=%@ ", kSnapCats[i],
-                ok ? [NSString stringWithFormat:@"%.3f", v] : @"n/a"];
-        }
-        gBypassGetCap = NO;
-
-        // MRMediaRemote 是异步回调，加 1.5s 兜底，保证无论如何都落一行
-        __block BOOL got = NO;
-        apv_queryRealMediaVolume(^(float mv) {
-            if (got) return;
-            got = YES;
-            apvObsLog([NSString stringWithFormat:@"%@MRMedia=%.3f", line, mv]);
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            if (got) return;
-            got = YES;
-            apvObsLog([NSString stringWithFormat:@"%@MRMedia=timeout", line]);
-        });
-    } @catch (id e) {
-        gBypassGetCap = NO; // 异常也不能把绕过开关留在打开状态
-        apvObsLog([NSString stringWithFormat:@"[SNAP] %@ EXC %@", cause, e]);
-    }
-}
-static void apv_snapAfter(double delay, NSString *cause) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ apvSnapshot(cause); });
-}
-static BOOL sPrevHFP = NO;
-
-// 不受 gVolDiag 门控的启动/装载日志：写独立文件，关诊断也能确认 hook 是否真生效。
-// 用于排查铃声音量双滑块——诊断关时 apvWrite 一行都不写，无从定位。
-static NSString * const kAPVBootLogPath = @"/var/jb/tmp/airpods_boot.log";
-static void apvBootLog(NSString *msg) {
-    @try {
-        FILE *f = fopen([kAPVBootLogPath UTF8String], "a");
-        if (!f) return;
-        fprintf(f, "[%s] %s\n", [[[NSDate date] description] UTF8String], [msg UTF8String]);
-        fclose(f);
-    } @catch (id e) {}
-}
+// v1.9.82：装载日志并入主日志，受「诊断日志」开关门控（关闭一行都不写）。
+// 历史用途是"诊断关也能确认 hook 是否真生效"（独立文件 airpods_boot.log）；
+// 现在诊断开时 [BOOT] 与其余日志同文件可见，无需再单独开文件。
+static void apvBootLog(NSString *msg) { apvWrite(@"[BOOT]", msg, 0.0); }
 
 // 调用栈前 N 帧（只在开诊断时才调用，别放进热路径）
 static NSString *volStack(NSUInteger n) {
@@ -681,8 +599,8 @@ static const void *kRingerHandlerKey = &kRingerHandlerKey;
     if (h <= 0) return;
     float value = 1.0f - (float)(loc.y / h);
     value = fmaxf(0.0f, fminf(1.0f, value));
-    // 戴 AirPods 时铃声音量封顶 40%（受「戴耳机限制铃声音量」开关控制，v1.9.78 修复：之前硬编码没读开关）
-    float cap = (gLimitRinger && currentOutputIsAirPods()) ? 0.4f : 1.0f;
+    // 戴 AirPods 时铃声音量封顶（档位 40%/30%，受开关控制，统一走 apv_notifyCap）
+    float cap = currentOutputIsAirPods() ? apv_notifyCap() : 1.0f;
     if (value > cap) value = cap;
     apv_setRingerVolume(value);
     apv_ringerApplyValue(slider, value); // 拖动实时反映填充高度
@@ -696,8 +614,8 @@ static void apv_ringerApplyValue(UIView *container, float value) {
         if (!fill) return;
         CGRect b = container.bounds;
         if (b.size.height <= 0) return;
-        float cap = (gLimitRinger && currentOutputIsAirPods()) ? 0.4f : 1.0f;
-        if (value > cap) value = cap; // 戴耳机显示也封顶（受开关控制）
+        float cap = currentOutputIsAirPods() ? apv_notifyCap() : 1.0f;
+        if (value > cap) value = cap; // 戴耳机显示也封顶（档位 40%/30%，统一走 apv_notifyCap）
         CGFloat fillH = b.size.height * (CGFloat)value;
         CGRect nf = CGRectMake(0, b.size.height - fillH, b.size.width, fillH);
         [UIView animateWithDuration:0.25 animations:^{ fill.frame = nf; }];
@@ -1480,23 +1398,6 @@ static void handleRouteEvent(NSString *source) {
             sLastEvtState = state;
             routeLog([NSString stringWithFormat:@"evt(%@) airInRoute=%d airInBT=%d conn=%d",
                       source, airInRoute, airInBT, sAirPodsConnected]);
-            // v1.9.80：戴上/摘下 1s 后快照（戴上后插件会压 Ringtone/Alert，等稳定再读）
-            apv_snapAfter(1.0, sAirPodsConnected ? @"戴上+1.0s" : @"摘下+1.0s");
-        }
-
-        // v1.9.80 只读观察：HFP 0→1（来电响铃/接听）和 1→0（挂断）时全类别快照。
-        // 纯观察不干预——定位"respring 后首次来电 100%"到底是哪个类别在跳。
-        // 时间点加密到 0.3s：微信设音量通常在来电后几百毫秒内发生，0.5s 会错过峰值。
-        BOOL hfpNow = hfpCallActive();
-        if (hfpNow != sPrevHFP) {
-            sPrevHFP = hfpNow;
-            if (hfpNow) {
-                apv_snapAfter(0.3, @"来电+0.3s");
-                apv_snapAfter(1.0, @"来电+1.0s");
-                apv_snapAfter(3.0, @"来电+3.0s");
-            } else {
-                apv_snapAfter(0.8, @"挂断+0.8s");
-            }
         }
 
         if (sAirPodsConnected) {
@@ -1527,10 +1428,6 @@ static void handleRouteEvent(NSString *source) {
 
     apv_refresh(); // 启动时读一次设置开关（TGK 风格 plist）
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
-    // v1.9.80：respring 后基线快照（延迟 10s 等音频服务起来）。排查"respring 后
-    // 首次来电跳 100%"必须知道 respring 刚结束时各类别的默认真值——对比来电快照，
-    // 哪个类别从 X 变成 1.000 就是元凶。
-    apv_snapAfter(10.0, @"开机+10s");
     sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
     // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
     // availableRoutes 为空导致的 no-route-yet 半秒延迟（开盒即能直接切）

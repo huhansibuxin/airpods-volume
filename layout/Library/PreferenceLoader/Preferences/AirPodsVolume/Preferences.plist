@@ -71,11 +71,25 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>戴耳机限制铃声音量 40%</string>
+			<string>戴耳机限制铃声音量</string>
 			<key>key</key>
 			<string>limitRingerWhenConnected</string>
 			<key>default</key>
 			<true/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>限到 30%（更安静）</string>
+			<key>key</key>
+			<string>ringerCap30</string>
+			<key>default</key>
+			<false/>
 			<key>defaults</key>
 			<string>com.huhansibuxin.airpodsvolume</string>
 			<key>PostNotification</key>
@@ -99,13 +113,9 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>「戴耳机限制铃声音量 40%」开关控制戴上时的限制；摘下后强制恢复铃声 100%（常驻硬需求，静音模式跳过）。戴 AirPods 时音量键禁用，媒体音量完全不管（系统自管理）。
+			<string>「戴耳机限制铃声音量」控制戴上时的限制：默认 40%，打开「限到 30%（更安静）」可降至 30%；关闭则不限制。摘下后强制恢复铃声 100%（常驻硬需求，静音模式跳过）。戴 AirPods 时音量键禁用，媒体音量完全不管（系统自管理）。
 
-诊断日志（总开关）：开后「全部日志」统一写入 /var/jb/tmp/airpods_vol.log，包括——
-• 控制中心模块日志（下拉控制中心刷屏的那种）30 秒最多 1 条；
-• 路由事件日志 5 秒最多 1 条；
-• 音量设置日志：每次 setVolumeTo 都记（类别/请求值/实际值/是否被封顶/调用栈）。
-平时请关闭，排查时再开。</string>
+诊断日志（总开关）：开后全部日志统一写入 /var/jb/tmp/airpods_vol.log，包括控制中心模块（30 秒最多 1 条）、路由事件（5 秒最多 1 条）、音量设置（每次 setVolumeTo 全记，含请求值/实际值/封顶/调用栈）与装载日志。平时请关闭，排查时再开。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
