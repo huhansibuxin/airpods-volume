@@ -3,7 +3,10 @@ export ARCHS = arm64e
 
 INSTALL_TARGET_PROCESSES = SpringBoard
 export _THEOS_PLATFORM_DPKG_DEB_COMPRESSION = gzip
-export THEOS_PACKAGE_SCHEME = rootless
+# scheme 由 CI/环境变量决定（rootless 默认，roothide 构建时 CI 传 roothide）；
+# 必须用 ?= 条件赋值——make 里普通赋值会覆盖环境变量，roothide job 会被打回 rootless
+THEOS_PACKAGE_SCHEME ?= rootless
+export THEOS_PACKAGE_SCHEME
 
 TWEAK_NAME = AirPodsVolume
 

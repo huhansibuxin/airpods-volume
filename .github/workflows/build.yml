@@ -7,16 +7,31 @@ on:
 jobs:
   build:
     runs-on: macos-14
+    strategy:
+      matrix:
+        variant: [rootless, roothide]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Theos
+      # rootless 用官方 theos；roothide 必须用 roothide 官方 fork 的 theos
+      # （github.com/roothide/theos），普通 theos 不认 roothide scheme
+      - name: Setup Theos (Rootless)
+        if: matrix.variant == 'rootless'
         run: |
           git clone --recurse-submodules https://github.com/theos/theos.git ${{ runner.temp }}/theos
           find ${{ runner.temp }}/theos/bin -name "*.pl" -exec sed -i '' '1s|#!/usr/bin/perl|#!/usr/bin/env perl|' {} \;
           echo "THEOS=${{ runner.temp }}/theos" >> $GITHUB_ENV
           echo "THEOS_PACKAGE_SCHEME=rootless" >> $GITHUB_ENV
+
+      - name: Setup Theos (Roothide)
+        if: matrix.variant == 'roothide'
+        run: |
+          git clone --recurse-submodules https://github.com/roothide/theos.git ${{ runner.temp }}/theos
+          find ${{ runner.temp }}/theos/bin -name "*.pl" -exec sed -i '' '1s|#!/usr/bin/perl|#!/usr/bin/env perl|' {} \;
+          echo "THEOS=${{ runner.temp }}/theos" >> $GITHUB_ENV
+          echo "THEOS_PACKAGE_SCHEME=roothide" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: |
@@ -40,5 +55,5 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: AirPodsVolume-rootless
+          name: AirPodsVolume-${{ matrix.variant }}
           path: packages/*.deb
