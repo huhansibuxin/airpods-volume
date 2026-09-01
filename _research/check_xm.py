@@ -51,8 +51,11 @@ for m in re.finditer(r"%orig\s*;", t):
 print("== 符号定义顺序（C 要求先声明后使用）==")
 names = [
     "routeLog", "volLog", "volStack", "hfpCallActive",
-    "callVolumeGuardTick", "startCallVolumeGuard", "stopCallVolumeGuard",
     "startPollWindow", "stopPoll", "enforceAirPodsRoute", "forceCallToAirPods",
+    # 说明：callVolumeGuardTick/startCallVolumeGuard/stopCallVolumeGuard 曾在此清单，
+    # 但函数早已从 Tweak.xm 删除 → 脚本恒报 "USED BEFORE DECL" 假 FAIL。
+    # 清单以"文件里真实存在的符号"为准，删掉函数时记得同步删这里。
+    "apvLogPath", "apvInvalidateLogPath", "apv_probeLogPath", "apv_log_queue",
 ]
 for name in names:
     d = re.search(r"^static\s+[\w\s\*]+?\b%s\s*\(" % name, t, re.M)

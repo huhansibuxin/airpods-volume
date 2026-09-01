@@ -115,7 +115,7 @@
 			<key>footerText</key>
 			<string>「戴耳机限制铃声音量」控制戴上时的限制：默认 40%，打开「限到 30%（更安静）」可降至 30%；关闭则不限制。摘下后强制恢复铃声 100%（常驻硬需求，静音模式跳过）。戴 AirPods 时音量键禁用，媒体音量完全不管（系统自管理）。
 
-诊断日志（总开关）：开后全部日志统一写入 /var/mobile/Documents/airpods_vol.log（SpringBoard 插件固定写 /var/mobile，不受隐根随机目录影响），包括控制中心模块（30 秒最多 1 条）、路由事件（5 秒最多 1 条）、音量设置（每次 setVolumeTo 全记，含请求值/实际值/封顶/调用栈）与装载日志。开关即时生效、无需注销。平时请关闭，排查时再开。</string>
+诊断日志（总开关）：开后全部日志统一写入 /var/mobile/Documents/airpods_vol.log（SpringBoard 插件固定写 /var/mobile，不受隐根随机目录影响；实际落点会同步写入 /var/mobile/Documents/airpods_vol.path，SSH 找不到日志时 cat 它即可），包括控制中心模块（30 秒最多 1 条）、路由事件（5 秒最多 1 条）、音量设置（每次 setVolumeTo 全记，含请求值/实际值/封顶/调用栈）与装载日志。开关即时生效、无需注销。平时请关闭，排查时再开。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -265,7 +265,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>功能说明 · 版本 1.9.93（每次更新插件，版本号在此同步）
+			<string>功能说明 · 版本 1.9.94（每次更新插件，版本号在此同步）
 
 通知合并（NotifsDontHide 并入）：同一 App 的通知从第 2 条起就合并成一栏（iOS 原生为第 5 条起）。打开「通知从第 3 条起才合并成一组」则改为第 3 条起合并，开关即时生效、无需注销。⚠️ 合并版启用后请卸载独立的 NotifsDontHide 包，避免双重 hook 冲突。</string>
 		</dict>

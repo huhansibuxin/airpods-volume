@@ -473,25 +473,61 @@ static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcen
 //   · hook 用户 App 的插件 → 写用户沙盒 NSHomeDirectory()/Documents/...
 //   · hook SpringBoard 的插件 → 写 /var/mobile/Documents/...（真实路径，
 //     不随 jbroot 随机串变化，SpringBoard 沙盒有写权限）
-// 本插件只注入 SpringBoard，故固定 /var/mobile/Documents/airpods_vol.log，
-// 带两级兜底（目录不可写时依次降级），首次写前 mkdir -p。
+// 本插件只注入 SpringBoard，故首选 /var/mobile/Documents/airpods_vol.log。
+//
+// v1.9.94：探测方式从「看目录权限位」改成「真 fopen 试写」。
+//   isWritableFileAtPath: 只看 DAC 权限位，**看不到沙盒/MACF 的实际裁决**：
+//   目录权限位写着可写、SpringBoard 真 fopen 却被拒，探测照样判成功 →
+//   又回到"以为在写、其实一行没有"的老坑。故逐个候选 mkdir -p 后真的
+//   fopen("a") 一次，打开成功才算这个候选可用。
+// 另外：选中路径会缓存（记住成功路径，避免每条日志都探测）；一旦实际写入
+// 失败（目录被清 / 沙盒策略变了），作废缓存，下一条日志重新探测降级。
+// 最终落点同步写一份 airpods_vol.path 标记文件，SSH 一眼能找到日志在哪。
+static NSString * volatile gLogPathChosen = nil;
+static os_unfair_lock sLogPathLock = OS_UNFAIR_LOCK_INIT;
+#define APV_LOG_MARKER @"/var/mobile/Documents/airpods_vol.path"
+
+// 逐个候选：mkdir -p → 真 fopen("a") 试写 → 成功即采纳
+static NSString *apv_probeLogPath(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *cands = @[@"/var/mobile/Documents/airpods_vol.log",
+                       @"/var/mobile/Library/airpods_vol.log",
+                       @"/var/mobile/airpods_vol.log",
+                       @"/var/tmp/airpods_vol.log"];
+    for (NSString *p in cands) {
+        NSString *dir = [p stringByDeletingLastPathComponent];
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        FILE *t = fopen([p UTF8String], "a");
+        if (t) { fclose(t); return p; }
+    }
+    return nil; // 全挂（极端情况）→ 静默不写，绝不崩
+}
+
 static NSString *apvLogPath(void) {
-    static NSString *path = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSArray *cands = @[@"/var/mobile/Documents/airpods_vol.log",
-                           @"/var/mobile/airpods_vol.log",
-                           @"/var/tmp/airpods_vol.log"];
-        NSString *chosen = [cands lastObject];
-        for (NSString *p in cands) {
-            NSString *dir = [p stringByDeletingLastPathComponent];
-            [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-            if ([fm isWritableFileAtPath:dir]) { chosen = p; break; }
+    NSString *p = gLogPathChosen;
+    if (p) return p;                       // 快路径：已探到过，无锁
+    os_unfair_lock_lock(&sLogPathLock);
+    p = gLogPathChosen;
+    if (!p) {
+        p = apv_probeLogPath();
+        gLogPathChosen = p;
+        if (p) {
+            // 把最终落点写一份标记文件，SSH 直接 cat 它就知道日志在哪
+            [[NSString stringWithFormat:@"%@\n", p] writeToFile:APV_LOG_MARKER
+                                                      atomically:YES
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:nil];
         }
-        path = chosen;
-    });
-    return path;
+    }
+    os_unfair_lock_unlock(&sLogPathLock);
+    return p;
+}
+
+// 写入失败时调用：作废缓存，下次重新探测（落点被清 / 沙盒策略变了都能自愈）
+static void apvInvalidateLogPath(void) {
+    os_unfair_lock_lock(&sLogPathLock);
+    gLogPathChosen = nil;
+    os_unfair_lock_unlock(&sLogPathLock);
 }
 
 // 节流：同一个 key 在 interval 秒内只放行一次（返回 NO = 抑制）
@@ -534,8 +570,16 @@ static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
     if (throttle > 0.0 && !apv_throttle(msg, throttle)) return;
     NSString *ts = [[NSDate date] description]; // 时间戳在提交时刻取，保序
     dispatch_async(apv_log_queue(), ^{
-        FILE *f = fopen([apvLogPath() UTF8String], "a");
-        if (!f) return;
+        // v1.9.94：打开失败 → 落点已失效，作废缓存重新探测一次再试
+        NSString *p = apvLogPath();
+        FILE *f = p ? fopen([p UTF8String], "a") : NULL;
+        if (!f) {
+            apvInvalidateLogPath();
+            p = apvLogPath();
+            if (!p) return;
+            f = fopen([p UTF8String], "a");
+            if (!f) return;
+        }
         fprintf(f, "[%s] %s %s\n", [ts UTF8String], [tag UTF8String], [msg UTF8String]);
         fclose(f);
     });
@@ -1733,6 +1777,14 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
     // 功能时序不变（Shortcuts/弹窗拦截晚装 1~2 秒，无感；音频兜底 clamp 仍 +3s）。
     apv_refresh(); // 启动时读一次设置开关（TGK 风格 plist）
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
+
+    // v1.9.94：把日志最终落点写进日志第一行（探测在后台日志队列做，不占主线程）。
+    // SSH 排查时直接 head 日志就能确认"到底写到哪了"，不用再猜路径。
+    dispatch_async(apv_log_queue(), ^{
+        NSString *lp = apvLogPath();
+        apvBootLog(lp ? [NSString stringWithFormat:@"日志落点 = %@（标记文件 %@）", lp, APV_LOG_MARKER]
+                      : @"日志落点探测失败：全部候选路径 fopen 均被拒（诊断日志不会有输出）");
+    });
 
     [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
