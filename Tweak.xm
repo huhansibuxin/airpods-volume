@@ -359,7 +359,11 @@ static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcen
 //
 // **全部日志由设置里那一个开关「诊断日志」控制**（gVolDiag），不再有
 // 独立的编译期宏。开 = 全开，关 = 一个字节都不写。
-// 全部写进同一个文件 /var/jb/tmp/airpods_vol.log，方便 tail -f 一次看全。
+// 全部写进同一个日志文件（v1.9.90 起路径运行时探测，跨 rootless/roothide）：
+//   rootless（存在 /var/jb）→ /var/jb/tmp/airpods_vol.log
+//   roothide（无 /var/jb） → /var/tmp/airpods_vol.log
+// 以前写死 /var/jb/tmp，切到 roothide 后 /var/jb 不存在 → fopen 静默失败、
+// 一行都不写，日志"消失"。现在按环境自适应，两种越狱都能 tail -f 看到。
 //
 // 三档频率（老板要求：刷屏的降频，音量的盯紧）：
 //   [VOL]   音量重点日志 —— **不限流**，每次音量设置全记（类别/请求值/
@@ -371,7 +375,18 @@ static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcen
 // 关掉开关时：三个函数都在第一行 return，连字符串都不拼，零开销。
 // ============================================================
 
-static NSString * const kAPVLogPath = @"/var/jb/tmp/airpods_vol.log";
+// v1.9.90：日志路径运行时探测，跨 rootless/roothide。
+// rootless 环境有 /var/jb 前缀；roothide 用真实路径 /var/tmp。
+static NSString *apvLogPath(void) {
+    static NSString *path = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        path = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]
+                    ? @"/var/jb/tmp/airpods_vol.log"
+                    : @"/var/tmp/airpods_vol.log";
+    });
+    return path;
+}
 
 // 节流：同一个 key 在 interval 秒内只放行一次（返回 NO = 抑制）
 static BOOL apv_throttle(NSString *key, NSTimeInterval interval) {
@@ -390,7 +405,7 @@ static BOOL apv_throttle(NSString *key, NSTimeInterval interval) {
 static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
     if (!gVolDiag) return;
     if (throttle > 0.0 && !apv_throttle(msg, throttle)) return;
-    FILE *f = fopen([kAPVLogPath UTF8String], "a");
+    FILE *f = fopen([apvLogPath() UTF8String], "a");
     if (!f) return;
     fprintf(f, "[%s] %s %s\n", [[[NSDate date] description] UTF8String],
             [tag UTF8String], [msg UTF8String]);
