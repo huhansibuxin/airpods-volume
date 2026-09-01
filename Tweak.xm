@@ -442,11 +442,11 @@ static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcen
 //
 // **全部日志由设置里那一个开关「诊断日志」控制**（gVolDiag），不再有
 // 独立的编译期宏。开 = 全开，关 = 一个字节都不写。
-// 全部写进同一个日志文件（v1.9.90 起路径运行时探测，跨 rootless/roothide）：
-//   rootless（存在 /var/jb）→ /var/jb/tmp/airpods_vol.log
-//   roothide（无 /var/jb） → /var/tmp/airpods_vol.log
-// 以前写死 /var/jb/tmp，切到 roothide 后 /var/jb 不存在 → fopen 静默失败、
-// 一行都不写，日志"消失"。现在按环境自适应，两种越狱都能 tail -f 看到。
+// 全部写进同一个日志文件（v1.9.93 起固定路径，详见 apvLogPath 注释）：
+//   /var/mobile/Documents/airpods_vol.log（兜底 /var/mobile/ → /var/tmp/）
+// 历史：v1.9.90 曾用"探测 /var/jb 是否存在"区分 rootless/roothide，但 Relaxin
+// 上 /var/jb 是指向 / 的 symlink → 恒判成 rootless → 落到 /var/jb/tmp == /tmp，
+// SpringBoard 沙盒写不进去，日志一行都没有。故改为固定 /var/mobile 真实路径。
 //
 // 三档频率（老板要求：刷屏的降频，音量的盯紧）：
 //   [VOL]   音量重点日志 —— **不限流**，每次音量设置全记（类别/请求值/
@@ -458,15 +458,38 @@ static NSString * const kNowPlayingModuleID = @"com.apple.mediaremote.controlcen
 // 关掉开关时：三个函数都在第一行 return，连字符串都不拼，零开销。
 // ============================================================
 
-// v1.9.90：日志路径运行时探测，跨 rootless/roothide。
-// rootless 环境有 /var/jb 前缀；roothide 用真实路径 /var/tmp。
+// v1.9.93：日志路径**固定**，不再探测。
+//
+// ⚠️ 为什么不能用探测（隐根 Relaxin 实机翻车）：
+//   1) Relaxin 上 **/var/jb 是一个指向 / 的 symlink**（为兼容 rootless 建的），
+//      fileExistsAtPath(@"/var/jb") 恒为真 → v1.9.90 的"有 /var/jb 就是 rootless"
+//      探测在这里 100% 误判，日志路径算成 /var/jb/tmp == /tmp，SpringBoard 沙盒
+//      写不进去 → 一行日志都没有（排查时完全找不到记录）。
+//   2) roothide 系是**隐根**：越狱根目录每次重启都会换随机目录名
+//      （/var/containers/Bundle/Application/.jbroot-<RANDOM>/usr/lib/TweakInject），
+//      任何基于越狱根推导的绝对路径都不稳定。
+//
+// 定案（老板约定，长期遵守）：
+//   · hook 用户 App 的插件 → 写用户沙盒 NSHomeDirectory()/Documents/...
+//   · hook SpringBoard 的插件 → 写 /var/mobile/Documents/...（真实路径，
+//     不随 jbroot 随机串变化，SpringBoard 沙盒有写权限）
+// 本插件只注入 SpringBoard，故固定 /var/mobile/Documents/airpods_vol.log，
+// 带两级兜底（目录不可写时依次降级），首次写前 mkdir -p。
 static NSString *apvLogPath(void) {
     static NSString *path = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        path = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]
-                    ? @"/var/jb/tmp/airpods_vol.log"
-                    : @"/var/tmp/airpods_vol.log";
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSArray *cands = @[@"/var/mobile/Documents/airpods_vol.log",
+                           @"/var/mobile/airpods_vol.log",
+                           @"/var/tmp/airpods_vol.log"];
+        NSString *chosen = [cands lastObject];
+        for (NSString *p in cands) {
+            NSString *dir = [p stringByDeletingLastPathComponent];
+            [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+            if ([fm isWritableFileAtPath:dir]) { chosen = p; break; }
+        }
+        path = chosen;
     });
     return path;
 }
@@ -1665,6 +1688,33 @@ static void installNotifGrouping(void) {
                      (IMP)&hook_ndh_dynamicGroupingThreshold, (IMP *)&orig_ndh_dynamicGroupingThreshold);
 }
 
+// ============================================================
+// 设置变更监听（v1.9.93 关键修复）
+//
+// ⚠️ 之前挂的是 [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged]，
+// 那是**进程内**通知中心——而 PreferenceLoader plist 的 PostNotification 发的是
+// **Darwin 通知**（notify_post / CFNotificationCenterGetDarwinNotifyCenter，跨进程）。
+// 两者不通，所以 SpringBoard 里的观察者**一次都没被调用过**：
+//   · v1.9.83 声称修好的"40%/30% 切档立即生效"其实一直要注销才生效
+//   · v1.9.91 通知合并档位"即时生效"同样没生效
+//   · 用户把「诊断日志」打开后日志仍然空——因为 gVolDiag 缓存还是启动时的 NO
+// 现改挂 Darwin 通知中心（跨进程收得到），回调在任意线程 → 回主队列刷新状态。
+// ============================================================
+static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
+                             CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    // Darwin 回调不在主线程，状态刷新回主队列（与路由事件回调同一串行域）
+    dispatch_async(dispatch_get_main_queue(), ^{
+        apv_refresh();
+        // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
+        // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
+        if (sAirPodsConnected) {
+            apv_clampNotifyVolume(
+                [NSClassFromString(@"AVSystemController") sharedAVSystemController]);
+        }
+        ccLog(@"设置开关已刷新");
+    });
+}
+
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
@@ -1747,18 +1797,11 @@ static void installNotifGrouping(void) {
     }];
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
-    [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
-        object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        apv_refresh();
-        // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
-        // 修复：以前压制只在路由事件/%ctor 里跑，设置里切 40%/30% 档要 respring 才生效。
-        // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
-        if (sAirPodsConnected) {
-            apv_clampNotifyVolume(
-                [NSClassFromString(@"AVSystemController") sharedAVSystemController]);
-        }
-        ccLog(@"设置开关已刷新");
-    }];
+    // v1.9.93：改用 Darwin 通知中心（跨进程）；NSNotificationCenter 收不到设置页的变更
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL, apv_prefsChanged,
+                                    (__bridge CFStringRef)kAPVChanged, NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
 
     // ---------- v1.9.89：以下全部重活移出主线程 ----------
     // 后台队列：dlopen 三个私有框架（ControlCenterUI/MediaRemoteUI/
