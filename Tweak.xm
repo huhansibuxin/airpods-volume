@@ -34,6 +34,7 @@ static BOOL gVolDiag = NO;      // 音量诊断日志（默认关：每次 setVo
 static BOOL gShowRingerSlider = YES; // 控制中心音量模块展开后显示铃声音量滑块（默认开）
 static BOOL gLimitRinger = YES;      // 戴 AirPods 时限制铃声音量（v1.9.77 开关，默认开；摘下强制 100% 常驻不受此开关影响）
 static BOOL gRingerCap30 = NO;       // v1.9.82：铃封顶档位——关=40%，开=30%（仅在 gLimitRinger 打开时有效）
+static BOOL gNotifGroupFrom3 = NO;   // v1.9.91：通知合并档位——关=第 2 条起合并成一栏（NDH 原行为），开=第 3 条起才合并
 
 // 戴耳机时通知音(Ringtone/Alert)的封顶值，全局唯一出口，禁止再散落硬编码 0.4/0.3：
 //   gLimitRinger 关           → 1.0（不限制）
@@ -59,6 +60,7 @@ static void apv_refresh(void) {
     gShowRingerSlider = apv_bool(@"showRingerSlider", YES);
     gLimitRinger = apv_bool(@"limitRingerWhenConnected", YES);
     gRingerCap30 = apv_bool(@"ringerCap30", NO);
+    gNotifGroupFrom3 = apv_bool(@"notifGroupFrom3", NO);
 }
 
 @interface AVSystemController : NSObject
@@ -1457,6 +1459,63 @@ static void handleRouteEvent(NSString *source) {
         routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
     }
 }
+// ============================================================
+// 通知合并成一组（源出 NotifsDontHide Feature 1，v1.9.91 并入）
+// ============================================================
+// 只并入 NDH 的「多条通知合并成一栏」功能；其「通知不隐藏」(Feature 2)
+// 不并入（独立仓库保留维护；且两包不可同装——同一批方法会被双重 hook）。
+//
+// 机制（iOS 16，NDH 实机验证）：
+//  1) NCNotificationRequest.threadIdentifier → 返回 sectionIdentifier：
+//     同一 App 的所有通知强制归入同一 thread，系统把它们视为一组可折叠集合
+//  2) NCNotificationCollapsingQueue.collapsingThreshold：系统默认 4
+//     （第 5 条才折叠成一栏）→ 改为 1（第 2 条起合并）
+//  3) NCNotificationStructuredSectionList.dynamicGroupingThreshold：
+//     iOS 16 备用杠杆，同步改阈值
+//
+// 开关 notifGroupFrom3（hook 内实时读 gNotifGroupFrom3，kAPVChanged 即时生效，免注销）：
+//   关（默认）→ 第 2 条通知起合并成一栏（NDH 原行为）
+//   开        → 第 3 条通知起才合并（少弹几条再折叠，没那么激进）
+
+static NSUInteger apv_ndh_collapseThreshold(void) {
+    return gNotifGroupFrom3 ? 2 : 1;
+}
+
+// NDH 同款安全装载：类/方法存在才 hook，静默跳过（未来 iOS 变化不会崩 SpringBoard）
+static void apv_ndh_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig) {
+    Class cls = objc_getClass(clsName);
+    if (!cls || !class_getInstanceMethod(cls, sel)) return;
+    MSHookMessageEx(cls, sel, imp, orig);
+}
+
+// 1) 同 App 通知归入同一 thread => 一组
+static id (*orig_ndh_threadIdentifier)(id, SEL);
+static id hook_ndh_threadIdentifier(id self, SEL _cmd) {
+    if ([self respondsToSelector:@selector(sectionIdentifier)]) {
+        return ((id (*)(id, SEL))objc_msgSend)(self, @selector(sectionIdentifier));
+    }
+    return orig_ndh_threadIdentifier(self, _cmd);
+}
+// 2) 折叠队列阈值：默认 4 → 1（第 2 条合并）/ 2（第 3 条合并）
+static NSUInteger (*orig_ndh_collapsingThreshold)(id, SEL);
+static NSUInteger hook_ndh_collapsingThreshold(id self, SEL _cmd) {
+    return apv_ndh_collapseThreshold();
+}
+// 3) 备用杠杆：分区列表动态分组阈值
+static NSUInteger (*orig_ndh_dynamicGroupingThreshold)(id, SEL);
+static NSUInteger hook_ndh_dynamicGroupingThreshold(id self, SEL _cmd) {
+    return apv_ndh_collapseThreshold();
+}
+
+static void installNotifGrouping(void) {
+    apv_ndh_try_hook("NCNotificationRequest", @selector(threadIdentifier),
+                     (IMP)&hook_ndh_threadIdentifier, (IMP *)&orig_ndh_threadIdentifier);
+    apv_ndh_try_hook("NCNotificationCollapsingQueue", @selector(collapsingThreshold),
+                     (IMP)&hook_ndh_collapsingThreshold, (IMP *)&orig_ndh_collapsingThreshold);
+    apv_ndh_try_hook("NCNotificationStructuredSectionList", @selector(dynamicGroupingThreshold),
+                     (IMP)&hook_ndh_dynamicGroupingThreshold, (IMP *)&orig_ndh_dynamicGroupingThreshold);
+}
+
 %ctor {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
@@ -1596,6 +1655,11 @@ static void handleRouteEvent(NSString *source) {
                 MSHookMessageEx(rtoCls, selPP,
                                 (IMP)replPerformPresentationRequest, (IMP *)&origPerformPresentationRequest);
         }
+
+        // 通知合并成一组（NotifsDontHide Feature 1 并入，v1.9.91）：
+        // 通知框架类随 SpringBoard 启动即已加载（NDH 在 %ctor 直挂同样可行），
+        // 后台队列挂安全 hook（类缺失静默跳过），开关档位 hook 内实时读、免注销生效
+        installNotifGrouping();
 
         // 回主队列：状态初始化 + 音频调用（此时 SpringBoard 启动最忙阶段已过）。
         // 放主队列是为了与各事件回调（均在 main queue）保持同一串行域，
