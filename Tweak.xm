@@ -1446,36 +1446,20 @@ static void handleRouteEvent(NSString *source) {
     NSString *bid = NSBundle.mainBundle.bundleIdentifier;
     if (![bid isEqualToString:@"com.apple.springboard"]) return;
 
+    // v1.9.89：respring 卡顿修复。
+    // 此前 %ctor 在 SpringBoard 主线程上同步执行了全部启动序列：dlopen 三个
+    // 私有框架（ControlCenterUI/MediaRemoteUI/UserNotificationsKit，加载+重定位+
+    // 类 realize）+ MPAVRoutingController 预建（首次建 MediaRemote XPC）+
+    // AVSystemController 首建 + BluetoothManager/AVAudioSession 枚举 + ctor-init
+    // 全套路由检测——全压在启动最忙的关键路径上，表现为「每次注销后屏幕卡一下」
+    //（不装插件不卡，实锤就是这里）。
+    // 现在拆成三层：
+    //   1) %ctor 本体只留 O(1) 轻量注册：读 prefs + 挂观察者 + 建 timer（挂起）
+    //   2) dlopen + MSHookMessageEx 丢后台队列（两者均线程安全）
+    //   3) 状态初始化/音频调用回主队列，等启动最忙阶段过了再跑
+    // 功能时序不变（Shortcuts/弹窗拦截晚装 1~2 秒，无感；音频兜底 clamp 仍 +3s）。
     apv_refresh(); // 启动时读一次设置开关（TGK 风格 plist）
     routeLog(@"ctor running"); // 启动标记：确认 %ctor 执行 + routeLog 写入是否正常
-    sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
-    // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
-    // availableRoutes 为空导致的 no-route-yet 半秒延迟（开盒即能直接切）
-    @try {
-        sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
-        [sMPARouter setDiscoveryMode:1];
-        [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}];
-    } @catch (id e) {}
-
-    id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
-    // v1.9.76：启动时摘下状态 → 通知音确保 100%（常驻，无开关；静音跳过）
-    if (!sAirPodsConnected && !isRingerMuted()) {
-        [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
-        [avc setVolumeTo:1.0f forCategory:@"Alert"];
-    }
-    // v1.9.81：respring 后戴耳机 → 主动压一次通知音（延迟 3s 等音频服务就绪）。
-    // 光修好 apv_clampNotifyVolume 的假值 bug 还不够：那段只在 handleRouteEvent 里跑，
-    // 而 respring 后路由事件可能迟迟不来（耳机一直戴着、状态无变化），这段空窗期
-    // 来电就会看到 Ringtone 真值 1.000 的 100% 条。这里主动兜底一次。
-    if (sAirPodsConnected) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            @try {
-                apv_clampNotifyVolume(
-                    [NSClassFromString(@"AVSystemController") sharedAVSystemController]);
-            } @catch (id e) {}
-        });
-    }
 
     [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
@@ -1539,19 +1523,6 @@ static void handleRouteEvent(NSString *source) {
         handleRouteEvent(@"btdisconnect");
     }];
 
-    // 启动时若已连 AirPods（如 respring 后仍连着）：启动轮询窗口 + 初始强制切
-    if (sAirPodsConnected) {
-        startPollWindow();
-        handleRouteEvent(@"ctor-init");
-    }
-
-    // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
-    installNowPlaying1x1();
-    // 1×1 模块内部布局：只隐藏上一曲/下一曲（展开态完全原生）
-    installNowPlayingLayoutTweaks();
-    // 控制中心音量模块展开后显示铃声音量双滑块（Ring 主功能移植）
-    installRingerSlider();
-
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
     [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
@@ -1566,24 +1537,76 @@ static void handleRouteEvent(NSString *source) {
         ccLog(@"设置开关已刷新");
     }];
 
-    // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
-    dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
-    Class ncdCls = NSClassFromString(@"NCNotificationDispatcher");
-    if (ncdCls) {
-        if ([ncdCls instancesRespondToSelector:@selector(postNotificationWithRequest:)])
-            MSHookMessageEx(ncdCls, @selector(postNotificationWithRequest:),
-                            (IMP)replDispatcherPost, (IMP *)&origDispatcherPost);
-        if ([ncdCls instancesRespondToSelector:@selector(modifyNotificationWithRequest:)])
-            MSHookMessageEx(ncdCls, @selector(modifyNotificationWithRequest:),
-                            (IMP)replDispatcherModify, (IMP *)&origDispatcherModify);
-    }
+    // ---------- v1.9.89：以下全部重活移出主线程 ----------
+    // 后台队列：dlopen 三个私有框架（ControlCenterUI/MediaRemoteUI/
+    // UserNotificationsKit）+ MSHook 装载 + MPAVRoutingController 预建。
+    // dlopen 与 MSHookMessageEx 均线程安全，后台执行无副作用；唯一代价是
+    // Shortcuts/弹窗拦截和 CC 模块 hook 晚约 1~2 秒生效（启动后无感）。
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        @try {
+            // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
+            // availableRoutes 为空导致的 no-route-yet 半秒延迟（开盒即能直接切）。
+            // 若主队列事件回调（btconnect 等）已抢先懒建过则跳过，避免重复实例。
+            if (!sMPARouter) {
+                sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
+                [sMPARouter setDiscoveryMode:1];
+                [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}];
+            }
+        } @catch (id e) {}
 
-    // AirPods 开盒/连接弹窗拦截：远程 overlay 决策点返回 NO
-    Class rtoCls = NSClassFromString(@"SBRemoteTransientOverlaySessionManager");
-    if (rtoCls) {
-        SEL selPP = @selector(remoteTransientOverlaySession:performPresentationRequest:);
-        if ([rtoCls instancesRespondToSelector:selPP])
-            MSHookMessageEx(rtoCls, selPP,
-                            (IMP)replPerformPresentationRequest, (IMP *)&origPerformPresentationRequest);
-    }
+        // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
+        installNowPlaying1x1();
+        // 1×1 模块内部布局：只隐藏上一曲/下一曲（展开态完全原生）
+        installNowPlayingLayoutTweaks();
+        // 控制中心音量模块展开后显示铃声音量双滑块（Ring 主功能移植）
+        installRingerSlider();
+
+        // 快捷指令通知拦截：强制加载框架 + realize 类后挂 post/modify 双路径
+        dlopen("/System/Library/PrivateFrameworks/UserNotificationsKit.framework/UserNotificationsKit", RTLD_NOW);
+        Class ncdCls = NSClassFromString(@"NCNotificationDispatcher");
+        if (ncdCls) {
+            if ([ncdCls instancesRespondToSelector:@selector(postNotificationWithRequest:)])
+                MSHookMessageEx(ncdCls, @selector(postNotificationWithRequest:),
+                                (IMP)replDispatcherPost, (IMP *)&origDispatcherPost);
+            if ([ncdCls instancesRespondToSelector:@selector(modifyNotificationWithRequest:)])
+                MSHookMessageEx(ncdCls, @selector(modifyNotificationWithRequest:),
+                                (IMP)replDispatcherModify, (IMP *)&origDispatcherModify);
+        }
+
+        // AirPods 开盒/连接弹窗拦截：远程 overlay 决策点返回 NO
+        Class rtoCls = NSClassFromString(@"SBRemoteTransientOverlaySessionManager");
+        if (rtoCls) {
+            SEL selPP = @selector(remoteTransientOverlaySession:performPresentationRequest:);
+            if ([rtoCls instancesRespondToSelector:selPP])
+                MSHookMessageEx(rtoCls, selPP,
+                                (IMP)replPerformPresentationRequest, (IMP *)&origPerformPresentationRequest);
+        }
+
+        // 回主队列：状态初始化 + 音频调用（此时 SpringBoard 启动最忙阶段已过）。
+        // 放主队列是为了与各事件回调（均在 main queue）保持同一串行域，
+        // sAirPodsConnected / sMPARouter 等状态不产生跨线程竞争。
+        dispatch_async(dispatch_get_main_queue(), ^{
+            sAirPodsConnected = airPodsInBluetoothDevices(); // 启动时初始化"AirPods 在场"
+            id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
+            // v1.9.76：启动时摘下状态 → 通知音确保 100%（常驻，无开关；静音跳过）
+            if (!sAirPodsConnected && !isRingerMuted()) {
+                [avc setVolumeTo:1.0f forCategory:@"Ringtone"];
+                [avc setVolumeTo:1.0f forCategory:@"Alert"];
+            }
+            if (sAirPodsConnected) {
+                // 启动时若已连 AirPods（如 respring 后仍连着）：启动轮询窗口 + 初始检测
+                startPollWindow();
+                handleRouteEvent(@"ctor-init");
+                // v1.9.81：respring 后戴耳机 → 再主动压一次通知音（延迟 3s 等音频服务就绪），
+                // 覆盖"路由事件迟迟不来（耳机一直戴着、状态无变化）"的空窗期。
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    @try {
+                        apv_clampNotifyVolume(
+                            [NSClassFromString(@"AVSystemController") sharedAVSystemController]);
+                    } @catch (id e) {}
+                });
+            }
+        });
+    });
 }
