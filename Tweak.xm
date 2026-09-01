@@ -5,6 +5,7 @@
 #import <dlfcn.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <os/lock.h>
 
 // ============================================================
 // 偏好设置（TGK 风格 plist）
@@ -84,11 +85,63 @@ static void apv_refresh(void) {
 @end
 
 static BOOL isNotificationCategory(id cat) {
-    NSString *s = [cat description];
-    return [s containsString:@"Ringtone"] || [s containsString:@"Alert"];
+    // v1.9.92：热路径优化——getVolume/setVolumeTo 每次调用都进来，
+    // 先走精确匹配（绝大多数调用就是 @"Ringtone"/@"Alert" 常量，零堆分配），
+    // 未命中再退回旧的 description+containsString 宽松匹配。
+    if ([cat isKindOfClass:[NSString class]]) {
+        NSString *s = (NSString *)cat;
+        if ([s isEqualToString:@"Ringtone"] || [s isEqualToString:@"Alert"]) return YES;
+    }
+    NSString *d = [cat description];
+    return [d containsString:@"Ringtone"] || [d containsString:@"Alert"];
 }
 
 static BOOL sAirPodsConnected = NO;
+
+// ============================================================
+// v1.9.92：XPC 查询 TTL 缓存（主线程/CPU 开销优化）
+//
+// 问题：一次路由事件 burst 里，airPodsInCurrentRoute / hfpCallActive /
+// carHFPActive / carHFPInputActive 各自同步查 [AVAudioSession
+// sharedInstance].currentRoute（XPC 到 mediaserverd），currentOutputIsAirPods /
+// carInSystemOutput 各自查 AVOutputContext outputDevices，蓝牙三兄弟各自查
+// BluetoothManager connectedDevices——同一份系统状态在一次事件里被同步问了
+// 4~6 遍，全在主线程。轮询窗口开着的 1.5s tick 也反复问。
+//
+// 修法：三类查询各挂一个小 TTL 缓存，事件入口（handleRouteEvent）主动失效
+// 保证事件时刻拿到新鲜值；burst 内后续调用直接命中缓存。
+// TTL 选值依据：通知本身是"状态已变"的信号，入口失效后第一遍必是新值；
+// 轮询 tick 间隔 1.5s > 全部 TTL，兜底检测永远能拿到不早于 tick 的数据。
+// （缓存读写均为单字对齐的指针/时间戳，ARM64 上读写原子，竞态最坏后果
+//  只是多查一次，无实际危害，不加锁避免热路径锁开销。）
+// ============================================================
+
+static NSTimeInterval apv_now(void) { return [[NSDate date] timeIntervalSince1970]; }
+
+// ---- 缓存 1：AVAudioSession currentRoute + availableInputs（0.4s）----
+static AVAudioSessionRouteDescription *sCachedRoute = nil;
+static NSArray *sCachedInputs = nil;
+static NSTimeInterval sCachedRouteAt = -1e9;
+
+static void apv_invalidateSessionCache(void) {
+    sCachedRoute = nil; sCachedInputs = nil; sCachedRouteAt = -1e9;
+}
+
+// currentRoute + availableInputs 一次取齐（两者都走 mediaserverd，一次 burst 只付一遍）
+static BOOL apv_sessionSnapshot(AVAudioSessionRouteDescription **routeOut, NSArray **inputsOut) {
+    NSTimeInterval now = apv_now();
+    if (!sCachedRoute || (now - sCachedRouteAt) >= 0.4) {
+        @try {
+            AVAudioSession *ses = [AVAudioSession sharedInstance];
+            sCachedRoute  = ses.currentRoute;
+            sCachedInputs = ses.availableInputs;
+        } @catch (id e) { sCachedRoute = nil; sCachedInputs = nil; }
+        sCachedRouteAt = now;
+    }
+    *routeOut = sCachedRoute;
+    *inputsOut = sCachedInputs;
+    return sCachedRoute != nil;
+}
 
 // ============================================================
 // AirPods 在场判断（BluetoothManager 已连接设备列表）
@@ -121,14 +174,27 @@ static BOOL isAirPodsName(NSString *name) {
     return name && [name containsString:@"AirPods"];
 }
 
+// ---- 缓存 2：BluetoothManager connectedDevices（0.8s）----
+// 蓝牙服务 XPC：airPodsInBluetoothDevices / otherBTDeviceConnected /
+// carInSystemOutput 三处共用；轮询窗口开着的 1.5s tick 也走这里。
+static NSArray *sCachedBTDevs = nil;
+static NSTimeInterval sCachedBTAt = -1e9;
+static NSArray *apv_btDevicesCached(void) {
+    NSTimeInterval now = apv_now();
+    if (!sCachedBTDevs || (now - sCachedBTAt) >= 0.8) {
+        @try {
+            id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
+            sCachedBTDevs = [bm connectedDevices] ?: @[];
+        } @catch (id e) { sCachedBTDevs = @[]; }
+        sCachedBTAt = now;
+    }
+    return sCachedBTDevs;
+}
+
 static BOOL airPodsInBluetoothDevices(void) {
-    @try {
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        NSArray *devs = [bm connectedDevices];
-        for (id d in devs) {
-            if (isAirPodsName([d name])) return YES;
-        }
-    } @catch (id e) {}
+    for (id d in apv_btDevicesCached()) {
+        if (isAirPodsName([d name])) return YES;
+    }
     return NO;
 }
 
@@ -143,11 +209,14 @@ static BOOL airPodsInBluetoothDevices(void) {
 // 否则戴上时误判"不在场"：attached 不触发（不切）+ 误走恢复分支。
 static BOOL airPodsInCurrentRoute(void) {
     @try {
-        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        // v1.9.92：走会话快照缓存，burst 内多函数共享一次 mediaserverd 查询
+        AVAudioSessionRouteDescription *route = nil;
+        NSArray *inputs = nil;
+        if (!apv_sessionSnapshot(&route, &inputs)) return NO;
         for (AVAudioSessionPortDescription *p in route.outputs) {
             if (isAirPodsName(p.portName)) return YES;
         }
-        for (AVAudioSessionPortDescription *p in [AVAudioSession sharedInstance].availableInputs) {
+        for (AVAudioSessionPortDescription *p in inputs) {
             if (isAirPodsName(p.portName)) return YES;
         }
     } @catch (id e) {}
@@ -156,17 +225,29 @@ static BOOL airPodsInCurrentRoute(void) {
 
 // 静音开关状态（SBSoundDefaults 域，iOS16 实机验证返回值随开关实时翻转）
 // 摘下耳机"强制 100"的通知音必须跳过静音模式：静音时不允许把 Ringtone/Alert 拉回 100
+// v1.9.92：0.5s TTL 缓存——这个函数在 getVolume hook 热路径里
+// （每次音量读取都可能调），SBSoundDefaults 每次新建调用有开销；静音开关
+// 物理拨动的响应延迟 0.5s 无感知。
+static BOOL sRingerMutedCache = NO;
+static NSTimeInterval sRingerMutedAt = -1e9;
 static BOOL isRingerMuted(void) {
+    NSTimeInterval now = apv_now();
+    if (now - sRingerMutedAt < 0.5) return sRingerMutedCache;
     @try {
         Class cls = NSClassFromString(@"SBSoundDefaults");
-        if (!cls) return NO;
-        id sbsd = [cls standardDefaults];
-        if (!sbsd) return NO;
-        if (![sbsd respondsToSelector:@selector(isRingerMuted)]) return NO;
-        return (BOOL)[sbsd isRingerMuted];
+        if (!cls) { sRingerMutedCache = NO; }
+        else {
+            id sbsd = [cls standardDefaults];
+            if (!sbsd || ![sbsd respondsToSelector:@selector(isRingerMuted)])
+                sRingerMutedCache = NO;
+            else
+                sRingerMutedCache = (BOOL)[sbsd isRingerMuted];
+        }
     } @catch (id e) {
-        return NO;
+        sRingerMutedCache = NO;
     }
+    sRingerMutedAt = now;
+    return sRingerMutedCache;
 }
 
 static float capForCategory(id cat) {
@@ -391,27 +472,50 @@ static NSString *apvLogPath(void) {
 }
 
 // 节流：同一个 key 在 interval 秒内只放行一次（返回 NO = 抑制）
+// v1.9.92：加 os_unfair_lock——volLog 可能从任意线程（音量调用方）、
+// routeLog/ccLog 从主线程和后台装载队列同时进来，裸 NSMutableDictionary
+// 并发读写有崩溃风险。锁只保护字典查找，纳秒级。
+static os_unfair_lock sThrottleLock = OS_UNFAIR_LOCK_INIT;
 static BOOL apv_throttle(NSString *key, NSTimeInterval interval) {
-    @try {
-        static NSMutableDictionary *last = nil;
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{ last = [[NSMutableDictionary alloc] init]; });
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        NSNumber *prev = [last objectForKey:key];
-        if (prev && (now - [prev doubleValue]) < interval) return NO;
+    static NSMutableDictionary *last = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ last = [[NSMutableDictionary alloc] init]; });
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    os_unfair_lock_lock(&sThrottleLock);
+    NSNumber *prev = [last objectForKey:key];
+    BOOL allow = YES;
+    if (prev && (now - [prev doubleValue]) < interval) {
+        allow = NO;
+    } else {
         [last setObject:[NSNumber numberWithDouble:now] forKey:key];
-        return YES;
-    } @catch (id e) { return YES; }
+    }
+    os_unfair_lock_unlock(&sThrottleLock);
+    return allow;
+}
+
+// v1.9.92：写盘移出调用线程——routeLog 在主线程路由事件里跑，此前每次
+// fopen/fprintf/fclose 同步磁盘 IO 都压在主线程上（开诊断日志时）。
+// 现在字符串在调用线程拼好（纯内存），实际写盘丢专用串行队列：
+// 主线程零磁盘 IO；串行队列保证日志行序与提交顺序一致。
+static dispatch_queue_t apv_log_queue(void) {
+    static dispatch_queue_t q = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        q = dispatch_queue_create("com.huhansibuxin.airpodsvolume.log", DISPATCH_QUEUE_SERIAL);
+    });
+    return q;
 }
 
 static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
     if (!gVolDiag) return;
     if (throttle > 0.0 && !apv_throttle(msg, throttle)) return;
-    FILE *f = fopen([apvLogPath() UTF8String], "a");
-    if (!f) return;
-    fprintf(f, "[%s] %s %s\n", [[[NSDate date] description] UTF8String],
-            [tag UTF8String], [msg UTF8String]);
-    fclose(f);
+    NSString *ts = [[NSDate date] description]; // 时间戳在提交时刻取，保序
+    dispatch_async(apv_log_queue(), ^{
+        FILE *f = fopen([apvLogPath() UTF8String], "a");
+        if (!f) return;
+        fprintf(f, "[%s] %s %s\n", [ts UTF8String], [tag UTF8String], [msg UTF8String]);
+        fclose(f);
+    });
 }
 
 // 音量重点日志：**盯紧**，只做 1s 内完全相同消息的去重
@@ -643,6 +747,11 @@ static const void *kRingerHandlerKey = &kRingerHandlerKey;
 @end
 
 // Ring updateFillLayer 复刻：填充从底部向上，高度 = value * height，动画过渡
+// v1.9.92：值与容器尺寸都没变时直接跳过——viewDidLayoutSubviews 在 CC 展开
+// 期间每个布局帧都会调，此前每帧都建一个 0.25s 的 UIView 动画事务（CA 事务
+// 创建/提交有真实开销）。全局只有这一个滑块实例，一对静态记录即可。
+static float sRingerLastFillVal = -1.0f;
+static CGRect sRingerLastFillBounds = CGRectZero;
 static void apv_ringerApplyValue(UIView *container, float value) {
     @try {
         UIView *fill = objc_getAssociatedObject(container, kRingerFillKey);
@@ -651,6 +760,10 @@ static void apv_ringerApplyValue(UIView *container, float value) {
         if (b.size.height <= 0) return;
         float cap = currentOutputIsAirPods() ? apv_notifyCap() : 1.0f;
         if (value > cap) value = cap; // 戴耳机显示也封顶（档位 40%/30%，统一走 apv_notifyCap）
+        if (fabsf(value - sRingerLastFillVal) < 0.001f &&
+            CGRectEqualToRect(b, sRingerLastFillBounds)) return; // 无变化，不建动画
+        sRingerLastFillVal = value;
+        sRingerLastFillBounds = b;
         CGFloat fillH = b.size.height * (CGFloat)value;
         CGRect nf = CGRectMake(0, b.size.height - fillH, b.size.width, fillH);
         [UIView animateWithDuration:0.25 animations:^{ fill.frame = nf; }];
@@ -741,30 +854,38 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
     }
 
     @try {
-        SEL viewSel = NSSelectorFromString(@"view");
-        id view = ((id (*)(id, SEL))objc_msgSend)(self, viewSel);
+        // v1.9.92：SEL 全部静态缓存——viewDidLayoutSubviews 在 CC 展开期间
+        // 每个布局帧都进来，NSSelectorFromString 每帧做哈希查找是纯浪费。
+        static SEL sSelView = NULL, sSelExpanded = NULL, sSelSlider = NULL, sSelCR = NULL, sSelAsset = NULL;
+        static dispatch_once_t onceSel;
+        dispatch_once(&onceSel, ^{
+            sSelView     = NSSelectorFromString(@"view");
+            sSelExpanded = NSSelectorFromString(@"isExpanded");
+            sSelSlider   = NSSelectorFromString(@"primarySlider");
+            sSelCR       = NSSelectorFromString(@"continuousSliderCornerRadius");
+            sSelAsset    = NSSelectorFromString(@"primaryAssetView");
+        });
+        id view = ((id (*)(id, SEL))objc_msgSend)(self, sSelView);
         if (![view isKindOfClass:[UIView class]]) return;
         UIView *moduleView = (UIView *)view;
 
         // isExpanded 发在 self.view 上（Ring FUN_00006590 行723：isExpanded(view)）。
         // 先查 view，再退而查 self，双保险；都不响应时按"展开"处理。
-        SEL expandedSel = NSSelectorFromString(@"isExpanded");
         BOOL expanded = YES;
-        if ([moduleView respondsToSelector:expandedSel]) {
-            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(moduleView, expandedSel);
-        } else if ([self respondsToSelector:expandedSel]) {
-            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(self, expandedSel);
+        if ([moduleView respondsToSelector:sSelExpanded]) {
+            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(moduleView, sSelExpanded);
+        } else if ([self respondsToSelector:sSelExpanded]) {
+            expanded = ((BOOL (*)(id, SEL))objc_msgSend)(self, sSelExpanded);
         }
 
         // ★ primarySlider / secondarySlider 是 self.view 的属性，不是控制器的！
         // 之前错写成 objc_msgSend(self, primarySlider) → 返回 nil → 永远提前 return，
         // 滑块从不创建（Ring FUN_00006590 行744：primarySlider(view)）。
-        SEL sliderSel = NSSelectorFromString(@"primarySlider");
         id slider = nil;
-        if ([moduleView respondsToSelector:sliderSel]) {
-            slider = ((id (*)(id, SEL))objc_msgSend)(moduleView, sliderSel);
-        } else if ([self respondsToSelector:sliderSel]) {
-            slider = ((id (*)(id, SEL))objc_msgSend)(self, sliderSel);
+        if ([moduleView respondsToSelector:sSelSlider]) {
+            slider = ((id (*)(id, SEL))objc_msgSend)(moduleView, sSelSlider);
+        } else if ([self respondsToSelector:sSelSlider]) {
+            slider = ((id (*)(id, SEL))objc_msgSend)(self, sSelSlider);
         }
         if (![slider isKindOfClass:[UIView class]]) return;
         UIView *primarySlider = (UIView *)slider;
@@ -806,9 +927,8 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
             CGRect rFrame = CGRectMake(rightX, sliderY, sliderW, sliderH);
             // 圆角与左边一致（Ring：读 primarySlider.continuousSliderCornerRadius，默认 42）
             double cornerRadius = 42.0;
-            SEL crSel = NSSelectorFromString(@"continuousSliderCornerRadius");
-            if ([primarySlider respondsToSelector:crSel]) {
-                cornerRadius = ((double (*)(id, SEL))objc_msgSend)(primarySlider, crSel);
+            if ([primarySlider respondsToSelector:sSelCR]) {
+                cornerRadius = ((double (*)(id, SEL))objc_msgSend)(primarySlider, sSelCR);
             }
             ringer = apv_createRingerSlider(rFrame, apv_ringerVolume(), cornerRadius);
             objc_setAssociatedObject(self, kRingerSliderKey, ringer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -860,9 +980,8 @@ static void replMRUVolumeLayout(id self, SEL _cmd) {
                                 bellY, bellSize, bellSize);
 
         // 尝试把顶部 AirPods/扬声器图标也移到左侧滑块上方（如果 view 上有 primaryAssetView）
-        SEL assetSel = NSSelectorFromString(@"primaryAssetView");
-        if ([moduleView respondsToSelector:assetSel]) {
-            id asset = ((id (*)(id, SEL))objc_msgSend)(moduleView, assetSel);
+        if ([moduleView respondsToSelector:sSelAsset]) {
+            id asset = ((id (*)(id, SEL))objc_msgSend)(moduleView, sSelAsset);
             if ([asset isKindOfClass:[UIView class]]) {
                 UIView *av = (UIView *)asset;
                 CGRect af = av.frame;
@@ -1023,17 +1142,29 @@ static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（戴上 0
 // ⚠️ 只反映 A2DP 媒体输出——蓝牙耳机同时有 A2DP(媒体)+HFP(通话)两个端口，
 // 视频通话时系统可能把 HFP 单独切到车载（A2DP 还在 AirPods）→ 此函数会
 // 误判"输出是 AirPods"而不抢。必须配合 carHFPActive() 一起判断。
+// ---- 缓存 3：AVOutputContext outputDevices（0.3s）----
+// currentOutputIsAirPods / carInSystemOutput 共用。
+static NSArray *sCachedOutDevs = nil;
+static NSTimeInterval sCachedOutAt = -1e9;
+static NSArray *apv_outputDevicesCached(void) {
+    NSTimeInterval now = apv_now();
+    if (!sCachedOutDevs || (now - sCachedOutAt) >= 0.3) {
+        @try {
+            id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
+            sCachedOutDevs = [ctx outputDevices] ?: @[];
+        } @catch (id e) { sCachedOutDevs = @[]; }
+        sCachedOutAt = now;
+    }
+    return sCachedOutDevs;
+}
+
 static BOOL currentOutputIsAirPods(void) {
-    @try {
-        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
-        NSArray *devs = [ctx outputDevices];
-        if (!devs || devs.count == 0) return NO;
-        for (id d in devs) {
-            if (!isAirPodsName([d name])) return NO;
-        }
-        return YES;
-    } @catch (id e) {}
-    return NO;
+    NSArray *devs = apv_outputDevicesCached();
+    if (devs.count == 0) return NO;
+    for (id d in devs) {
+        if (!isAirPodsName([d name])) return NO;
+    }
+    return YES;
 }
 
 // 检测 HFP 通话路由是否被车载占用（视频/语音通话场景，2026-08-23 老板实测）：
@@ -1042,7 +1173,9 @@ static BOOL currentOutputIsAirPods(void) {
 // 这是 currentOutputIsAirPods() 看不到的盲区，必须单独检测。
 static BOOL carHFPActive(void) {
     @try {
-        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        AVAudioSessionRouteDescription *route = nil;
+        NSArray *inputs = nil;
+        if (!apv_sessionSnapshot(&route, &inputs)) return NO; // v1.9.92：走快照缓存
         for (AVAudioSessionPortDescription *p in route.outputs) {
             if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) {
                 if (!isAirPodsName(p.portName)) return YES; // HFP 输出不是 AirPods = 车载
@@ -1057,9 +1190,13 @@ static BOOL carHFPActive(void) {
 // 当前路由里，就是"正在煲电话粥"，音量兜底窗口就该开着。
 static BOOL hfpCallActive(void) {
     @try {
-        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        AVAudioSessionRouteDescription *route = nil;
+        NSArray *inputs = nil;
+        if (!apv_sessionSnapshot(&route, &inputs)) return NO; // v1.9.92：走快照缓存
         for (AVAudioSessionPortDescription *p in route.outputs)
             if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) return YES;
+        // ⚠️ 必须用 route.inputs（当前路由的输入端口），不是 availableInputs
+        // （所有可用输入）——语义不同，用错会把"仅可用未激活"误判成通话中
         for (AVAudioSessionPortDescription *p in route.inputs)
             if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) return YES;
     } @catch (id e) {}
@@ -1073,14 +1210,10 @@ static BOOL hfpCallActive(void) {
 
 // 是否有"非 AirPods 的蓝牙设备"已连接（车载/其他蓝牙）→ 车模式判定用
 static BOOL otherBTDeviceConnected(void) {
-    @try {
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        NSArray *devs = [bm connectedDevices];
-        for (id d in devs) {
-            NSString *nm = [d name];
-            if (nm && !isAirPodsName(nm)) return YES;
-        }
-    } @catch (id e) {}
+    for (id d in apv_btDevicesCached()) { // v1.9.92：走蓝牙列表缓存
+        NSString *nm = [d name];
+        if (nm && !isAirPodsName(nm)) return YES;
+    }
     return NO;
 }
 
@@ -1089,17 +1222,12 @@ static BOOL otherBTDeviceConnected(void) {
 static BOOL carInSystemOutput(void) {
     @try {
         NSMutableSet *carNames = [NSMutableSet set];
-        id bm = [NSClassFromString(@"BluetoothManager") sharedInstance];
-        if (bm && [bm respondsToSelector:@selector(connectedDevices)]) {
-            for (id d in [bm connectedDevices]) {
-                NSString *nm = [d name];
-                if (nm && !isAirPodsName(nm)) [carNames addObject:nm];
-            }
+        for (id d in apv_btDevicesCached()) { // v1.9.92：走蓝牙列表缓存
+            NSString *nm = [d name];
+            if (nm && !isAirPodsName(nm)) [carNames addObject:nm];
         }
         if (carNames.count == 0) return NO; // 没有非 AirPods 蓝牙设备 → 不可能被车载抢
-        id ctx = [NSClassFromString(@"AVOutputContext") sharedSystemAudioContext];
-        NSArray *devs = [ctx outputDevices];
-        for (id d in devs) {
+        for (id d in apv_outputDevicesCached()) { // v1.9.92：走输出设备缓存
             NSString *nm = [d name];
             if (nm && [carNames containsObject:nm]) return YES; // 车载设备已成为当前系统输出
         }
@@ -1110,7 +1238,9 @@ static BOOL carInSystemOutput(void) {
 // 通话输入是否被车载占用（currentRoute.inputs 出现非 AirPods 的 BluetoothHFP）
 static BOOL carHFPInputActive(void) {
     @try {
-        AVAudioSessionRouteDescription *route = [AVAudioSession sharedInstance].currentRoute;
+        AVAudioSessionRouteDescription *route = nil;
+        NSArray *inputs = nil;
+        if (!apv_sessionSnapshot(&route, &inputs)) return NO; // v1.9.92：走快照缓存
         for (AVAudioSessionPortDescription *p in route.inputs) {
             if ([p.portType isEqualToString:AVAudioSessionPortBluetoothHFP]) {
                 if (!isAirPodsName(p.portName)) return YES;
@@ -1425,6 +1555,8 @@ static void apv_clampNotifyVolume(id avc) {
 
 static void handleRouteEvent(NSString *source) {
     @try {
+        // v1.9.92：事件时刻强制取新鲜值——缓存只用于吸收 burst 内的重复查询
+        apv_invalidateSessionCache();
         id avc = [NSClassFromString(@"AVSystemController") sharedAVSystemController];
         BOOL airInRoute = airPodsInCurrentRoute();
         BOOL airInBT = airPodsInBluetoothDevices();
@@ -1459,6 +1591,20 @@ static void handleRouteEvent(NSString *source) {
         routeLog([NSString stringWithFormat:@"evt(%@) EXC %@", source, e]);
     }
 }
+
+// v1.9.92：事件合并去抖——outputdev 通知在连接抖动/开盒瞬间每秒连发多次，
+// 每次全量检测（会话快照 + 蓝牙列表 + 输出设备 + 压制 + 路由决策）都在主线程。
+// 100ms 窗口内的 burst 合并成一次跑（戴上必切延迟 100ms 无感知，功能时序不变）。
+static BOOL sRouteEvtPending = NO;
+static void handleRouteEventDebounced(void) {
+    if (sRouteEvtPending) return;
+    sRouteEvtPending = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        sRouteEvtPending = NO;
+        handleRouteEvent(@"coalesced");
+    });
+}
 // ============================================================
 // 通知合并成一组（源出 NotifsDontHide Feature 1，v1.9.91 并入）
 // ============================================================
@@ -1489,9 +1635,12 @@ static void apv_ndh_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig) {
 }
 
 // 1) 同 App 通知归入同一 thread => 一组
+// v1.9.92：sectionIdentifier 支持性是类级事实，缓存一次（每条通知都进这里）
 static id (*orig_ndh_threadIdentifier)(id, SEL);
 static id hook_ndh_threadIdentifier(id self, SEL _cmd) {
-    if ([self respondsToSelector:@selector(sectionIdentifier)]) {
+    static NSInteger sSupport = 0; // 0=未查 1=支持 -1=不支持
+    if (sSupport == 0) sSupport = [self respondsToSelector:@selector(sectionIdentifier)] ? 1 : -1;
+    if (sSupport == 1) {
         return ((id (*)(id, SEL))objc_msgSend)(self, @selector(sectionIdentifier));
     }
     return orig_ndh_threadIdentifier(self, _cmd);
@@ -1537,13 +1686,13 @@ static void installNotifGrouping(void) {
 
     [[NSNotificationCenter defaultCenter] addObserverForName:AVAudioSessionRouteChangeNotification
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        handleRouteEvent(@"avroute");
+        handleRouteEventDebounced(); // v1.9.92：burst 合并
     }];
 
     // 输出设备列表变化（控制中心切喇叭/切耳机、设备加入都触发，不依赖播放会话）
     [[NSNotificationCenter defaultCenter] addObserverForName:@"AVOutputContextOutputDevicesDidChangeNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-        handleRouteEvent(@"outputdev");
+        handleRouteEventDebounced(); // v1.9.92：连接抖动时每秒连发多次，合并
     }];
 
     // 1.5s 轮询兜底：保证"开盒必切"（系统不切输出时设备列表无变化、通知不触发）。
@@ -1588,13 +1737,13 @@ static void installNotifGrouping(void) {
         sLastRouteForce = 0;    // 车载/设备连接：重置冷却，确保开盒必切/抢回
         sLastDisconnect = 0;    // 清除断开保护期：重新开盒必切（不被摘盒保护挡）
         startPollWindow();
-        handleRouteEvent(@"btconnect");
+        handleRouteEventDebounced(); // v1.9.92：burst 合并（冷却重置/开窗仍立即执行）
     }];
     // AirPods 蓝牙断开 → 立即停止轮询（不等窗口到期）
     [[NSNotificationCenter defaultCenter] addObserverForName:@"BluetoothDeviceDisconnectSuccessNotification"
         object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
         stopPoll();
-        handleRouteEvent(@"btdisconnect");
+        handleRouteEventDebounced(); // v1.9.92：burst 合并
     }];
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
