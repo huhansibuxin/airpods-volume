@@ -1358,10 +1358,14 @@ static void forceRouteToAirPods(const char *why) {
         if (airRoute) {
             BOOL ok = [sMPARouter pickRoute:airRoute];
             routeLog([NSString stringWithFormat:@"mpav-force(%s) ok=%d hfpBefore=%d", why ? why : "?", ok, carHFPActive()]);
-            // 诊断：pickRoute 后 0.6s 复查 HFP 是否跟着切（验证 MediaRemote 能否控制 HFP 通话路由）
+            // v1.9.95：0.6s 后复查**单次抢回成败**——pickRoute 返回 ok=1 ≠ 真切过去
+            //（系统假答应），此前只查 HFP（hfpAfter0.6）是盲区：老板实测"开头几次
+            // 好像没抢成功"无法从日志判定。现在 outAP=1 才是真成功，outAP=0 = 假答应。
+            // 复查自动拿新值：session 快照 TTL 0.4s / outputDevices TTL 0.3s 均 < 0.6s。
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
-                routeLog([NSString stringWithFormat:@"mpav-force(%s) hfpAfter0.6=%d", why ? why : "?", carHFPActive()]);
+                routeLog([NSString stringWithFormat:@"mpav-force(%s) verify0.6 outAP=%d hfp=%d",
+                          why ? why : "?", currentOutputIsAirPods(), carHFPActive()]);
             });
         } else {
             // 列表还没刷新出来（实例刚建）：0.4s 后重试一次，再不行靠轮询兜底
@@ -1407,15 +1411,29 @@ static void forceCallToAirPods(void) {
         id airRoute = nil;
         for (id r in routes) { if (isAirPodsName([r routeName])) { airRoute = r; break; } }
         if (airRoute) {
-            [sMPARouter pickRoute:airRoute];
+            // v1.9.95：补上成败日志 + 0.6s 后复查——此前车载 HFP 抢回**完全静默**
+            //（一行日志都没有），老板没法确认抢回是否真成功。carOwnsCall 三路
+            // 检测（HFP 输出/输入端口/系统输出）走 0.4s/0.3s TTL 缓存，0.6s 后
+            // 复查自动拿新值：carOwns=0 = 车载已放手 = 抢回成功。
+            BOOL ok = [sMPARouter pickRoute:airRoute];
+            routeLog([NSString stringWithFormat:@"call-force ok=%d carBefore=%d", ok, carOwnsCall()]);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                routeLog([NSString stringWithFormat:@"call-force verify0.6 carOwns=%d", carOwnsCall()]);
+            });
         } else {
             // 列表还没刷新出来（实例刚建）：0.4s 后重试一次，再不行靠车模式轮询兜底
+            routeLog(@"call-force no-route-yet");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 if (carOwnsCall()) {
                     NSArray *r2 = [sMPARouter availableRoutes];
                     for (id r in r2) {
-                        if (isAirPodsName([r routeName])) { [sMPARouter pickRoute:r]; break; }
+                        if (isAirPodsName([r routeName])) {
+                            BOOL ok2 = [sMPARouter pickRoute:r];
+                            routeLog([NSString stringWithFormat:@"call-force retry ok=%d", ok2]);
+                            break;
+                        }
                     }
                 }
             });

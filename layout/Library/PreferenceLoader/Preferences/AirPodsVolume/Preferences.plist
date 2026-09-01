@@ -265,7 +265,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>功能说明 · 版本 1.9.94（每次更新插件，版本号在此同步）
+			<string>功能说明 · 版本 1.9.95（每次更新插件，版本号在此同步）
 
 通知合并（NotifsDontHide 并入）：同一 App 的通知从第 2 条起就合并成一栏（iOS 原生为第 5 条起）。打开「通知从第 3 条起才合并成一组」则改为第 3 条起合并，开关即时生效、无需注销。⚠️ 合并版启用后请卸载独立的 NotifsDontHide 包，避免双重 hook 冲突。</string>
 		</dict>
