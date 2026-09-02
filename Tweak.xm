@@ -1845,33 +1845,31 @@ static void sysLog(NSString *msg) { apvWriteEx(@"[SYS]", msg, 30.0, YES); }
 //   · 装载成功但命中 0 → hook 点选错了（方法存在但系统根本不走它）
 // 两种情况修法完全不同，日志里必须一眼分得清。
 // ------------------------------------------------------------
-// v1.9.102：探针表精简——只保留「装载成功且被系统调用」的 hook 点 + 新染色入口。
-// 日志实锤(v1.9.101)：_UIStatusBarItem 基类没有 _fillColorForUpdate:entry:（装载失败），
-// 该方法在 _UIStatusBarWifiItem/_UIStatusBarCellularItem 子类上（头文件 145904/141938 行）；
-// SBIconController/SBIconView/SBIconScrollView 的 gestureRecognizerShouldBegin: 与
-// SBHIconManager setEditing:fromIconView: 均 0 命中 → 全部删除，只保留 SBIconView
-// setEditing:/setEditing:animated: 兜底（命中 132/511 次）。
+// v1.9.103：Lynx2 逆向移植版探针表。
+// 染色换真入口：_UIStatusBarSignalView setActiveColor:（WiFi/Cellular 信号格父类，
+// UIKitCore.h 144593 行，_activeColor ivar 就是亮条颜色）；VPN 状态变化事件用
+// SBStatusBarStateAggregator _updateVPNItem（Lynx2 同款 hook 点）。
+// 长按总闸：SBMainDisplayPolicyAggregator _allowsCapabilityHomeScreenEditingWithExplanation:
+// （Lynx2 disableHSEditing 同款，直接 return NO 长按根本进不了编辑态）。
 enum {
-    kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点绘制入口）✅命中
+    kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点入口）✅命中
     kProbeAppProcess,     // SBApplication _updateProcess:withState:（APP 启停事件）✅命中
-    kProbeWifiFillColor,  // _UIStatusBarWifiItem _fillColorForUpdate:entry:（WiFi 信号格染色）
-    kProbeCellFillColor,  // _UIStatusBarCellularItem _fillColorForUpdate:entry:（蜂窝信号格染色）
-    kProbeWifiApply,      // _UIStatusBarWifiItem applyUpdate:toDisplayItem:（染色兜底候选）
-    kProbeCellularApply,  // _UIStatusBarCellularItem applyUpdate:toDisplayItem:（染色兜底候选）
+    kProbeSignalColor,    // _UIStatusBarSignalView setActiveColor:（信号格染色真入口）v1.9.103
+    kProbeVPNItem,        // SBStatusBarStateAggregator _updateVPNItem（VPN 状态变化事件）v1.9.103
+    kProbeEditPolicy,     // SBMainDisplayPolicyAggregator _allowsCapability...（Lynx 总闸）v1.9.103
     kProbeSetEditingView, // SBIconView setEditing:（长按兜底）✅命中
     kProbeSetEditingViewAnim, // SBIconView setEditing:animated:（长按兜底）✅命中
     kProbeCount
 };
 typedef struct { const char *name; BOOL installed; int hits; } apv_probe_t;
 static apv_probe_t sProbes[kProbeCount] = {
-    { "SBIconView.layoutSubviews",        NO, 0 },
-    { "SBApplication._updateProcess",     NO, 0 },
-    { "WifiItem._fillColorForUpdate",     NO, 0 },
-    { "CellularItem._fillColorForUpdate", NO, 0 },
-    { "WifiItem.applyUpdate",             NO, 0 },
-    { "CellularItem.applyUpdate",         NO, 0 },
-    { "SBIconView.setEditing",            NO, 0 },
-    { "SBIconView.setEditing:animated",   NO, 0 },
+    { "SBIconView.layoutSubviews",      NO, 0 },
+    { "SBApplication._updateProcess",   NO, 0 },
+    { "SignalView.setActiveColor",      NO, 0 },
+    { "Aggregator._updateVPNItem",      NO, 0 },
+    { "PolicyAggregator.editing",       NO, 0 },
+    { "SBIconView.setEditing",          NO, 0 },
+    { "SBIconView.setEditing:animated", NO, 0 },
 };
 
 // 每个探针只在**首次命中**时落一条（写清触发现场）；之后每 200 次补一条计数，
@@ -1920,14 +1918,13 @@ static void apv_sys_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig, i
 // 判定"运行中"：SBApplicationController → SBApplication.processState.isRunning
 // 事件驱动：hook SBApplication 的进程状态更新回调，状态一变就重画，不做轮询。
 // ------------------------------------------------------------
-static const NSInteger kAPVDotTag = 0x41565044; // 'APVD'
+static const NSInteger kAPVDotTag = 0x41565044; // 'APVD'（v1.9.103 起不再用 tag 找点，保留常量兼容旧引用）
 static NSMutableDictionary *sRunCache = nil;    // bundleID -> NSNumber(BOOL) 运行状态缓存
 static os_unfair_lock sRunLock = OS_UNFAIR_LOCK_INIT;
 
-// v1.9.101：缓存绿点的最终 frame / 颜色 / 是否显示，避免每次 layoutSubviews 都重算
-static NSMutableDictionary *sDotFrameCache = nil; // bundleID -> NSValue(CGRect)
-static NSMutableDictionary *sDotColorCache = nil;  // bundleID -> UIColor
-static NSMutableSet *sDotHiddenSet = nil;        // bundleID 当点应 hidden=YES 时加入
+// v1.9.103：缓存简化——旧 sDotFrameCache（手动 frame 缓存）随 Lynx2 约束定位方案一起删除；
+// sDotColorCache 语义改为 bundleID -> NSNumber(BOOL)「上次应用到的运行状态」，做快路径判等。
+static NSMutableDictionary *sDotColorCache = nil;
 static os_unfair_lock sDotCacheLock = OS_UNFAIR_LOCK_INIT;
 
 // v1.9.102：VPN 连接状态不再用「只在 Darwin 通知时刷新」的静态缓存（通知在 SpringBoard
@@ -1990,12 +1987,10 @@ static void apv_invalidateRunCache(void) {
     os_unfair_lock_unlock(&sRunLock);
 }
 
-// v1.9.101：清空绿点 frame/color 缓存（设置变化、开关变化时调用）
+// 清空绿点状态缓存（设置变化、开关变化时调用）
 static void apv_invalidateDotCache(void) {
     os_unfair_lock_lock(&sDotCacheLock);
-    [sDotFrameCache removeAllObjects];
     [sDotColorCache removeAllObjects];
-    [sDotHiddenSet removeAllObjects];
     os_unfair_lock_unlock(&sDotCacheLock);
 }
 
@@ -2006,133 +2001,124 @@ static void apv_logBidOnce(NSString *bid, NSString *prefix, NSMutableSet *seen) 
     sysLog([NSString stringWithFormat:@"%@ %@", prefix, bid]);
 }
 
+// 隐藏/恢复图标名字：SBIconLegibilityLabelView（labelView）的文字在内部 UILabel 层
+static void apv_setIconLabelHidden(UIView *iconView, BOOL hidden) {
+    @try {
+        UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
+        if (![lv isKindOfClass:[UIView class]]) return;
+        for (UIView *sub in lv.subviews) {
+            if ([sub isKindOfClass:[UILabel class]]) sub.hidden = hidden;
+            for (UIView *ss in sub.subviews)
+                if ([ss isKindOfClass:[UILabel class]]) ss.hidden = hidden;
+        }
+    } @catch (id e) {}
+}
+
 static void apv_updateRunDot(UIView *iconView) {
     if (!iconView) return;
     apv_probe(kProbeIconLayout, nil);
 
-    // 开关关：只负责收掉已经画出来的点
+    // 原生 indicator 属性读取（SBIconView 自带，iPad dock 用同款属性存指示点视图）
+    UIView *ind = nil;
+    @try {
+        if ([iconView respondsToSelector:@selector(indicator)])
+            ind = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(indicator));
+    } @catch (id e) {}
+
+    // 开关关：收点（alpha 瞬时归零，切开关是罕见事件，不用动画）+ 恢复名字
     if (!gRunIndicator) {
-        UIView *dot = [iconView viewWithTag:kAPVDotTag];
-        if (dot) dot.hidden = YES;
+        if ([ind isKindOfClass:[UIView class]]) ind.alpha = 0.0;
+        apv_setIconLabelHidden(iconView, NO);
         return;
     }
 
     NSString *bid = apv_iconBundleID(iconView);
     if (!bid.length) {
-        UIView *dot = [iconView viewWithTag:kAPVDotTag];
-        if (dot) dot.hidden = YES;
-        apvWriteEx(@"[SYS]", [NSString stringWithFormat:@"指示点: 取不到 bundleID（类=%@，路径=%d）",
-                              NSStringFromClass([iconView class]), sBidPath], 60.0, YES);
+        if ([ind isKindOfClass:[UIView class]]) ind.alpha = 0.0;
+        apv_setIconLabelHidden(iconView, NO);
         return;
     }
 
-    // 先查运行状态缓存（由 SBApplication _updateProcess 事件驱动刷新）
-    if (!apv_isRunningBundle(bid)) {
-        UIView *dot = [iconView viewWithTag:kAPVDotTag];
-        if (dot) dot.hidden = YES;
-        os_unfair_lock_lock(&sDotCacheLock);
-        [sDotHiddenSet addObject:bid];
-        os_unfair_lock_unlock(&sDotCacheLock);
-        // v1.9.102：不运行 → 恢复显示被我们隐藏的名字
-        @try {
-            UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
-            if ([lv isKindOfClass:[UIView class]]) {
-                for (UIView *sub in lv.subviews) {
-                    if ([sub isKindOfClass:[UILabel class]]) sub.hidden = NO;
-                    for (UIView *ss in sub.subviews)
-                        if ([ss isKindOfClass:[UILabel class]]) ss.hidden = NO;
-                }
-            }
-        } @catch (id e) {}
-        return;
-    }
+    BOOL running = apv_isRunningBundle(bid);
 
-    // v1.9.102（老板要求简化）：绿点 11pt。APP 运行时**永远隐藏图标名字**，
-    // 只显示一个小绿点，放在原文字(labelView)位置的正中。不再分长短名两种摆法。
-    CGFloat d = 11.0;
-    CGRect f = CGRectZero;
-    BOOL labelFound = NO;
-    UILabel *innerLabel = nil;
-
-    @try {
-        UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
-        if ([lv isKindOfClass:[UIView class]] && lv.superview == iconView && lv.bounds.size.width > 0) {
-            // 找真正显示文字的子 UILabel（SBIconSimpleLabelView 是 UIImageView，文字在更深层）
-            for (UIView *sub in lv.subviews) {
-                if ([sub isKindOfClass:[UILabel class]]) { innerLabel = (UILabel *)sub; break; }
-            }
-            if (!innerLabel) {
-                for (UIView *sub in lv.subviews) {
-                    for (UIView *ss in sub.subviews) {
-                        if ([ss isKindOfClass:[UILabel class]]) { innerLabel = (UILabel *)ss; break; }
-                    }
-                    if (innerLabel) break;
-                }
-            }
-            // 点居中在 labelView 区域（图标名字的正中）
-            CGRect lf = [lv convertRect:lv.bounds toView:iconView];
-            f = CGRectMake(CGRectGetMidX(lf) - d * 0.5, CGRectGetMidY(lf) - d * 0.5, d, d);
-            labelFound = YES;
+    // 快路径：点已建、归属同一个 app、显隐状态没变 → 布局期零开销直接返回
+    if ([ind isKindOfClass:[UIView class]]) {
+        NSString *owner = objc_getAssociatedObject(ind, @selector(hash));
+        if ([owner isEqualToString:bid]) {
+            os_unfair_lock_lock(&sDotCacheLock);
+            NSNumber *last = [sDotColorCache objectForKey:bid];
+            os_unfair_lock_unlock(&sDotCacheLock);
+            if (last && (BOOL)last.boolValue == running &&
+                ((running && ind.alpha > 0.99) || (!running && ind.alpha < 0.01)))
+                return;
+            if (ind.superview == nil) [iconView addSubview:ind]; // 布局期被子视图清空的兜底
         }
-    } @catch (id e) {}
-
-    // 找不到 labelView：点放在图标底部中心，但先 hidden=YES，避免一闪
-    if (!labelFound) {
-        CGSize s = iconView.bounds.size;
-        f = CGRectMake((s.width - d) * 0.5, s.height - 6.0, d, d);
     }
 
-    // 读缓存的 frame：如果与本次计算一致且状态没变，直接复用（减少布局抖动）
+    // 建点（一次）：原生属性挂靠 + 纯约束定位（Lynx2 同款做法）
+    if (![ind isKindOfClass:[UIView class]]) {
+        @try {
+            if (![iconView respondsToSelector:@selector(setIndicator:)]) return;
+            ind = [[UIView alloc] initWithFrame:CGRectZero];
+            ((void (*)(id, SEL, id))objc_msgSend)(iconView, @selector(setIndicator:), ind);
+        } @catch (id e) { return; }
+        ind.userInteractionEnabled = NO;
+        ind.translatesAutoresizingMaskIntoConstraints = NO;
+        [iconView addSubview:ind];
+        ind.layer.cornerRadius = 5.5;      // 11pt 圆点
+        ind.layer.continuousCorners = YES; // Lynx 同款连续圆角
+        objc_setAssociatedObject(ind, @selector(hash), bid, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        // 约束定位：优先锚到文字位（老板要求"点在文字正中"）；文字位不可用退回 Lynx 摆法
+        UIView *label = nil;
+        @try {
+            if ([iconView respondsToSelector:@selector(labelView)])
+                label = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
+        } @catch (id e) {}
+        if ([label isKindOfClass:[UIView class]] && label.superview == iconView) {
+            [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeCenterX relatedBy:NSLayoutRelationEqual toItem:label attribute:NSLayoutAttributeCenterX multiplier:1.0 constant:0.0]];
+            [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:label attribute:NSLayoutAttributeCenterY multiplier:1.0 constant:0.0]];
+        } else {
+            Ivar iv = class_getInstanceVariable(object_getClass(iconView), "_scalingContainer");
+            UIView *container = iv ? object_getIvar(iconView, iv) : nil;
+            if ([container isKindOfClass:[UIView class]] && container.superview == iconView) {
+                [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeCenterX relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeCenterX multiplier:1.0 constant:0.0]];
+                [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeBottom multiplier:1.0 constant:5.0]];
+            } else {
+                [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeCenterX relatedBy:NSLayoutRelationEqual toItem:iconView attribute:NSLayoutAttributeCenterX multiplier:1.0 constant:0.0]];
+                [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeBottom relatedBy:NSLayoutRelationEqual toItem:iconView attribute:NSLayoutAttributeBottom multiplier:1.0 constant:-6.0]];
+            }
+        }
+        [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:11.0]];
+        [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeHeight relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:11.0]];
+        ind.backgroundColor = gRunDotColor ?: [UIColor whiteColor];
+    } else {
+        // SBIconView 单元格可能被复用到别的 app：归属变了就换色换标
+        NSString *owner = objc_getAssociatedObject(ind, @selector(hash));
+        if (![owner isEqualToString:bid]) {
+            objc_setAssociatedObject(ind, @selector(hash), bid, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            ind.backgroundColor = gRunDotColor ?: [UIColor whiteColor];
+        }
+    }
+
+    // 名字显隐：运行中永远隐藏（v1.9.102 定的样式），不运行恢复显示
+    apv_setIconLabelHidden(iconView, running);
+
+    // 显隐动画（Lynx 同款 transitionWithView；我们用全不透明纯色点）
+    CGFloat target = running ? 1.0 : 0.0;
+    if (ind.alpha != target) {
+        [UIView transitionWithView:ind duration:0.25 options:0 animations:^{ ind.alpha = target; } completion:nil];
+    }
+
     os_unfair_lock_lock(&sDotCacheLock);
-    NSValue *cachedFrame = [sDotFrameCache objectForKey:bid];
-    UIColor *cachedColor = [sDotColorCache objectForKey:bid];
-    BOOL wasHidden = [sDotHiddenSet containsObject:bid];
-    os_unfair_lock_unlock(&sDotCacheLock);
-
-    UIView *dot = [iconView viewWithTag:kAPVDotTag];
-    if (!dot) {
-        dot = [[UIView alloc] initWithFrame:f];
-        dot.tag = kAPVDotTag;
-        dot.userInteractionEnabled = NO;
-        dot.hidden = YES;
-        [iconView addSubview:dot];
-    }
-
-    UIColor *targetColor = gRunDotColor ?: [UIColor whiteColor];
-    BOOL frameChanged = YES;
-    if (cachedFrame) {
-        CGRect cf = [cachedFrame CGRectValue];
-        if (CGRectEqualToRect(cf, f)) frameChanged = NO;
-    }
-
-    // 如果状态/颜色/位置都没变，直接 return，不碰 UI（省电，防抖动）
-    if (!frameChanged && cachedColor && [cachedColor isEqual:targetColor] && !wasHidden && !dot.hidden && labelFound) {
-        return;
-    }
-
-    // 真正需要更新
-    dot.frame = f;
-    dot.layer.cornerRadius = d * 0.5;
-    dot.backgroundColor = targetColor;
-    dot.hidden = NO;
-    [iconView bringSubviewToFront:dot];
-
-    // v1.9.102：运行中 → 永远隐藏图标名字（只显示绿点）
-    if (innerLabel) innerLabel.hidden = YES;
-
-    os_unfair_lock_lock(&sDotCacheLock);
-    if (!sDotFrameCache) sDotFrameCache = [[NSMutableDictionary alloc] init];
     if (!sDotColorCache) sDotColorCache = [[NSMutableDictionary alloc] init];
-    if (!sDotHiddenSet) sDotHiddenSet = [[NSMutableSet alloc] init];
-    [sDotFrameCache setObject:[NSValue valueWithCGRect:f] forKey:bid];
-    [sDotColorCache setObject:targetColor forKey:bid];
-    [sDotHiddenSet removeObject:bid];
+    [sDotColorCache setObject:[NSNumber numberWithBool:running] forKey:bid];
     os_unfair_lock_unlock(&sDotCacheLock);
 
     static NSMutableSet *sDotSeen = nil;
     static dispatch_once_t dotOnce;
     dispatch_once(&dotOnce, ^{ sDotSeen = [[NSMutableSet alloc] init]; });
-    apv_logBidOnce(bid, @"指示点: 已画点(运行中)", sDotSeen);
+    apv_logBidOnce(bid, running ? @"指示点: 显示(运行中)" : @"指示点: 隐藏(未运行)", sDotSeen);
 }
 
 static void apv_recurseIconDots(UIView *v, NSInteger depth) {
@@ -2193,12 +2179,20 @@ static void hook_app_updateProcess(id self, SEL _cmd, id process, id state) {
 // ------------------------------------------------------------
 // ③ 连接 VPN 染色 — 改染 WiFi/Cellular（v1.9.97 老板反馈）
 // ------------------------------------------------------------
-// v1.9.100：按 SystemX 反编译实锤的做法，改 hook _UIStatusBarItem 基类的
-// -_fillColorForUpdate:entry:。entry 为 _UIStatusBarDataWifiEntry 或
-// _UIStatusBarDataCellularEntry 且 VPN 连接时，直接返回用户自定义色；否则回传 %orig。
-// 这样染的是状态栏"WiFi / 4G / 5G 信号"这一格的填充色，不会再染到 VPN 自身图标。
-// VPN 是否连接用 NEVPNManager.connection.status，状态变化通过 Darwin 通知
-// com.apple.networkextension.vpn.status_changed 监听（连上/断开即时触发重绘，无 polling）。
+// v1.9.103（Lynx2 移植轮）：染**信号格**的真入口是父类 _UIStatusBarSignalView
+// 的 -setActiveColor:（UIKitCore.h:144593 实锤 ivar _activeColor 就是亮条颜色；
+// _UIStatusBarWifiSignalView / _UIStatusBarCellularSignalView 全部变体都是它的
+// 子类 → hook 父类一个点通吃 WiFi + 4G/5G）。
+//   · 连接时：setActiveColor: 被系统刷色 → hook 记下原色（只记第一次，防把染色
+//     当原色缓存），转手喂用户自定义色；
+//   · 断开/关开关时：从缓存取回原色喂回，恢复系统色。
+// VPN 状态变化事件 = SBStatusBarStateAggregator _updateVPNItem（Lynx2 隐藏 VPN
+// 图标同款 hook 点，连/断 SpringBoard 必调），触发后把窗口里现存 SignalView 的
+// 当前 _activeColor 经 msgSend 喂回 setActiveColor:（走 hook：连=染色/断=恢复）。
+// 兜底仍是 NEVPNManager.connection.status 反射查询 + Darwin 通知
+// com.apple.networkextension.vpn.status_changed，无 polling。
+// （历史：v1.9.100-102 的 _fillColorForUpdate:entry: / applyUpdate:toDisplayItem:
+//   路线已删——基类无该方法、子类染不动，多版 0 命中。）
 // ------------------------------------------------------------
 // 私有 API 声明
 @interface NEVPNConnection : NSObject
@@ -2259,112 +2253,132 @@ static void apv_refreshVPNCache(void) {
             on, gColorizeVPN, apv_colorCode(gVPNColor ?: [UIColor orangeColor])]);
 }
 
-// VPN 状态变化（Darwin 通知）：强制重查一次并打日志（通知不一定收得到，收到就赚）
+// VPN 状态变化（Darwin 通知）：强制重查一次并重刷信号格颜色。
+// （这个 Darwin 通知在 SpringBoard 实测收不到，v1.9.103 的主刷新走 _updateVPNItem hook；
+//   这里保留作兜底——万一收到就赚。Darwin 回调不在主线程 → 回主队列再动 UI。）
 static void apv_vpnStatusChanged(CFNotificationCenterRef center, void *observer,
                                  CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    apv_refreshVPNCache();
+    dispatch_async(dispatch_get_main_queue(), ^{
+        apv_refreshVPNCache();
+        apv_vpnRefreshSignalViews();
+    });
 }
 
 // ------------------------------------------------------------
-// ③ 连接 VPN 染色 — v1.9.102 真入口：hook WiFi/Cellular **子类**的 _fillColorForUpdate:entry:
+// ③ 连接 VPN 染色 — v1.9.103：Lynx2 逆向后的真入口 _UIStatusBarSignalView setActiveColor:
 // ------------------------------------------------------------
-// 日志实锤（v1.9.101）：_UIStatusBarItem 基类**没有** _fillColorForUpdate:entry:（装载失败），
-// 但头文件（UIKitCore.h 145904/141938 行）显示 _UIStatusBarWifiItem / _UIStatusBarCellularItem
-// 子类**都有**该方法，且信号格填充色（WiFi 信号 / 4G/5G 信号格）就由它返回的 UIColor 决定。
-// 所以染色 hook 必须落在子类上，不是基类。applyUpdate:toDisplayItem: 改 _imageView.tintColor
-// 保留作兜底（1.9.99 曾命中过 1 次，imageView 偶尔非 nil）。
-// VPN 连接状态：0.5s 节流的实时查询（状态栏刷新驱动，不是后台轮询），状态变化最多延迟
-// 0.5 秒生效；Darwin 通知仍保留用于强制刷新缓存（收到即置下次立即重查）。
+// 头文件实锤（UIKitCore.h 144593 行）：_UIStatusBarSignalView 是 WiFi/蟬窝信号格的公共父类，
+//   ivar UIColor * _activeColor(+0x1b0) 就是"亮条"颜色；setter -setActiveColor:。
+//   _UIStatusBarWifiSignalView / _UIStatusBarCellularSignalView（Small/Flat/Expanded 变体）全是它子类。
+//   → hook 父类 setter 一个点通吃 WiFi + 4G/5G。
+// 旧路线全部删除：_fillColorForUpdate:entry:（基类无、子类染不动）、applyUpdate:toDisplayItem:
+//   tintColor 兑底（仅 1 次命中、染不到信号格）。
+// VPN 状态变化事件：hook SBStatusBarStateAggregator _updateVPNItem（Lynx2 隐藏 VPN 图标同款
+//   入口，VPN 连/断 SpringBoard 必调）→ 触发信号格颜色重刷（事件驱动，无轮询）。
+// VPN 是否连接：NEVPNManager.connection.status 0.5s 节流实时查（沿用 v1.9.102）。
 // ------------------------------------------------------------
-// WiFi 信号格填充色入口（hook 子类 _UIStatusBarWifiItem）
-static id (*orig_wifi_fillColor)(id, SEL, id, id);
-static id hook_wifi_fillColor(id self, SEL _cmd, id update, id entry) {
-    apv_probe(kProbeWifiFillColor, nil); // 无条件探针：先证明这个点真的被系统调
-    id r = nil;
-    @try {
-        if (orig_wifi_fillColor) r = orig_wifi_fillColor(self, _cmd, update, entry);
-    } @catch (id e) {}
-    UIColor *c = apv_vpnColorIfActive();
-    if (!c) return r;
-    return c; // VPN 连 → 信号格填充用户色
+// 信号格"系统原色"缓存：view(弱引用) -> UIColor，VPN 断开时恢复用
+static NSMapTable *sSignalOrigColor = nil;
+static os_unfair_lock sSignalLock = OS_UNFAIR_LOCK_INIT;
+
+static void apv_signalCacheInit(void) {
+    if (!sSignalOrigColor)
+        sSignalOrigColor = [NSMapTable weakToStrongObjectsMapTable];
 }
 
-// 蜂窝 4G/5G 信号格填充色入口（hook 子类 _UIStatusBarCellularItem）
-static id (*orig_cell_fillColor)(id, SEL, id, id);
-static id hook_cell_fillColor(id self, SEL _cmd, id update, id entry) {
-    apv_probe(kProbeCellFillColor, nil); // 无条件探针
-    id r = nil;
+// 读信号格当前 _activeColor ivar（只读，不走 setter 避免递归）
+static UIColor *apv_signalGetActiveColor(id view) {
     @try {
-        if (orig_cell_fillColor) r = orig_cell_fillColor(self, _cmd, update, entry);
-    } @catch (id e) {}
-    UIColor *c = apv_vpnColorIfActive();
-    if (!c) return r;
-    return c;
-}
-
-// _UIStatusBarItem 只有 _imageView ivar（_UIStatusBarImageView *），没有 imageView 方法。
-// 直接发 imageView 消息会触发「未识别 selector」→ SpringBoard 崩溃。这里从 ivar 安全读取。
-static UIImageView *apv_statusItemImageView(id item) {
-    if (!item) return nil;
-    @try {
-        Ivar iv = class_getInstanceVariable(object_getClass(item), "_imageView");
+        Ivar iv = class_getInstanceVariable(object_getClass(view), "_activeColor");
         if (!iv) return nil;
-        id v = object_getIvar(item, iv);
-        return [v isKindOfClass:[UIImageView class]] ? (UIImageView *)v : nil;
+        id c = object_getIvar(view, iv);
+        return [c isKindOfClass:[UIColor class]] ? (UIColor *)c : nil;
     } @catch (id e) { return nil; }
 }
 
-// 兜底：applyUpdate:toDisplayItem: 里改 _imageView.tintColor（探针无条件先打）
-static id (*orig_wifi_applyUpdate)(id, SEL, id, id);
-static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    apv_probe(kProbeWifiApply, nil);
-    id r = nil;
-    @try {
-        if (orig_wifi_applyUpdate) r = orig_wifi_applyUpdate(self, _cmd, update, displayItem);
-    } @catch (id e) {}
-    UIColor *c = apv_vpnColorIfActive();
-    if (!c) return r;
-    UIImageView *v = apv_statusItemImageView(self);
-    if (v) {
-        if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
-            v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-        v.tintColor = c;
-    }
-    return r;
+// 递归找 _UIStatusBarSignalView 实例
+static void apv_vpnWalkSignalViews(UIView *v, Class signalCls, void (^apply)(UIView *)) {
+    if (!v) return;
+    if ([v isKindOfClass:signalCls]) apply(v);
+    for (UIView *sub in v.subviews) apv_vpnWalkSignalViews(sub, signalCls, apply);
 }
 
-static id (*orig_cellular_applyUpdate)(id, SEL, id, id);
-static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    apv_probe(kProbeCellularApply, nil);
-    id r = nil;
+// VPN 状态变化后重刷信号格颜色：把当前色再喂回 setActiveColor:
+// （走我们的 hook：连=染用户色，断=恢复系统色）。只在 VPN 变化时跑一次。
+static void apv_vpnRefreshSignalViews(void) {
     @try {
-        if (orig_cellular_applyUpdate) r = orig_cellular_applyUpdate(self, _cmd, update, displayItem);
+        apv_signalCacheInit();
+        Class signalCls = NSClassFromString(@"_UIStatusBarSignalView");
+        if (!signalCls) return;
+        __block int touched = 0;
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                apv_vpnWalkSignalViews(w, signalCls, ^(UIView *v) {
+                    touched++;
+                    UIColor *cur = apv_signalGetActiveColor(v);
+                    if (cur && [v respondsToSelector:@selector(setActiveColor:)])
+                        ((void (*)(id, SEL, id))objc_msgSend)(v, @selector(setActiveColor:), cur);
+                });
+            }
+        }
+        if (touched) apvWriteEx(@"[VPN]", [NSString stringWithFormat:@"信号格重刷: 触达 %d 个 SignalView", touched], 60.0, YES);
     } @catch (id e) {}
-    UIColor *c = apv_vpnColorIfActive();
-    if (!c) return r;
-    UIImageView *v = apv_statusItemImageView(self);
-    if (v) {
-        if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
-            v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-        v.tintColor = c;
+}
+
+// 染色 hook：_UIStatusBarSignalView setActiveColor:（父类，WiFi+蟬窝通吃）
+static void (*orig_signal_setActiveColor)(id, SEL, UIColor *);
+static void hook_signal_setActiveColor(id self, SEL _cmd, UIColor *c) {
+    apv_probe(kProbeSignalColor, apv_colorCode(c));
+    apv_signalCacheInit();
+    UIColor *tint = apv_vpnColorIfActive();
+    if (tint) {
+        // 记住系统原色（只记第一次，防止把染色后的绿色当原色缓存）
+        os_unfair_lock_lock(&sSignalLock);
+        if (sSignalOrigColor && ![sSignalOrigColor objectForKey:self])
+            [sSignalOrigColor setObject:(c ?: [UIColor whiteColor]) forKey:self];
+        os_unfair_lock_unlock(&sSignalLock);
+        orig_signal_setActiveColor(self, _cmd, tint);
+        return;
     }
-    return r;
+    // VPN 没连：若这格被染过 → 恢复系统原色
+    os_unfair_lock_lock(&sSignalLock);
+    UIColor *origC = sSignalOrigColor ? [sSignalOrigColor objectForKey:self] : nil;
+    if (origC) [sSignalOrigColor removeObjectForKey:self];
+    os_unfair_lock_unlock(&sSignalLock);
+    orig_signal_setActiveColor(self, _cmd, origC ?: c);
+}
+
+// VPN 状态变化事件（Lynx2 同款 hook 点）：连/断各触发一次信号格重刷
+static void (*orig_agg_updateVPNItem)(id, SEL);
+static void hook_agg_updateVPNItem(id self, SEL _cmd) {
+    apv_probe(kProbeVPNItem, nil);
+    orig_agg_updateVPNItem(self, _cmd);
+    sLastVPNProbe = 0; // 强制下次 setActiveColor: 立即重查 VPN 状态
+    dispatch_async(dispatch_get_main_queue(), ^{ apv_vpnRefreshSignalViews(); });
+    // 状态栏这轮更新画完后再补一刀（一次性按需定时器，不是轮询）
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ apv_vpnRefreshSignalViews(); });
 }
 
 // ------------------------------------------------------------
-// ④ 禁用桌面长按 — v1.9.102 清理：删除所有 0 命中的 hook 点
+// ④ 禁用桌面长按 — v1.9.103：Lynx2 总闸 + setEditing 兜底
 // ------------------------------------------------------------
-// 日志实锤（v1.9.101 探针汇总）：
-//   · SBIconController.gestureRecognizerShouldBegin:   装载失败（类/方法不存在）
-//   · SBIconView.gestureRecognizerShouldBegin:         已装/0 命中
-//   · SBIconScrollView.gestureRecognizerShouldBegin:   已装/0 命中
-//   · SBHIconManager setEditing:fromIconView:          已装/0 命中
-//   → 上面 4 个 hook 点全部删除。
-//   · SBIconView setEditing:                           命中 132 次
-//   · SBIconView setEditing:animated:                  命中 511 次
-//   → 只保留这两个命中点做兜底拦截（editing=YES 时不进编辑态）。
-//   老板已接受：若长按仍偶发进入编辑态（"完成"/"+"），本功能不再深挖。
+// 总闸（Lynx2 disableHSEditing 反汇编实锤同款）：SBMainDisplayPolicyAggregator
+//   -_allowsCapabilityHomeScreenEditingWithExplanation: 是 iOS 16 桌面编辑能力的系统级判定
+//   （SpringBoard/SBMainDisplayPolicyAggregator.h:54），返回 NO 后长按图标根本进不了
+//   抖动模式，"完成"/"+" 都不会出现——这就是 Lynx2"他的不会"的原因。
+// 历史教训（v1.9.101 探针汇总）：SBIconController/SBIconView/SBIconScrollView 的
+//   gestureRecognizerShouldBegin: 与 SBHIconManager setEditing:fromIconView: 均 0 命中/装载
+//   失败 → 不再回头。SBIconView setEditing:/setEditing:animated:（命中 132/511 次）继续兜底。
 // ------------------------------------------------------------
+static BOOL (*orig_editPolicy)(id, SEL, id *);
+static BOOL hook_editPolicy(id self, SEL _cmd, id *explanation) {
+    apv_probe(kProbeEditPolicy, gDisableHomeLongPress ? @"开关开→拒绝编辑" : nil);
+    if (gDisableHomeLongPress) return NO;
+    return orig_editPolicy(self, _cmd, explanation);
+}
+
 static void (*orig_setEditing)(id, SEL, BOOL);
 static void hook_setEditing(id self, SEL _cmd, BOOL editing) {
     apv_probe(kProbeSetEditingView, [NSString stringWithFormat:@"editing=%d 开关=%d",
@@ -2388,16 +2402,14 @@ static void hook_setEditingAnimated(id self, SEL _cmd, BOOL editing, BOOL animat
 }
 
 static void installSystemXFeatures(void) {
-    // v1.9.101：初始化运行/绿点/VPN 缓存字典
+    // 初始化运行/绿点缓存字典
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         sRunCache = [[NSMutableDictionary alloc] init];
-        sDotFrameCache = [[NSMutableDictionary alloc] init];
         sDotColorCache = [[NSMutableDictionary alloc] init];
-        sDotHiddenSet = [[NSMutableSet alloc] init];
     });
 
-    // v1.9.101 开关快照：注销不锁屏/VPN飞入已下线；染色双保险；长按多入口拦截
+    // v1.9.103 开关快照：指示点/VPN染色/禁长按全换 Lynx2 同款机制
     sysLog([NSString stringWithFormat:
             @"开关状态: 指示点=%d(%@) VPN变色=%d(%@) 禁长按=%d | 诊断日志=%d",
             gRunIndicator, apv_colorCode(gRunDotColor),
@@ -2405,25 +2417,35 @@ static void installSystemXFeatures(void) {
             gDisableHomeLongPress, gVolDiag]);
 
     apv_refreshVPNCache();
+    apv_signalCacheInit();
 
-    // ① APP 运行指示点
+    // ① APP 运行指示点（Lynx2 原生机制：约束定位 + SBApplicationProcessStateDidChange 事件驱动）
     apv_sys_try_hook("SBIconView", @selector(layoutSubviews),
                      (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews, kProbeIconLayout);
     apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
                      (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess, kProbeAppProcess);
+    // Lynx2 同款：SB 进程内通知，app 启停/前后台时 SpringBoard 自发（NSNotificationCenter，非 Darwin）
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"SBApplicationProcessStateDidChange"
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        if (!gRunIndicator) return;
+        apv_invalidateRunCache();  // 清缓存 → 刷新时走实时查询，状态最准
+        apv_refreshAllIconDots();
+    }];
 
-    // ③ VPN 变色 — v1.9.102：hook WiFi/Cellular 子类的 _fillColorForUpdate:entry:（真入口，
-    // 基类无此方法，v1.9.101 日志实锤装载失败）；applyUpdate 改 tintColor 作兜底
-    apv_sys_try_hook("_UIStatusBarWifiItem", @selector(_fillColorForUpdate:entry:),
-                     (IMP)&hook_wifi_fillColor, (IMP *)&orig_wifi_fillColor, kProbeWifiFillColor);
-    apv_sys_try_hook("_UIStatusBarCellularItem", @selector(_fillColorForUpdate:entry:),
-                     (IMP)&hook_cell_fillColor, (IMP *)&orig_cell_fillColor, kProbeCellFillColor);
-    apv_sys_try_hook("_UIStatusBarWifiItem", @selector(applyUpdate:toDisplayItem:),
-                     (IMP)&hook_wifi_applyUpdate, (IMP *)&orig_wifi_applyUpdate, kProbeWifiApply);
-    apv_sys_try_hook("_UIStatusBarCellularItem", @selector(applyUpdate:toDisplayItem:),
-                     (IMP)&hook_cellular_applyUpdate, (IMP *)&orig_cellular_applyUpdate, kProbeCellularApply);
+    // ③ VPN 变色 — v1.9.103：hook 信号格父类 setActiveColor:（真入口，WiFi+蜂窝通吃）
+    //    + SBStatusBarStateAggregator _updateVPNItem（VPN 连/断事件触发重刷）
+    apv_sys_try_hook("_UIStatusBarSignalView", @selector(setActiveColor:),
+                     (IMP)&hook_signal_setActiveColor, (IMP *)&orig_signal_setActiveColor, kProbeSignalColor);
+    apv_sys_try_hook("SBStatusBarStateAggregator", @selector(_updateVPNItem),
+                     (IMP)&hook_agg_updateVPNItem, (IMP *)&orig_agg_updateVPNItem, kProbeVPNItem);
 
-    // ④ 禁用桌面长按 — v1.9.102：只保留命中点 SBIconView setEditing:/setEditing:animated:
+    // ④ 禁用桌面长按 — v1.9.103：Lynx2 总闸 _allowsCapabilityHomeScreenEditingWithExplanation:
+    //    （系统级编辑能力判定，return NO 后长按根本进不了抖动模式，"完成"/"+" 不会出现）
+    apv_sys_try_hook("SBMainDisplayPolicyAggregator", @selector(_allowsCapabilityHomeScreenEditingWithExplanation:),
+                     (IMP)&hook_editPolicy, (IMP *)&orig_editPolicy, kProbeEditPolicy);
+    // setEditing: 兜底继续保留（Lynx2 之外的其他入口防御）
     apv_sys_try_hook("SBIconView", @selector(setEditing:),
                      (IMP)&hook_setEditing, (IMP *)&orig_setEditing, kProbeSetEditingView);
     apv_sys_try_hook("SBIconView", @selector(setEditing:animated:),
@@ -2477,6 +2499,8 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
             apv_refreshAllIconDots();
         }
         apv_refreshVPNCache();
+        // v1.9.103：VPN 染色开关切换 → 立即重刷信号格（连=染色 / 断=恢复原色），免注销
+        apv_vpnRefreshSignalViews();
         // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
         // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
         if (sAirPodsConnected) {
