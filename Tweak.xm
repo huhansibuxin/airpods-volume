@@ -627,8 +627,14 @@ static dispatch_queue_t apv_log_queue(void) {
     return q;
 }
 
-static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
-    if (!gVolDiag) return;
+// v1.9.96：force=YES 是「装载/探针」专用通道（[SYS] 标签）。
+// 它回答的是"hook 到底挂没挂上、挂上后有没有被触发"——排查的第一证据，
+// 不能因为「诊断日志」开关没开就一行都看不到（v1.9.82 之前的 airpods_boot.log
+// 就是不受门控的，那是当年唯一能确认 hook 生效的手段）。
+// 量极小且一次性：装载结果 + 每个探针首次命中 + 启动/5s/30s 三次汇总，
+// 之后全部走 30s 限流；不进任何热路径，不影响性能。
+static void apvWriteEx(NSString *tag, NSString *msg, NSTimeInterval throttle, BOOL force) {
+    if (!force && !gVolDiag) return;
     if (throttle > 0.0 && !apv_throttle(msg, throttle)) return;
     NSString *ts = [[NSDate date] description]; // 时间戳在提交时刻取，保序
     dispatch_async(apv_log_queue(), ^{
@@ -645,6 +651,10 @@ static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
         fprintf(f, "[%s] %s %s\n", [ts UTF8String], [tag UTF8String], [msg UTF8String]);
         fclose(f);
     });
+}
+
+static void apvWrite(NSString *tag, NSString *msg, NSTimeInterval throttle) {
+    apvWriteEx(tag, msg, throttle, NO);
 }
 
 // 音量重点日志：**盯紧**，只做 1s 内完全相同消息的去重
@@ -1826,16 +1836,73 @@ static void installNotifGrouping(void) {
 // 受「诊断日志」总开关门控。全部功能默认关闭。
 // ============================================================
 
-static void sysLog(NSString *msg) { apvWrite(@"[SYS]", msg, 30.0); }
+// 走 force 通道：不受「诊断日志」开关门控，装没装上永远有据可查
+static void sysLog(NSString *msg) { apvWriteEx(@"[SYS]", msg, 30.0, YES); }
+
+// ------------------------------------------------------------
+// 探针：把「没装载」和「装了但从没被触发」区分开
+//   · 装载失败 → 类/方法在这个 iOS 版本上不存在，得换 hook 点
+//   · 装载成功但命中 0 → hook 点选错了（方法存在但系统根本不走它）
+// 两种情况修法完全不同，日志里必须一眼分得清。
+// ------------------------------------------------------------
+enum {
+    kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点绘制入口）
+    kProbeAppProcess,     // SBApplication _updateProcess:withState:（APP 启停事件）
+    kProbeSetUILocked,    // SBLockScreenManager _setUILocked:
+    kProbeLockFromSource, // SBLockScreenManager lockUIFromSource:withOptions:
+    kProbeVPNApply,       // _UIStatusBarIndicatorVPNItem applyUpdate:toDisplayItem:
+    kProbeVPNAddAnim,     // ...additionAnimationForDisplayItemWithIdentifier:
+    kProbeLongPress,      // SBIconView editingModeGestureRecognizerDidFire:
+    kProbeLongPressMgr,   // SBHIconManager iconView:editingModeGestureRecognizerDidFire:
+    kProbeCount
+};
+typedef struct { const char *name; BOOL installed; int hits; } apv_probe_t;
+static apv_probe_t sProbes[kProbeCount] = {
+    { "SBIconView.layoutSubviews",        NO, 0 },
+    { "SBApplication._updateProcess",     NO, 0 },
+    { "SBLockScreenManager._setUILocked", NO, 0 },
+    { "SBLockScreenManager.lockSrc",      NO, 0 },
+    { "VPNItem.applyUpdate",              NO, 0 },
+    { "VPNItem.additionAnim",             NO, 0 },
+    { "SBIconView.longPressFire",         NO, 0 },
+    { "SBHIconManager.longPressFire",     NO, 0 },
+};
+
+// 每个探针只在**首次命中**时落一条（写清触发现场）；之后每 200 次补一条计数，
+// 既能证明"一直在被调"，又不会把日志刷爆。
+static void apv_probe(int idx, NSString *detail) {
+    if (idx < 0 || idx >= kProbeCount) return;
+    sProbes[idx].hits++;
+    if (sProbes[idx].hits == 1) {
+        apvWriteEx(@"[SYS]", [NSString stringWithFormat:@"探针命中 %s %@",
+                              sProbes[idx].name, detail ? detail : @""], 0.0, YES);
+    } else if (sProbes[idx].hits % 200 == 0) {
+        apvWriteEx(@"[SYS]", [NSString stringWithFormat:@"探针 %s 累计命中 %d 次",
+                              sProbes[idx].name, sProbes[idx].hits], 0.0, YES);
+    }
+}
+
+// 汇总快照：5s（刚启动完）/ 30s（用户已开始操作）各一次
+static void apv_probeSummary(NSString *when) {
+    @try {
+        NSMutableString *m = [NSMutableString stringWithFormat:@"探针汇总(%@): ", when];
+        for (int i = 0; i < kProbeCount; i++) {
+            [m appendFormat:@"%s[%@/%d] ", sProbes[i].name,
+                            sProbes[i].installed ? @"已装" : @"未装", sProbes[i].hits];
+        }
+        apvWriteEx(@"[SYS]", m, 0.0, YES);
+    } @catch (id e) {}
+}
 
 // 带装载结果日志的 hook：排查"哪条没挂上"直接看日志，不用猜
-static void apv_sys_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig) {
+static void apv_sys_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig, int probeIdx) {
     Class cls = objc_getClass(clsName);
     if (!cls || !class_getInstanceMethod(cls, sel)) {
         sysLog([NSString stringWithFormat:@"装载失败（跳过）: %s %@", clsName, NSStringFromSelector(sel)]);
         return;
     }
     MSHookMessageEx(cls, sel, imp, orig);
+    if (probeIdx >= 0 && probeIdx < kProbeCount) sProbes[probeIdx].installed = YES;
     sysLog([NSString stringWithFormat:@"装载成功: %s %@", clsName, NSStringFromSelector(sel)]);
 }
 
@@ -1851,14 +1918,33 @@ static const NSInteger kAPVDotTag = 0x41565044; // 'APVD'
 static NSMutableDictionary *sRunCache = nil;    // bundleID -> NSNumber(BOOL)
 static os_unfair_lock sRunLock = OS_UNFAIR_LOCK_INIT;
 
+// 三条取 bundleID 的路径依次降级（不同 iOS 版本/图标类型能拿到的不一样），
+// 走通哪条记进 sBidPath，探针日志里能看到——万一取不到，一眼知道是哪条断了。
+static int sBidPath = 0; // 0=未取到过 1=icon.applicationBundleID 2=icon.application.bundleIdentifier 3=iconView.applicationBundleIdentifierForShortcuts
 static NSString *apv_iconBundleID(UIView *iconView) {
     @try {
-        if (![iconView respondsToSelector:@selector(icon)]) return nil;
-        id icon = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(icon));
-        if (!icon || ![icon respondsToSelector:@selector(applicationBundleID)]) return nil;
-        id bid = ((id (*)(id, SEL))objc_msgSend)(icon, @selector(applicationBundleID));
-        return [bid isKindOfClass:[NSString class]] ? bid : nil;
-    } @catch (id e) { return nil; }
+        if ([iconView respondsToSelector:@selector(icon)]) {
+            id icon = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(icon));
+            if (icon) {
+                if ([icon respondsToSelector:@selector(applicationBundleID)]) {
+                    id bid = ((id (*)(id, SEL))objc_msgSend)(icon, @selector(applicationBundleID));
+                    if ([bid isKindOfClass:[NSString class]] && [bid length]) { sBidPath = 1; return bid; }
+                }
+                if ([icon respondsToSelector:@selector(application)]) {
+                    id app = ((id (*)(id, SEL))objc_msgSend)(icon, @selector(application));
+                    if ([app respondsToSelector:@selector(bundleIdentifier)]) {
+                        id bid = ((id (*)(id, SEL))objc_msgSend)(app, @selector(bundleIdentifier));
+                        if ([bid isKindOfClass:[NSString class]] && [bid length]) { sBidPath = 2; return bid; }
+                    }
+                }
+            }
+        }
+        if ([iconView respondsToSelector:@selector(applicationBundleIdentifierForShortcuts)]) {
+            id bid = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(applicationBundleIdentifierForShortcuts));
+            if ([bid isKindOfClass:[NSString class]] && [bid length]) { sBidPath = 3; return bid; }
+        }
+    } @catch (id e) {}
+    return nil;
 }
 
 static BOOL apv_isRunningBundle(NSString *bid) {
@@ -1888,8 +1974,16 @@ static void apv_invalidateRunCache(void) {
     os_unfair_lock_unlock(&sRunLock);
 }
 
+// 每个 bundleID 只记一次：既证明"识别到了哪些 app"，又不会因桌面反复布局刷屏
+static void apv_logBidOnce(NSString *bid, NSString *prefix, NSMutableSet *seen) {
+    if (!bid.length || [seen containsObject:bid]) return;
+    [seen addObject:bid];
+    sysLog([NSString stringWithFormat:@"%@ %@", prefix, bid]);
+}
+
 static void apv_updateRunDot(UIView *iconView) {
     if (!iconView) return;
+    apv_probe(kProbeIconLayout, nil);
     UIView *dot = [iconView viewWithTag:kAPVDotTag];
     if (!gRunIndicator) {            // 开关关：只负责收掉已经画出来的点
         if (dot) dot.hidden = YES;
@@ -1903,7 +1997,17 @@ static void apv_updateRunDot(UIView *iconView) {
         [iconView addSubview:dot];
     }
     NSString *bid = apv_iconBundleID(iconView);
-    if (!bid.length) { dot.hidden = YES; return; }
+    if (!bid.length) {
+        dot.hidden = YES;
+        // 取不到 bundleID 是"点画不出来"的头号原因，限流记一条（含类名，便于定位）
+        apvWriteEx(@"[SYS]", [NSString stringWithFormat:@"指示点: 取不到 bundleID（类=%@，路径=%d）",
+                              NSStringFromClass([iconView class]), sBidPath], 60.0, YES);
+        return;
+    }
+    static NSMutableSet *sBidSeen = nil;
+    static dispatch_once_t bidOnce;
+    dispatch_once(&bidOnce, ^{ sBidSeen = [[NSMutableSet alloc] init]; });
+    apv_logBidOnce(bid, @"指示点: 识别到图标", sBidSeen);
     if (!apv_isRunningBundle(bid)) { dot.hidden = YES; return; }
     CGSize s = iconView.bounds.size;
     CGFloat d = 5.0;
@@ -1924,6 +2028,10 @@ static void apv_updateRunDot(UIView *iconView) {
     dot.backgroundColor = gRunDotColor ?: [UIColor whiteColor];
     dot.hidden = NO;
     [iconView bringSubviewToFront:dot];
+    static NSMutableSet *sDotSeen = nil;
+    static dispatch_once_t dotOnce;
+    dispatch_once(&dotOnce, ^{ sDotSeen = [[NSMutableSet alloc] init]; });
+    apv_logBidOnce(bid, @"指示点: 已画点(运行中)", sDotSeen);
 }
 
 static void apv_recurseIconDots(UIView *v, NSInteger depth) {
@@ -1949,6 +2057,18 @@ static void hook_iconView_layoutSubviews(UIView *self, SEL _cmd) {
 static void (*orig_app_updateProcess)(id, SEL, id, id);
 static void hook_app_updateProcess(id self, SEL _cmd, id process, id state) {
     orig_app_updateProcess(self, _cmd, process, state);
+    @try {   // 探针：APP 启停事件有没有真的送进来
+        NSString *bid = nil;
+        BOOL running = NO;
+        if ([self respondsToSelector:@selector(bundleIdentifier)]) {
+            id b = ((id (*)(id, SEL))objc_msgSend)(self, @selector(bundleIdentifier));
+            if ([b isKindOfClass:[NSString class]]) bid = b;
+        }
+        id st = ((id (*)(id, SEL))objc_msgSend)(self, @selector(processState));
+        if (st && [st respondsToSelector:@selector(isRunning)])
+            running = ((BOOL (*)(id, SEL))objc_msgSend)(st, @selector(isRunning));
+        apv_probe(kProbeAppProcess, [NSString stringWithFormat:@"bid=%@ running=%d", bid ?: @"?", running]);
+    } @catch (id e) {}
     if (!gRunIndicator) return;
     apv_invalidateRunCache();
     // 状态刚变，processState 未必已经落定，稍等 0.5s 再刷一次桌面
@@ -2003,6 +2123,9 @@ static void apv_doAutoUnlock(id lsm) {
 
 static void (*orig_setUILocked)(id, SEL, BOOL);
 static void hook_setUILocked(id self, SEL _cmd, BOOL locked) {
+    apv_probe(kProbeSetUILocked, [NSString stringWithFormat:@"locked=%d 吞锁条件=%d(开关%d/注销启动%d/未吞过%d)",
+                                  locked, apv_shouldSwallowLock(locked),
+                                  gNoLockAfterRespring, gRespringLaunch, !gLockSwallowed]);
     if (apv_shouldSwallowLock(locked)) {
         gLockSwallowed = YES;
         sysLog(@"[noLock] 吃掉注销后的 _setUILocked:YES");
@@ -2015,6 +2138,9 @@ static void hook_setUILocked(id self, SEL _cmd, BOOL locked) {
 
 static void (*orig_lockUIFromSource)(id, SEL, int, id);
 static void hook_lockUIFromSource(id self, SEL _cmd, int source, id options) {
+    apv_probe(kProbeLockFromSource, [NSString stringWithFormat:@"source=%d 吞锁条件=%d(开关%d/注销启动%d/未吞过%d)",
+                                     source, apv_shouldSwallowLock(YES),
+                                     gNoLockAfterRespring, gRespringLaunch, !gLockSwallowed]);
     if (apv_shouldSwallowLock(YES)) {
         gLockSwallowed = YES;
         sysLog([NSString stringWithFormat:@"[noLock] 吃掉注销后的 lockUIFromSource:%d", source]);
@@ -2035,6 +2161,15 @@ static void hook_lockUIFromSource(id self, SEL _cmd, int source, id options) {
 static id (*orig_vpn_applyUpdate)(id, SEL, id, id);
 static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
     id r = orig_vpn_applyUpdate(self, _cmd, update, displayItem);
+    @try {   // 探针：VPN 指示器的刷新到底有没有走到这里，imageView 拿不拿得到
+        id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        apv_probe(kProbeVPNApply, [NSString stringWithFormat:@"imageView=%@ 有图=%d 变色开关=%d",
+                                   iv ? NSStringFromClass([iv class]) : @"nil",
+                                   ([iv isKindOfClass:[UIImageView class]] && ((UIImageView *)iv).image) ? 1 : 0,
+                                   gColorizeVPN]);
+    } @catch (id e) {
+        apv_probe(kProbeVPNApply, @"imageView 取值抛异常");
+    }
     if (!gColorizeVPN) return r;
     @try {
         id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
@@ -2050,6 +2185,8 @@ static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
 
 static id (*orig_vpn_additionAnim)(id, SEL, id);
 static id hook_vpn_additionAnim(id self, SEL _cmd, id ident) {
+    apv_probe(kProbeVPNAddAnim, [NSString stringWithFormat:@"ident=%@ 禁用开关=%d",
+                                 [ident description] ?: @"nil", gHideVPNFlyIn]);
     if (gHideVPNFlyIn) {
         CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
         a.duration = 0.0;
@@ -2068,11 +2205,33 @@ static id hook_vpn_additionAnim(id self, SEL _cmd, id ident) {
 // ------------------------------------------------------------
 static id (*orig_icon_editingFired)(id, SEL, id);
 static id hook_icon_editingFired(id self, SEL _cmd, id gr) {
+    apv_probe(kProbeLongPress, [NSString stringWithFormat:@"gesture=%@ 禁用开关=%d",
+                                gr ? NSStringFromClass([gr class]) : @"nil", gDisableHomeLongPress]);
     if (gDisableHomeLongPress) {
-        sysLog(@"[长按] 拦截 editingModeGestureRecognizerDidFire（桌面长按已禁用）");
+        sysLog(@"[长按] 拦截 SBIconView editingModeGestureRecognizerDidFire:（桌面长按已禁用）");
         return nil;
     }
     return orig_icon_editingFired(self, _cmd, gr);
+}
+
+// 备用路径：长按也可能走 delegate（SBHIconManager iconView:editingModeGestureRecognizerDidFire:）。
+// 两条都堵，探针会告诉我们系统实际走的是哪条（或两条都走）。
+static id (*orig_iconMgr_editingFired)(id, SEL, id, id);
+static id hook_iconMgr_editingFired(id self, SEL _cmd, id iconView, id gr) {
+    apv_probe(kProbeLongPressMgr, [NSString stringWithFormat:@"gesture=%@ 禁用开关=%d",
+                                   gr ? NSStringFromClass([gr class]) : @"nil", gDisableHomeLongPress]);
+    if (gDisableHomeLongPress) {
+        sysLog(@"[长按] 拦截 SBHIconManager iconView:editingModeGestureRecognizerDidFire:（桌面长按已禁用）");
+        return nil;
+    }
+    return orig_iconMgr_editingFired(self, _cmd, iconView, gr);
+}
+
+static NSString *apv_colorCode(UIColor *c) {
+    if (!c) return @"nil";
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    @try { [c getRed:&r green:&g blue:&b alpha:&a]; } @catch (id e) { return @"?"; }
+    return [NSString stringWithFormat:@"#%02X%02X%02X", (int)(r * 255), (int)(g * 255), (int)(b * 255)];
 }
 
 static void installSystemXFeatures(void) {
@@ -2080,30 +2239,46 @@ static void installSystemXFeatures(void) {
     dispatch_once(&once, ^{ sRunCache = [[NSMutableDictionary alloc] init]; });
     gRespringLaunch = apv_isRespringLaunch();
 
+    // 先落一条开关快照：日志里能直接看出"是功能没生效"还是"开关/颜色根本没读到"
+    sysLog([NSString stringWithFormat:
+            @"开关状态: 指示点=%d(%@) 注销不锁屏=%d VPN变色=%d(%@) 禁长按=%d 禁VPN飞入=%d | 本次启动=%@ | 诊断日志=%d",
+            gRunIndicator, apv_colorCode(gRunDotColor), gNoLockAfterRespring,
+            gColorizeVPN, apv_colorCode(gVPNColor), gDisableHomeLongPress, gHideVPNFlyIn,
+            gRespringLaunch ? @"注销(respring)" : @"冷开机", gVolDiag]);
+
     // ① APP 运行指示点
     apv_sys_try_hook("SBIconView", @selector(layoutSubviews),
-                     (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews);
+                     (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews, kProbeIconLayout);
     apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
-                     (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess);
+                     (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess, kProbeAppProcess);
     // ② 注销不锁屏：内部状态机 + 外部上锁入口两条路径都堵
     apv_sys_try_hook("SBLockScreenManager", @selector(_setUILocked:),
-                     (IMP)&hook_setUILocked, (IMP *)&orig_setUILocked);
+                     (IMP)&hook_setUILocked, (IMP *)&orig_setUILocked, kProbeSetUILocked);
     apv_sys_try_hook("SBLockScreenManager", @selector(lockUIFromSource:withOptions:),
-                     (IMP)&hook_lockUIFromSource, (IMP *)&orig_lockUIFromSource);
-    // ③ VPN 变色 / ⑤ VPN 飞入动画
+                     (IMP)&hook_lockUIFromSource, (IMP *)&orig_lockUIFromSource, kProbeLockFromSource);
+    // ③ VPN 变色 / ⑤ VPN 飞入动画（两者的方法都继承自 _UIStatusBarItem，class_getInstanceMethod 能查到）
     apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(applyUpdate:toDisplayItem:),
-                     (IMP)&hook_vpn_applyUpdate, (IMP *)&orig_vpn_applyUpdate);
+                     (IMP)&hook_vpn_applyUpdate, (IMP *)&orig_vpn_applyUpdate, kProbeVPNApply);
     apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(additionAnimationForDisplayItemWithIdentifier:),
-                     (IMP)&hook_vpn_additionAnim, (IMP *)&orig_vpn_additionAnim);
-    // ④ 禁用桌面长按
+                     (IMP)&hook_vpn_additionAnim, (IMP *)&orig_vpn_additionAnim, kProbeVPNAddAnim);
+    // ④ 禁用桌面长按：SBIconView 自身 + SBHIconManager 代理，两条都堵
     apv_sys_try_hook("SBIconView", @selector(editingModeGestureRecognizerDidFire:),
-                     (IMP)&hook_icon_editingFired, (IMP *)&orig_icon_editingFired);
+                     (IMP)&hook_icon_editingFired, (IMP *)&orig_icon_editingFired, kProbeLongPress);
+    apv_sys_try_hook("SBHIconManager", @selector(iconView:editingModeGestureRecognizerDidFire:),
+                     (IMP)&hook_iconMgr_editingFired, (IMP *)&orig_iconMgr_editingFired, kProbeLongPressMgr);
 
     // 开关本来就开着时（如注销后恢复），等桌面布局完再刷一次指示点
     if (gRunIndicator) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ apv_refreshAllIconDots(); });
     }
+
+    // 探针汇总：启动完 5s 一次（看哪些 hook 在启动期就该被触发）/
+    // 30s 一次（用户已经开始划桌面、开 APP 了）。"已装/0 次"= hook 点选错了，得换。
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ apv_probeSummary(@"启动5秒"); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ apv_probeSummary(@"启动30秒"); });
 }
 
 // ============================================================
