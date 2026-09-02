@@ -1845,33 +1845,33 @@ static void sysLog(NSString *msg) { apvWriteEx(@"[SYS]", msg, 30.0, YES); }
 //   · 装载成功但命中 0 → hook 点选错了（方法存在但系统根本不走它）
 // 两种情况修法完全不同，日志里必须一眼分得清。
 // ------------------------------------------------------------
+// v1.9.102：探针表精简——只保留「装载成功且被系统调用」的 hook 点 + 新染色入口。
+// 日志实锤(v1.9.101)：_UIStatusBarItem 基类没有 _fillColorForUpdate:entry:（装载失败），
+// 该方法在 _UIStatusBarWifiItem/_UIStatusBarCellularItem 子类上（头文件 145904/141938 行）；
+// SBIconController/SBIconView/SBIconScrollView 的 gestureRecognizerShouldBegin: 与
+// SBHIconManager setEditing:fromIconView: 均 0 命中 → 全部删除，只保留 SBIconView
+// setEditing:/setEditing:animated: 兜底（命中 132/511 次）。
 enum {
-    kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点绘制入口）
-    kProbeAppProcess,     // SBApplication _updateProcess:withState:（APP 启停事件）
-    kProbeFillColor,      // _UIStatusBarItem _fillColorForUpdate:entry:（VPN 染色候选入口①）
-    kProbeWifiApply,      // _UIStatusBarWifiItem applyUpdate:toDisplayItem:（VPN 染色候选入口②）
-    kProbeCellularApply,  // _UIStatusBarCellularItem applyUpdate:toDisplayItem:（VPN 染色候选入口②）
-    kProbeIconGesture,    // SBIconController gestureRecognizerShouldBegin:（长按禁编辑候选入口①）
-    kProbeIconViewGesture,    // SBIconView gestureRecognizerShouldBegin:（长按禁编辑候选入口②）
-    kProbeIconScrollGesture,  // SBIconScrollView gestureRecognizerShouldBegin:（长按禁编辑候选入口③）
-    kProbeSetEditingMgr,  // SBHIconManager setEditing:fromIconView:（长按兜底）
-    kProbeSetEditingView, // SBIconView setEditing:（编辑态兜底）
-    kProbeSetEditingViewAnim, // SBIconView setEditing:animated:（编辑态兜底）
+    kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点绘制入口）✅命中
+    kProbeAppProcess,     // SBApplication _updateProcess:withState:（APP 启停事件）✅命中
+    kProbeWifiFillColor,  // _UIStatusBarWifiItem _fillColorForUpdate:entry:（WiFi 信号格染色）
+    kProbeCellFillColor,  // _UIStatusBarCellularItem _fillColorForUpdate:entry:（蜂窝信号格染色）
+    kProbeWifiApply,      // _UIStatusBarWifiItem applyUpdate:toDisplayItem:（染色兜底候选）
+    kProbeCellularApply,  // _UIStatusBarCellularItem applyUpdate:toDisplayItem:（染色兜底候选）
+    kProbeSetEditingView, // SBIconView setEditing:（长按兜底）✅命中
+    kProbeSetEditingViewAnim, // SBIconView setEditing:animated:（长按兜底）✅命中
     kProbeCount
 };
 typedef struct { const char *name; BOOL installed; int hits; } apv_probe_t;
 static apv_probe_t sProbes[kProbeCount] = {
-    { "SBIconView.layoutSubviews",            NO, 0 },
-    { "SBApplication._updateProcess",         NO, 0 },
-    { "StatusBarItem._fillColorForUpdate",    NO, 0 },
-    { "WifiItem.applyUpdate",                 NO, 0 },
-    { "CellularItem.applyUpdate",             NO, 0 },
-    { "SBIconController.gestureShouldBegin",  NO, 0 },
-    { "SBIconView.gestureShouldBegin",        NO, 0 },
-    { "SBIconScrollView.gestureShouldBegin",  NO, 0 },
-    { "SBHIconManager.setEditing",            NO, 0 },
-    { "SBIconView.setEditing",                NO, 0 },
-    { "SBIconView.setEditing:animated",       NO, 0 },
+    { "SBIconView.layoutSubviews",        NO, 0 },
+    { "SBApplication._updateProcess",     NO, 0 },
+    { "WifiItem._fillColorForUpdate",     NO, 0 },
+    { "CellularItem._fillColorForUpdate", NO, 0 },
+    { "WifiItem.applyUpdate",             NO, 0 },
+    { "CellularItem.applyUpdate",         NO, 0 },
+    { "SBIconView.setEditing",            NO, 0 },
+    { "SBIconView.setEditing:animated",   NO, 0 },
 };
 
 // 每个探针只在**首次命中**时落一条（写清触发现场）；之后每 200 次补一条计数，
@@ -1930,11 +1930,9 @@ static NSMutableDictionary *sDotColorCache = nil;  // bundleID -> UIColor
 static NSMutableSet *sDotHiddenSet = nil;        // bundleID 当点应 hidden=YES 时加入
 static os_unfair_lock sDotCacheLock = OS_UNFAIR_LOCK_INIT;
 
-// v1.9.101：缓存 VPN 连接状态与最终染色颜色，只在 VPN 状态变化或设置变化时刷新
-static BOOL sCachedVPNOn = NO;
-static BOOL sCachedColorizeVPN = NO;
-static UIColor *sCachedVPNColor = nil;
-static os_unfair_lock sVPNCacheLock = OS_UNFAIR_LOCK_INIT;
+// v1.9.102：VPN 连接状态不再用「只在 Darwin 通知时刷新」的静态缓存（通知在 SpringBoard
+// 里收不到 → 永远 connected=0 → 永不染色）。改为 hook 命中时 0.5s 节流实时查询，
+// Darwin 通知/设置变化时强制立即重查一次。节流状态见染色区 sLastVPNProbe。
 
 // 三条取 bundleID 的路径依次降级（不同 iOS 版本/图标类型能拿到的不一样），
 // 走通哪条记进 sBidPath，探针日志里能看到——万一取不到，一眼知道是哪条断了。
@@ -2035,20 +2033,31 @@ static void apv_updateRunDot(UIView *iconView) {
         os_unfair_lock_lock(&sDotCacheLock);
         [sDotHiddenSet addObject:bid];
         os_unfair_lock_unlock(&sDotCacheLock);
+        // v1.9.102：不运行 → 恢复显示被我们隐藏的名字
+        @try {
+            UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
+            if ([lv isKindOfClass:[UIView class]]) {
+                for (UIView *sub in lv.subviews) {
+                    if ([sub isKindOfClass:[UILabel class]]) sub.hidden = NO;
+                    for (UIView *ss in sub.subviews)
+                        if ([ss isKindOfClass:[UILabel class]]) ss.hidden = NO;
+                }
+            }
+        } @catch (id e) {}
         return;
     }
 
-    // v1.9.101：绿点大小再放大两号（从 11 → 13），位置以实际 UILabel.frame 为基准
-    CGFloat d = 13.0;
+    // v1.9.102（老板要求简化）：绿点 11pt。APP 运行时**永远隐藏图标名字**，
+    // 只显示一个小绿点，放在原文字(labelView)位置的正中。不再分长短名两种摆法。
+    CGFloat d = 11.0;
     CGRect f = CGRectZero;
     BOOL labelFound = NO;
-    BOOL hideLabel = NO;
     UILabel *innerLabel = nil;
 
     @try {
         UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
         if ([lv isKindOfClass:[UIView class]] && lv.superview == iconView && lv.bounds.size.width > 0) {
-            // 优先找直接子 UILabel；SBIconSimpleLabelView 是 UIImageView，真正文字可能在 deeper
+            // 找真正显示文字的子 UILabel（SBIconSimpleLabelView 是 UIImageView，文字在更深层）
             for (UIView *sub in lv.subviews) {
                 if ([sub isKindOfClass:[UILabel class]]) { innerLabel = (UILabel *)sub; break; }
             }
@@ -2060,37 +2069,14 @@ static void apv_updateRunDot(UIView *iconView) {
                     if (innerLabel) break;
                 }
             }
-
+            // 点居中在 labelView 区域（图标名字的正中）
             CGRect lf = [lv convertRect:lv.bounds toView:iconView];
-            if (innerLabel && innerLabel.text.length && innerLabel.frame.size.width > 0) {
-                // 用 innerLabel 自己的 frame（labelView 坐标系）计算，最准确
-                CGRect textFrame = [innerLabel convertRect:innerLabel.bounds toView:iconView];
-                CGFloat textW = textFrame.size.width;
-                CGFloat cy = CGRectGetMidY(textFrame);
-                // 长名判定：文字宽度超过 labelView 可用宽，或者文字被系统截断（UILabel 显示文本与完整文本不同）
-                BOOL truncated = (textW > lf.size.width - 2.0);
-                if (!truncated && innerLabel.text && [innerLabel.text isEqualToString:innerLabel.text]) {
-                    // 再保险：如果 label 的 lineBreakMode 是 truncate 且文字接近宽度，也认为长
-                }
-                if (truncated) {
-                    // 长名：隐藏 UILabel，点放在原文字区域正中
-                    hideLabel = YES;
-                    f = CGRectMake(CGRectGetMidX(lf) - d * 0.5, CGRectGetMidY(lf) - d * 0.5, d, d);
-                } else {
-                    // 短名：点紧挨文字右缘后，垂直居中
-                    hideLabel = NO;
-                    f = CGRectMake(CGRectGetMaxX(textFrame) + 2.0, cy - d * 0.5, d, d);
-                }
-                labelFound = YES;
-            } else if (lf.size.width > 0) {
-                // 没找到 UILabel，但 labelView 有大小：居中放
-                f = CGRectMake(CGRectGetMidX(lf) - d * 0.5, CGRectGetMidY(lf) - d * 0.5, d, d);
-                labelFound = YES;
-            }
+            f = CGRectMake(CGRectGetMidX(lf) - d * 0.5, CGRectGetMidY(lf) - d * 0.5, d, d);
+            labelFound = YES;
         }
     } @catch (id e) {}
 
-    // 找不到 label：点放在图标底部中心，但先 hidden=YES，避免一闪
+    // 找不到 labelView：点放在图标底部中心，但先 hidden=YES，避免一闪
     if (!labelFound) {
         CGSize s = iconView.bounds.size;
         f = CGRectMake((s.width - d) * 0.5, s.height - 6.0, d, d);
@@ -2131,10 +2117,8 @@ static void apv_updateRunDot(UIView *iconView) {
     dot.hidden = NO;
     [iconView bringSubviewToFront:dot];
 
-    // 控制 label 显隐（只在长名时隐藏，且只影响我们找到的 innerLabel）
-    if (innerLabel) {
-        innerLabel.hidden = hideLabel;
-    }
+    // v1.9.102：运行中 → 永远隐藏图标名字（只显示绿点）
+    if (innerLabel) innerLabel.hidden = YES;
 
     os_unfair_lock_lock(&sDotCacheLock);
     if (!sDotFrameCache) sDotFrameCache = [[NSMutableDictionary alloc] init];
@@ -2250,47 +2234,72 @@ static BOOL apv_vpnConnected(void) {
     } @catch (id e) { return NO; }
 }
 
-// v1.9.101：刷新 VPN 状态/颜色缓存（VPN 状态变化、设置变化时调用）
+// v1.9.102：VPN 连接状态查询节流时间戳（0.5s 内存节流；0 = 强制下次立即重查）
+static double sLastVPNProbe = 0;
+
+// 开关开且 VPN 连 → 返回要染的颜色；否则 nil（用系统默认色）。0.5s 节流实时查，
+// 状态变化最多延迟 0.5 秒生效（状态栏刷新驱动，不是后台轮询）。
+static UIColor *apv_vpnColorIfActive(void) {
+    if (!gColorizeVPN) return nil;
+    double now = CACurrentMediaTime();
+    static BOOL cachedConn = NO;
+    if (now - sLastVPNProbe >= 0.5 || sLastVPNProbe == 0) {
+        cachedConn = apv_vpnConnected();
+        sLastVPNProbe = now;
+    }
+    if (!cachedConn) return nil;
+    return gVPNColor ?: [UIColor orangeColor];
+}
+
+// 强制立即重查一次（Darwin 通知 / 设置变化时调用），并落一条日志便于核对
 static void apv_refreshVPNCache(void) {
-    os_unfair_lock_lock(&sVPNCacheLock);
-    sCachedVPNOn = apv_vpnConnected();
-    sCachedColorizeVPN = gColorizeVPN;
-    sCachedVPNColor = gVPNColor ?: [UIColor orangeColor];
-    os_unfair_lock_unlock(&sVPNCacheLock);
-    sysLog([NSString stringWithFormat:@"[VPN] 缓存刷新: connected=%d colorize=%d color=%@",
-            sCachedVPNOn, sCachedColorizeVPN, apv_colorCode(sCachedVPNColor)]);
+    sLastVPNProbe = 0; // 强制下次读取重查
+    BOOL on = apv_vpnColorIfActive() != nil;
+    sysLog([NSString stringWithFormat:@"[VPN] 强制重查: connected=%d colorize=%d color=%@",
+            on, gColorizeVPN, apv_colorCode(gVPNColor ?: [UIColor orangeColor])]);
 }
 
-// v1.9.101：取缓存的 VPN 颜色（状态不变时不再实时读 NEVPNManager）
-static UIColor *apv_cachedVPNColor(void) {
-    os_unfair_lock_lock(&sVPNCacheLock);
-    BOOL use = (sCachedColorizeVPN && sCachedVPNOn);
-    UIColor *c = use ? sCachedVPNColor : nil;
-    os_unfair_lock_unlock(&sVPNCacheLock);
-    return c;
-}
-
-// VPN 状态变化（Darwin 通知）：刷新缓存、触发一次 SysLog，同时让状态栏数据重走染色入口。
+// VPN 状态变化（Darwin 通知）：强制重查一次并打日志（通知不一定收得到，收到就赚）
 static void apv_vpnStatusChanged(CFNotificationCenterRef center, void *observer,
                                  CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     apv_refreshVPNCache();
-    sysLog([NSString stringWithFormat:@"[VPN] 状态变化通知: cachedVpn=%d colorize=%d",
-            sCachedVPNOn, sCachedColorizeVPN]);
 }
 
 // ------------------------------------------------------------
-// ③ 连接 VPN 染色 — v1.9.101 双保险：候选入口① _fillColorForUpdate:entry: +
-// 候选入口② _UIStatusBarWifiItem/CellularItem applyUpdate:toDisplayItem: 改 tintColor
+// ③ 连接 VPN 染色 — v1.9.102 真入口：hook WiFi/Cellular **子类**的 _fillColorForUpdate:entry:
 // ------------------------------------------------------------
-// SystemX 反编译里出现 _fillColorForUpdate:entry:；但 iOS16 实机日志显示该 hook
-// 从未命中。所以保留它作候选，同时把 v1.9.99 修好的 applyUpdate 染色兜底加回来。
-// 颜色统一走 apv_cachedVPNColor()，只在 VPN 状态变化或设置变化时刷新，避免每次
-// 状态栏刷新都实时读 NEVPNManager。
+// 日志实锤（v1.9.101）：_UIStatusBarItem 基类**没有** _fillColorForUpdate:entry:（装载失败），
+// 但头文件（UIKitCore.h 145904/141938 行）显示 _UIStatusBarWifiItem / _UIStatusBarCellularItem
+// 子类**都有**该方法，且信号格填充色（WiFi 信号 / 4G/5G 信号格）就由它返回的 UIColor 决定。
+// 所以染色 hook 必须落在子类上，不是基类。applyUpdate:toDisplayItem: 改 _imageView.tintColor
+// 保留作兜底（1.9.99 曾命中过 1 次，imageView 偶尔非 nil）。
+// VPN 连接状态：0.5s 节流的实时查询（状态栏刷新驱动，不是后台轮询），状态变化最多延迟
+// 0.5 秒生效；Darwin 通知仍保留用于强制刷新缓存（收到即置下次立即重查）。
 // ------------------------------------------------------------
-static BOOL apv_isStatusEntryKind(id entry, const char *clsName) {
-    if (!entry) return NO;
-    Class c = objc_getClass(clsName);
-    return c && [entry isKindOfClass:c];
+// WiFi 信号格填充色入口（hook 子类 _UIStatusBarWifiItem）
+static id (*orig_wifi_fillColor)(id, SEL, id, id);
+static id hook_wifi_fillColor(id self, SEL _cmd, id update, id entry) {
+    apv_probe(kProbeWifiFillColor, nil); // 无条件探针：先证明这个点真的被系统调
+    id r = nil;
+    @try {
+        if (orig_wifi_fillColor) r = orig_wifi_fillColor(self, _cmd, update, entry);
+    } @catch (id e) {}
+    UIColor *c = apv_vpnColorIfActive();
+    if (!c) return r;
+    return c; // VPN 连 → 信号格填充用户色
+}
+
+// 蜂窝 4G/5G 信号格填充色入口（hook 子类 _UIStatusBarCellularItem）
+static id (*orig_cell_fillColor)(id, SEL, id, id);
+static id hook_cell_fillColor(id self, SEL _cmd, id update, id entry) {
+    apv_probe(kProbeCellFillColor, nil); // 无条件探针
+    id r = nil;
+    @try {
+        if (orig_cell_fillColor) r = orig_cell_fillColor(self, _cmd, update, entry);
+    } @catch (id e) {}
+    UIColor *c = apv_vpnColorIfActive();
+    if (!c) return r;
+    return c;
 }
 
 // _UIStatusBarItem 只有 _imageView ivar（_UIStatusBarImageView *），没有 imageView 方法。
@@ -2305,38 +2314,17 @@ static UIImageView *apv_statusItemImageView(id item) {
     } @catch (id e) { return nil; }
 }
 
-// 候选入口①：_UIStatusBarItem 基类的 _fillColorForUpdate:entry:
-static id (*orig_statusItem_fillColor)(id, SEL, id, id);
-static id hook_statusItem_fillColor(id self, SEL _cmd, id update, id entry) {
-    id r = nil;
-    @try {
-        if (orig_statusItem_fillColor) r = orig_statusItem_fillColor(self, _cmd, update, entry);
-    } @catch (id e) {}
-
-    UIColor *c = apv_cachedVPNColor();
-    if (!c) return r;
-
-    BOOL isWifi  = apv_isStatusEntryKind(entry, "_UIStatusBarDataWifiEntry");
-    BOOL isCell  = apv_isStatusEntryKind(entry, "_UIStatusBarDataCellularEntry");
-    if (!isWifi && !isCell) return r;
-
-    apv_probe(kProbeFillColor, [NSString stringWithFormat:@"%s cached=1", isWifi ? "WiFiEntry" : "CellularEntry"]);
-    return c;
-}
-
-// 候选入口②：_UIStatusBarWifiItem/CellularItem applyUpdate:toDisplayItem: 里改 _imageView.tintColor
+// 兜底：applyUpdate:toDisplayItem: 里改 _imageView.tintColor（探针无条件先打）
 static id (*orig_wifi_applyUpdate)(id, SEL, id, id);
 static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    apv_probe(kProbeWifiApply, nil);
     id r = nil;
     @try {
         if (orig_wifi_applyUpdate) r = orig_wifi_applyUpdate(self, _cmd, update, displayItem);
     } @catch (id e) {}
-
-    UIColor *c = apv_cachedVPNColor();
+    UIColor *c = apv_vpnColorIfActive();
     if (!c) return r;
-
     UIImageView *v = apv_statusItemImageView(self);
-    apv_probe(kProbeWifiApply, [NSString stringWithFormat:@"imageView=%@", v ? NSStringFromClass([v class]) : @"nil"]);
     if (v) {
         if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
             v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -2347,16 +2335,14 @@ static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
 
 static id (*orig_cellular_applyUpdate)(id, SEL, id, id);
 static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    apv_probe(kProbeCellularApply, nil);
     id r = nil;
     @try {
         if (orig_cellular_applyUpdate) r = orig_cellular_applyUpdate(self, _cmd, update, displayItem);
     } @catch (id e) {}
-
-    UIColor *c = apv_cachedVPNColor();
+    UIColor *c = apv_vpnColorIfActive();
     if (!c) return r;
-
     UIImageView *v = apv_statusItemImageView(self);
-    apv_probe(kProbeCellularApply, [NSString stringWithFormat:@"imageView=%@", v ? NSStringFromClass([v class]) : @"nil"]);
     if (v) {
         if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
             v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -2366,70 +2352,19 @@ static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem
 }
 
 // ------------------------------------------------------------
-// ④ 禁用桌面长按 — v1.9.100 按 SystemX 思路从手势源头掐掉
+// ④ 禁用桌面长按 — v1.9.102 清理：删除所有 0 命中的 hook 点
 // ------------------------------------------------------------
-// SBIconController 有一个实例变量 _longPressToEditGestureRecognizer，就是"长按桌面
-// 进编辑模式"的那个 UILongPressGestureRecognizer。在 gestureRecognizerShouldBegin:
-// 里识别到这个 recognizer 并返回 NO，长按桌面就不会进编辑态（不再出现"完成"/"+"）。
-// 同时保留 SBHIconManager/SBIconView 的 setEditing 兜底，防止别的入口把编辑态拉起来。
+// 日志实锤（v1.9.101 探针汇总）：
+//   · SBIconController.gestureRecognizerShouldBegin:   装载失败（类/方法不存在）
+//   · SBIconView.gestureRecognizerShouldBegin:         已装/0 命中
+//   · SBIconScrollView.gestureRecognizerShouldBegin:   已装/0 命中
+//   · SBHIconManager setEditing:fromIconView:          已装/0 命中
+//   → 上面 4 个 hook 点全部删除。
+//   · SBIconView setEditing:                           命中 132 次
+//   · SBIconView setEditing:animated:                  命中 511 次
+//   → 只保留这两个命中点做兜底拦截（editing=YES 时不进编辑态）。
+//   老板已接受：若长按仍偶发进入编辑态（"完成"/"+"），本功能不再深挖。
 // ------------------------------------------------------------
-static id apv_longPressToEditRecognizer(id obj) {
-    if (!obj) return nil;
-    @try {
-        Ivar iv = class_getInstanceVariable([obj class], "_longPressToEditGestureRecognizer");
-        if (!iv) return nil;
-        return object_getIvar(obj, iv);
-    } @catch (id e) { return nil; }
-}
-
-// v1.9.101：通用拦截逻辑——只要目标对象的 _longPressToEditGestureRecognizer 就是这个 gesture，就返回 NO
-static BOOL apv_shouldBlockLongPressGesture(id self, id gesture, int probeIdx) {
-    if (!gDisableHomeLongPress) return NO;
-    id editGesture = apv_longPressToEditRecognizer(self);
-    if (editGesture && gesture == editGesture) {
-        apv_probe(probeIdx, @"拦截 _longPressToEditGestureRecognizer");
-        sysLog([NSString stringWithFormat:@"[长按] 拦截 %@ _longPressToEditGestureRecognizer（长按不进编辑态）",
-                NSStringFromClass([self class])]);
-        return YES;
-    }
-    return NO;
-}
-
-static BOOL (*orig_iconController_gestureShouldBegin)(id, SEL, id);
-static BOOL hook_iconController_gestureShouldBegin(id self, SEL _cmd, id gesture) {
-    if (apv_shouldBlockLongPressGesture(self, gesture, kProbeIconGesture)) return NO;
-    if (orig_iconController_gestureShouldBegin)
-        return orig_iconController_gestureShouldBegin(self, _cmd, gesture);
-    return YES;
-}
-
-static BOOL (*orig_iconView_gestureShouldBegin)(id, SEL, id);
-static BOOL hook_iconView_gestureShouldBegin(id self, SEL _cmd, id gesture) {
-    if (apv_shouldBlockLongPressGesture(self, gesture, kProbeIconViewGesture)) return NO;
-    if (orig_iconView_gestureShouldBegin)
-        return orig_iconView_gestureShouldBegin(self, _cmd, gesture);
-    return YES;
-}
-
-static BOOL (*orig_iconScrollView_gestureShouldBegin)(id, SEL, id);
-static BOOL hook_iconScrollView_gestureShouldBegin(id self, SEL _cmd, id gesture) {
-    if (apv_shouldBlockLongPressGesture(self, gesture, kProbeIconScrollGesture)) return NO;
-    if (orig_iconScrollView_gestureShouldBegin)
-        return orig_iconScrollView_gestureShouldBegin(self, _cmd, gesture);
-    return YES;
-}
-
-static void (*orig_setEditingFromIconView)(id, SEL, BOOL, id);
-static void hook_setEditingFromIconView(id self, SEL _cmd, BOOL editing, id iconView) {
-    apv_probe(kProbeSetEditingMgr, [NSString stringWithFormat:@"editing=%d 开关=%d",
-                                    editing, gDisableHomeLongPress]);
-    if (gDisableHomeLongPress && editing) {
-        sysLog(@"[长按] 兜底拦截 SBHIconManager setEditing:YES fromIconView:");
-        return;
-    }
-    orig_setEditingFromIconView(self, _cmd, editing, iconView);
-}
-
 static void (*orig_setEditing)(id, SEL, BOOL);
 static void hook_setEditing(id self, SEL _cmd, BOOL editing) {
     apv_probe(kProbeSetEditingView, [NSString stringWithFormat:@"editing=%d 开关=%d",
@@ -2477,23 +2412,18 @@ static void installSystemXFeatures(void) {
     apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
                      (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess, kProbeAppProcess);
 
-    // ③ VPN 变色 — 双保险
-    apv_sys_try_hook("_UIStatusBarItem", @selector(_fillColorForUpdate:entry:),
-                     (IMP)&hook_statusItem_fillColor, (IMP *)&orig_statusItem_fillColor, kProbeFillColor);
+    // ③ VPN 变色 — v1.9.102：hook WiFi/Cellular 子类的 _fillColorForUpdate:entry:（真入口，
+    // 基类无此方法，v1.9.101 日志实锤装载失败）；applyUpdate 改 tintColor 作兜底
+    apv_sys_try_hook("_UIStatusBarWifiItem", @selector(_fillColorForUpdate:entry:),
+                     (IMP)&hook_wifi_fillColor, (IMP *)&orig_wifi_fillColor, kProbeWifiFillColor);
+    apv_sys_try_hook("_UIStatusBarCellularItem", @selector(_fillColorForUpdate:entry:),
+                     (IMP)&hook_cell_fillColor, (IMP *)&orig_cell_fillColor, kProbeCellFillColor);
     apv_sys_try_hook("_UIStatusBarWifiItem", @selector(applyUpdate:toDisplayItem:),
                      (IMP)&hook_wifi_applyUpdate, (IMP *)&orig_wifi_applyUpdate, kProbeWifiApply);
     apv_sys_try_hook("_UIStatusBarCellularItem", @selector(applyUpdate:toDisplayItem:),
                      (IMP)&hook_cellular_applyUpdate, (IMP *)&orig_cellular_applyUpdate, kProbeCellularApply);
 
-    // ④ 禁用桌面长按 — 多入口拦截 + setEditing 兜底
-    apv_sys_try_hook("SBIconController", @selector(gestureRecognizerShouldBegin:),
-                     (IMP)&hook_iconController_gestureShouldBegin, (IMP *)&orig_iconController_gestureShouldBegin, kProbeIconGesture);
-    apv_sys_try_hook("SBIconView", @selector(gestureRecognizerShouldBegin:),
-                     (IMP)&hook_iconView_gestureShouldBegin, (IMP *)&orig_iconView_gestureShouldBegin, kProbeIconViewGesture);
-    apv_sys_try_hook("SBIconScrollView", @selector(gestureRecognizerShouldBegin:),
-                     (IMP)&hook_iconScrollView_gestureShouldBegin, (IMP *)&orig_iconScrollView_gestureShouldBegin, kProbeIconScrollGesture);
-    apv_sys_try_hook("SBHIconManager", @selector(setEditing:fromIconView:),
-                     (IMP)&hook_setEditingFromIconView, (IMP *)&orig_setEditingFromIconView, kProbeSetEditingMgr);
+    // ④ 禁用桌面长按 — v1.9.102：只保留命中点 SBIconView setEditing:/setEditing:animated:
     apv_sys_try_hook("SBIconView", @selector(setEditing:),
                      (IMP)&hook_setEditing, (IMP *)&orig_setEditing, kProbeSetEditingView);
     apv_sys_try_hook("SBIconView", @selector(setEditing:animated:),
