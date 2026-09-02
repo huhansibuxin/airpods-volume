@@ -309,7 +309,7 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>连接 VPN 变色（WiFi/4G·5G 信号格）</string>
+			<string>连接 VPN 变色（状态栏 VPN 图标）</string>
 			<key>key</key>
 			<string>colorizeVPNStatusBar</string>
 			<key>default</key>
@@ -359,15 +359,15 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>功能说明 · 版本 1.9.103（每次更新插件，版本号在此同步）
+			<string>功能说明 · 版本 1.9.104（每次更新插件，版本号在此同步）
 
 通知合并（NotifsDontHide 并入）：同一 App 的通知从第 2 条起就合并成一栏（iOS 原生为第 5 条起）。打开「通知从第 3 条起才合并成一组」则改为第 3 条起合并，开关即时生效、无需注销。⚠️ 合并版启用后请卸载独立的 NotifsDontHide 包，避免双重 hook 冲突。
 
-桌面与状态栏（v1.9.103：全套换 Lynx2 同款机制——指示点用 SBIconView 原生 indicator 属性 + 纯约束定位；VPN 染色 hook 父类 _UIStatusBarSignalView setActiveColor:）：
+桌面与状态栏（v1.9.104：指示点换 Lynx2 原生 indicator + 约束定位；VPN 染色改 SystemX 同款——hook _UIStatusBarIndicatorVPNItem _fillColorForUpdate:entry: 染 VPN 指示器图标本身；禁用长按用 Lynx2 总闸）：
 · APP 运行指示点：正在运行的 APP 图标下方显示一个小圆点（APP 一退出就消失）。**运行时隐藏图标名字**、点放在原名字位的正中（11pt）。颜色在「指示点颜色代码」里直接填，支持 #RRGGBB（如 #00FF00 绿）或 255,255,255 两种写法，留空则用默认白色。
 · ~~注销不锁屏~~：**v1.9.97 已删除**。开此功能 + 注销会让 SpringBoard 进安全模式，别再用。
 · ~~禁用 VPN 飞入动画~~：**v1.9.100 已删除**（多次 hook 未命中且老板要求删代码）。
-· 连接 VPN 变色：VPN 连上后把状态栏**会变的那一格**（WiFi 信号 或 4G/5G 信号格）染成「VPN 颜色代码」里的色——不是 VPN 自身图标。v1.9.103 换 Lynx2 思路 hook 父类 _UIStatusBarSignalView 的 setActiveColor:（WiFi/蜂窝全部变体都是它的子类，一个点通吃），VPN 连/断由 SBStatusBarStateAggregator _updateVPNItem 事件触发、开关切换即时生效。
+· 连接 VPN 变色：照 SystemX（SystemBox）的 colorizeVPNStatusBar 做法，hook _UIStatusBarIndicatorVPNItem 的 _fillColorForUpdate:entry:，VPN 连上时把**状态栏里的 VPN 指示器图标本身**（key/lock 图标 + 文字）染成「VPN 颜色代码」里的色。v1.9.104 从之前"染信号格"换过来——信号格那套老板实测一直没生效。状态栏数据变化由系统自动重绘触发、开关切换即时生效。
 · 禁用桌面长按：v1.9.103 加 Lynx2 同款总闸 SBMainDisplayPolicyAggregator _allowsCapabilityHomeScreenEditingWithExplanation: 直接返回 NO——系统级编辑能力判定，长按根本进不了抖动模式，"完成"/"+" 不会出现。setEditing: 兜底继续保留。
 
 怎么确认抓没抓到：SSH 进设备后 grep SYS 日志即可（日志路径见上方诊断日志说明）。

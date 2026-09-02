@@ -43,7 +43,7 @@ static BOOL gNotifGroupFrom3 = NO;   // v1.9.91：通知合并档位——关=�
 // ---- v1.9.96：SystemX(SystemBox) 移植功能开关（全部默认关闭）----
 static BOOL gRunIndicator = NO;        // APP 运行指示点：正在运行的 APP 图标下方显示彩色小圆点
 // v1.9.97：注销不锁屏（gNoLockAfterRespring）已删除——会让 SpringBoard 进安全模式。
-static BOOL gColorizeVPN = NO;         // 连接 VPN 后把状态栏 WiFi/4G·5G 信号格染色（不染 VPN 图标）
+static BOOL gColorizeVPN = NO;         // 连接 VPN 后把状态栏 VPN 指示器图标染色（SystemX 同款 _UIStatusBarIndicatorVPNItem）
 static BOOL gDisableHomeLongPress = NO;// 禁用桌面长按（不再进抖动编辑态）
 static BOOL gHideVPNFlyIn = NO;        // 禁用 VPN 状态栏图标飞入动画（瞬间出现）
 static UIColor *gRunDotColor = nil;    // 指示点颜色（颜色代码解析结果）
@@ -123,7 +123,7 @@ static void apv_refresh(void) {
     gDisableHomeLongPress = apv_bool(@"disableHomeScreenLongPress", NO);
     gHideVPNFlyIn = apv_bool(@"hideVPNFlyInAnimation", NO);
     gRunDotColor = apv_colorFromCode(apv_string(@"runIndicatorColor", @"#FFFFFF"), @"#FFFFFF");
-    gVPNColor = apv_colorFromCode(apv_string(@"vpnStatusBarColor", @"#FF9F0A"), @"#FF9F0A");
+    gVPNColor = apv_colorFromCode(apv_string(@"vpnStatusBarColor", @"#FF9F0A"), @"#FF9F0A"); // VPN 图标配色键（设置里"VPN 颜色代码"，默认橙）
 }
 
 @interface AVSystemController : NSObject
@@ -1854,7 +1854,7 @@ static void sysLog(NSString *msg) { apvWriteEx(@"[SYS]", msg, 30.0, YES); }
 enum {
     kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点入口）✅命中
     kProbeAppProcess,     // SBApplication _updateProcess:withState:（APP 启停事件）✅命中
-    kProbeSignalColor,    // _UIStatusBarSignalView setActiveColor:（信号格染色真入口）v1.9.103
+    kProbeSignalColor,    // _UIStatusBarIndicatorVPNItem _fillColorForUpdate:entry:（VPN 图标染色，SystemX 同款）v1.9.104
     kProbeVPNItem,        // SBStatusBarStateAggregator _updateVPNItem（VPN 状态变化事件）v1.9.103
     kProbeEditPolicy,     // SBMainDisplayPolicyAggregator _allowsCapability...（Lynx 总闸）v1.9.103
     kProbeSetEditingView, // SBIconView setEditing:（长按兜底）✅命中
@@ -1865,7 +1865,7 @@ typedef struct { const char *name; BOOL installed; int hits; } apv_probe_t;
 static apv_probe_t sProbes[kProbeCount] = {
     { "SBIconView.layoutSubviews",      NO, 0 },
     { "SBApplication._updateProcess",   NO, 0 },
-    { "SignalView.setActiveColor",      NO, 0 },
+    { "VPNItem._fillColorForUpdate",      NO, 0 },
     { "Aggregator._updateVPNItem",      NO, 0 },
     { "PolicyAggregator.editing",       NO, 0 },
     { "SBIconView.setEditing",          NO, 0 },
@@ -2066,7 +2066,7 @@ static void apv_updateRunDot(UIView *iconView) {
         ind.userInteractionEnabled = NO;
         ind.translatesAutoresizingMaskIntoConstraints = NO;
         [iconView addSubview:ind];
-        ind.layer.cornerRadius = 5.5;      // 11pt 圆点
+        ind.layer.cornerRadius = 5.0;      // 10pt 圆点（老板要求小一个 pt）
         // continuousCorners 是 CALayer 私有属性（公开 SDK 无此声明，编译报错）；
         // 公开等价物 = cornerCurve = kCACornerCurveContinuous（iOS13+，同款连续圆角）
         ind.layer.cornerCurve = kCACornerCurveContinuous;
@@ -2092,8 +2092,8 @@ static void apv_updateRunDot(UIView *iconView) {
                 [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeBottom relatedBy:NSLayoutRelationEqual toItem:iconView attribute:NSLayoutAttributeBottom multiplier:1.0 constant:-6.0]];
             }
         }
-        [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:11.0]];
-        [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeHeight relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:11.0]];
+        [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:10.0]];
+        [iconView addConstraint:[NSLayoutConstraint constraintWithItem:ind attribute:NSLayoutAttributeHeight relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:10.0]];
         ind.backgroundColor = gRunDotColor ?: [UIColor whiteColor];
     } else {
         // SBIconView 单元格可能被复用到别的 app：归属变了就换色换标
@@ -2180,22 +2180,18 @@ static void hook_app_updateProcess(id self, SEL _cmd, id process, id state) {
 // ------------------------------------------------------------
 
 // ------------------------------------------------------------
-// ③ 连接 VPN 染色 — 改染 WiFi/Cellular（v1.9.97 老板反馈）
+// ③ 连接 VPN 染色 — v1.9.104：SystemX（SystemBox）同款真入口
 // ------------------------------------------------------------
-// v1.9.103（Lynx2 移植轮）：染**信号格**的真入口是父类 _UIStatusBarSignalView
-// 的 -setActiveColor:（UIKitCore.h:144593 实锤 ivar _activeColor 就是亮条颜色；
-// _UIStatusBarWifiSignalView / _UIStatusBarCellularSignalView 全部变体都是它的
-// 子类 → hook 父类一个点通吃 WiFi + 4G/5G）。
-//   · 连接时：setActiveColor: 被系统刷色 → hook 记下原色（只记第一次，防把染色
-//     当原色缓存），转手喂用户自定义色；
-//   · 断开/关开关时：从缓存取回原色喂回，恢复系统色。
-// VPN 状态变化事件 = SBStatusBarStateAggregator _updateVPNItem（Lynx2 隐藏 VPN
-// 图标同款 hook 点，连/断 SpringBoard 必调），触发后把窗口里现存 SignalView 的
-// 当前 _activeColor 经 msgSend 喂回 setActiveColor:（走 hook：连=染色/断=恢复）。
-// 兜底仍是 NEVPNManager.connection.status 反射查询 + Darwin 通知
-// com.apple.networkextension.vpn.status_changed，无 polling。
-// （历史：v1.9.100-102 的 _fillColorForUpdate:entry: / applyUpdate:toDisplayItem:
-//   路线已删——基类无该方法、子类染不动，多版 0 命中。）
+// SystemX 的 colorizeVPNStatusBar 实锤做法（见 systembox_reverse_report.md §2）：
+//   宿主类 _UIStatusBarIndicatorVPNItem，hook 其
+//   - (UIColor *)_fillColorForUpdate:(id)update entry:(id)entry
+//   —— 当 entry 是 VPN 类型（VPN 指示器在显示）时直接返回用户自定义色；
+//   顺手对指示器的 stringView 调 setTintColor: 把文字也染上。
+//   状态栏数据变化（VPN 连/断）由系统自动触发重绘 → 这个 hook 必被调用 → 染色生效。
+// 之前钩 _UIStatusBarSignalView setActiveColor:（染信号格）跟 SystemX 不是一回事，
+// 老板实测"还是没染色" → 改用 SystemX 同款（染 VPN 指示器图标本身）。
+// VPN 是否连接：NEVPNManager.connection.status 0.5s 节流查（apv_vpnColorIfActive）。
+// VPN 状态变化事件：SBStatusBarStateAggregator _updateVPNItem（连/断必调，兼作探针）。
 // ------------------------------------------------------------
 // 私有 API 声明
 @interface NEVPNConnection : NSObject
@@ -2270,100 +2266,59 @@ static void apv_vpnStatusChanged(CFNotificationCenterRef center, void *observer,
 }
 
 // ------------------------------------------------------------
-// ③ 连接 VPN 染色 — v1.9.103：Lynx2 逆向后的真入口 _UIStatusBarSignalView setActiveColor:
+// ③ 连接 VPN 染色 — v1.9.104：SystemX 同款真入口（染 VPN 指示器图标本身）
 // ------------------------------------------------------------
-// 头文件实锤（UIKitCore.h 144593 行）：_UIStatusBarSignalView 是 WiFi/蟬窝信号格的公共父类，
-//   ivar UIColor * _activeColor(+0x1b0) 就是"亮条"颜色；setter -setActiveColor:。
-//   _UIStatusBarWifiSignalView / _UIStatusBarCellularSignalView（Small/Flat/Expanded 变体）全是它子类。
-//   → hook 父类 setter 一个点通吃 WiFi + 4G/5G。
-// 旧路线全部删除：_fillColorForUpdate:entry:（基类无、子类染不动）、applyUpdate:toDisplayItem:
-//   tintColor 兑底（仅 1 次命中、染不到信号格）。
-// VPN 状态变化事件：hook SBStatusBarStateAggregator _updateVPNItem（Lynx2 隐藏 VPN 图标同款
-//   入口，VPN 连/断 SpringBoard 必调）→ 触发信号格颜色重刷（事件驱动，无轮询）。
-// VPN 是否连接：NEVPNManager.connection.status 0.5s 节流实时查（沿用 v1.9.102）。
+// v1.9.104：SystemX（SystemBox / com.wkk.systembox）同款实现 —— 染 VPN 指示器图标本身
+// （见 D:\woekbude\tweak_backup_2026-09-01\systembox_reverse_report.md §2 colorizeVPNStatusBar）
+//   宿主类 _UIStatusBarIndicatorVPNItem，hook 其
+//   - (UIColor *)_fillColorForUpdate:(id)update entry:(id)entry
+//   —— 当 entry 是 VPN 类型（即 VPN 指示器在显示）时直接返回用户色；
+//   顺手对指示器的 stringView 调 setTintColor: 把文字也染上。
+//   状态栏数据变化（VPN 连/断）由系统自动触发重绘 → 这个 hook 必被调用 → 染色生效。
+// 之前钩 _UIStatusBarSignalView setActiveColor:（染信号格）跟 SystemX 不是一回事，
+// 老板实测"还是没染色" → 改用 SystemX 同款（染 VPN 指示器图标本身）。
+// VPN 是否连接：NEVPNManager.connection.status 0.5s 节流查（apv_vpnColorIfActive）。
+// VPN 状态变化事件：SBStatusBarStateAggregator _updateVPNItem（连/断必调，兼作探针）。
 // ------------------------------------------------------------
-// 信号格"系统原色"缓存：view(弱引用) -> UIColor，VPN 断开时恢复用
-static NSMapTable *sSignalOrigColor = nil;
-static os_unfair_lock sSignalLock = OS_UNFAIR_LOCK_INIT;
-
-static void apv_signalCacheInit(void) {
-    if (!sSignalOrigColor)
-        sSignalOrigColor = [NSMapTable weakToStrongObjectsMapTable];
-}
-
-// 读信号格当前 _activeColor ivar（只读，不走 setter 避免递归）
-static UIColor *apv_signalGetActiveColor(id view) {
-    @try {
-        Ivar iv = class_getInstanceVariable(object_getClass(view), "_activeColor");
-        if (!iv) return nil;
-        id c = object_getIvar(view, iv);
-        return [c isKindOfClass:[UIColor class]] ? (UIColor *)c : nil;
-    } @catch (id e) { return nil; }
-}
-
-// 递归找 _UIStatusBarSignalView 实例
-static void apv_vpnWalkSignalViews(UIView *v, Class signalCls, void (^apply)(UIView *)) {
-    if (!v) return;
-    if ([v isKindOfClass:signalCls]) apply(v);
-    for (UIView *sub in v.subviews) apv_vpnWalkSignalViews(sub, signalCls, apply);
-}
-
-// VPN 状态变化后重刷信号格颜色：把当前色再喂回 setActiveColor:
-// （走我们的 hook：连=染用户色，断=恢复系统色）。只在 VPN 变化时跑一次。
-static void apv_vpnRefreshSignalViews(void) {
-    @try {
-        apv_signalCacheInit();
-        Class signalCls = NSClassFromString(@"_UIStatusBarSignalView");
-        if (!signalCls) return;
-        __block int touched = 0;
-        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                apv_vpnWalkSignalViews(w, signalCls, ^(UIView *v) {
-                    touched++;
-                    UIColor *cur = apv_signalGetActiveColor(v);
-                    if (cur && [v respondsToSelector:@selector(setActiveColor:)])
-                        ((void (*)(id, SEL, id))objc_msgSend)(v, @selector(setActiveColor:), cur);
-                });
+static UIColor *(*orig_vpn_fillColor)(id, SEL, id, id);
+static UIColor *hook_vpn_fillColor(id self, SEL _cmd, id update, id entry) {
+    apv_probe(kProbeSignalColor, @"VPNItem._fillColorForUpdate");
+    // 只在我们想染（开关开 + VPN 真连上）时返回用户色；其余一律走系统
+    if (apv_vpnColorIfActive()) {
+        UIColor *c = gVPNColor ?: [UIColor orangeColor];
+        // SystemX 同款：顺手把指示器文字/图标 tint 也染上，视觉更明显
+        @try {
+            if ([self respondsToSelector:@selector(stringView)]) {
+                id sv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(stringView));
+                if (sv && [sv respondsToSelector:@selector(setTintColor:)])
+                    ((void (*)(id, SEL, id))objc_msgSend)(sv, @selector(setTintColor:), c);
             }
-        }
-        if (touched) apvWriteEx(@"[VPN]", [NSString stringWithFormat:@"信号格重刷: 触达 %d 个 SignalView", touched], 60.0, YES);
-    } @catch (id e) {}
-}
-
-// 染色 hook：_UIStatusBarSignalView setActiveColor:（父类，WiFi+蟬窝通吃）
-static void (*orig_signal_setActiveColor)(id, SEL, UIColor *);
-static void hook_signal_setActiveColor(id self, SEL _cmd, UIColor *c) {
-    apv_probe(kProbeSignalColor, apv_colorCode(c));
-    apv_signalCacheInit();
-    UIColor *tint = apv_vpnColorIfActive();
-    if (tint) {
-        // 记住系统原色（只记第一次，防止把染色后的绿色当原色缓存）
-        os_unfair_lock_lock(&sSignalLock);
-        if (sSignalOrigColor && ![sSignalOrigColor objectForKey:self])
-            [sSignalOrigColor setObject:(c ?: [UIColor whiteColor]) forKey:self];
-        os_unfair_lock_unlock(&sSignalLock);
-        orig_signal_setActiveColor(self, _cmd, tint);
-        return;
+        } @catch (id e) {}
+        return c;
     }
-    // VPN 没连：若这格被染过 → 恢复系统原色
-    os_unfair_lock_lock(&sSignalLock);
-    UIColor *origC = sSignalOrigColor ? [sSignalOrigColor objectForKey:self] : nil;
-    if (origC) [sSignalOrigColor removeObjectForKey:self];
-    os_unfair_lock_unlock(&sSignalLock);
-    orig_signal_setActiveColor(self, _cmd, origC ?: c);
+    return orig_vpn_fillColor(self, _cmd, update, entry);
 }
 
-// VPN 状态变化事件（Lynx2 同款 hook 点）：连/断各触发一次信号格重刷
+// VPN 状态变化事件（Lynx2/SystemX 同款 hook 点）：连/断各触发一次重绘 + 强制下次重算
 static void (*orig_agg_updateVPNItem)(id, SEL);
 static void hook_agg_updateVPNItem(id self, SEL _cmd) {
     apv_probe(kProbeVPNItem, nil);
     orig_agg_updateVPNItem(self, _cmd);
-    sLastVPNProbe = 0; // 强制下次 setActiveColor: 立即重查 VPN 状态
-    dispatch_async(dispatch_get_main_queue(), ^{ apv_vpnRefreshSignalViews(); });
-    // 状态栏这轮更新画完后再补一刀（一次性按需定时器，不是轮询）
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ apv_vpnRefreshSignalViews(); });
+    apv_vpnRefreshSignalViews(); // 强制重绘 + 清 0.5s 节流（连/断系统本就会重绘，这里兜底即时生效）
+}
+
+// VPN 染色开关切换 / VPN 状态变化后尽力触发一次状态栏重绘。
+// _fillColorForUpdate:entry: 在每次状态栏重绘都被调用、且读 apv_vpnColorIfActive()
+// （实时反映 VPN 连接状态 + 当前配色），所以颜色永远是最新的；本函数只是让
+// 设置切换时少等一个刷新周期、即时变色。失败无所谓（下个刷新周期会跟上）。
+static void apv_vpnRefreshSignalViews(void) {
+    sLastVPNProbe = 0; // 下次 _fillColorForUpdate: 立即按最新 VPN 状态/颜色重算
+    @try {
+        id agg = [NSClassFromString(@"SBStatusBarStateAggregator") sharedInstance];
+        SEL upd = @selector(_updateStatusBar);
+        if (agg && [agg respondsToSelector:upd])
+            ((void (*)(id, SEL))objc_msgSend)(agg, upd);
+    } @catch (id e) {}
 }
 
 // ------------------------------------------------------------
@@ -2406,6 +2361,20 @@ static void hook_setEditingAnimated(id self, SEL _cmd, BOOL editing, BOOL animat
     orig_setEditingAnimated(self, _cmd, editing, animated);
 }
 
+// v1.9.104：压掉系统自带的 launching/running 指示点（走 SBIconView setIndicator:）。
+// 不压的话，系统每次启动帧都会把我们的指示点覆盖成它自己的 → 启动期看到"app 身上"
+// 那个（系统的）、启动完系统清掉、我们的点回到文字下 → 这就是老板说的"跳"。
+// 我们的点用 setIndicator: 挂、且带 @selector(hash) 关联标记 → 放行；
+// 系统的（无标记）一律压成 nil，彻底不显示。
+static void (*orig_setIndicator)(id, SEL, id);
+static void hook_setIndicator(id self, SEL _cmd, id ind) {
+    if (ind && objc_getAssociatedObject(ind, @selector(hash))) {
+        orig_setIndicator(self, _cmd, ind); // 我们的点，放行
+    } else {
+        orig_setIndicator(self, _cmd, nil); // 系统的 launching/running 指示点：压掉
+    }
+}
+
 static void installSystemXFeatures(void) {
     // 初始化运行/绿点缓存字典
     static dispatch_once_t once;
@@ -2422,11 +2391,13 @@ static void installSystemXFeatures(void) {
             gDisableHomeLongPress, gVolDiag]);
 
     apv_refreshVPNCache();
-    apv_signalCacheInit();
 
     // ① APP 运行指示点（Lynx2 原生机制：约束定位 + SBApplicationProcessStateDidChange 事件驱动）
     apv_sys_try_hook("SBIconView", @selector(layoutSubviews),
                      (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews, kProbeIconLayout);
+    // v1.9.104：压掉系统自带 launching 指示点（消除"跟着 app 动"的双点跳变）
+    apv_sys_try_hook("SBIconView", @selector(setIndicator:),
+                     (IMP)&hook_setIndicator, (IMP *)&orig_setIndicator, -1);
     apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
                      (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess, kProbeAppProcess);
     // Lynx2 同款：SB 进程内通知，app 启停/前后台时 SpringBoard 自发（NSNotificationCenter，非 Darwin）
@@ -2439,10 +2410,11 @@ static void installSystemXFeatures(void) {
         apv_refreshAllIconDots();
     }];
 
-    // ③ VPN 变色 — v1.9.103：hook 信号格父类 setActiveColor:（真入口，WiFi+蜂窝通吃）
-    //    + SBStatusBarStateAggregator _updateVPNItem（VPN 连/断事件触发重刷）
-    apv_sys_try_hook("_UIStatusBarSignalView", @selector(setActiveColor:),
-                     (IMP)&hook_signal_setActiveColor, (IMP *)&orig_signal_setActiveColor, kProbeSignalColor);
+    // ③ VPN 变色 — v1.9.104：SystemX 同款真入口 _UIStatusBarIndicatorVPNItem
+    //    -_fillColorForUpdate:entry:（染 VPN 指示器图标本身，连=用户色/断=系统色）
+    //    + SBStatusBarStateAggregator _updateVPNItem（VPN 连/断事件触发重绘）
+    apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(_fillColorForUpdate:entry:),
+                     (IMP)&hook_vpn_fillColor, (IMP *)&orig_vpn_fillColor, kProbeSignalColor);
     apv_sys_try_hook("SBStatusBarStateAggregator", @selector(_updateVPNItem),
                      (IMP)&hook_agg_updateVPNItem, (IMP *)&orig_agg_updateVPNItem, kProbeVPNItem);
 
@@ -2504,7 +2476,7 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
             apv_refreshAllIconDots();
         }
         apv_refreshVPNCache();
-        // v1.9.103：VPN 染色开关切换 → 立即重刷信号格（连=染色 / 断=恢复原色），免注销
+        // v1.9.104：VPN 染色开关切换 → 立即重染 VPN 图标（连=染色 / 断=恢复原色），免注销
         apv_vpnRefreshSignalViews();
         // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
         // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
