@@ -2066,7 +2066,9 @@ static void apv_updateRunDot(UIView *iconView) {
         ind.translatesAutoresizingMaskIntoConstraints = NO;
         [iconView addSubview:ind];
         ind.layer.cornerRadius = 5.5;      // 11pt 圆点
-        ind.layer.continuousCorners = YES; // Lynx 同款连续圆角
+        // continuousCorners 是 CALayer 私有属性（公开 SDK 无此声明，编译报错）；
+        // 公开等价物 = cornerCurve = kCACornerCurveContinuous（iOS13+，同款连续圆角）
+        ind.layer.cornerCurve = kCACornerCurveContinuous;
         objc_setAssociatedObject(ind, @selector(hash), bid, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         // 约束定位：优先锚到文字位（老板要求"点在文字正中"）；文字位不可用退回 Lynx 摆法
@@ -2256,6 +2258,8 @@ static void apv_refreshVPNCache(void) {
 // VPN 状态变化（Darwin 通知）：强制重查一次并重刷信号格颜色。
 // （这个 Darwin 通知在 SpringBoard 实测收不到，v1.9.103 的主刷新走 _updateVPNItem hook；
 //   这里保留作兜底——万一收到就赚。Darwin 回调不在主线程 → 回主队列再动 UI。）
+// 前置声明：apv_vpnRefreshSignalViews 定义在下方 hook 区，Darwin 回调在它之前。
+static void apv_vpnRefreshSignalViews(void);
 static void apv_vpnStatusChanged(CFNotificationCenterRef center, void *observer,
                                  CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     dispatch_async(dispatch_get_main_queue(), ^{
