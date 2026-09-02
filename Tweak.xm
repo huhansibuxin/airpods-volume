@@ -1900,7 +1900,7 @@ static void apv_probeSummary(NSString *when) {
 
 // 带装载结果日志的 hook：排查"哪条没挂上"直接看日志，不用猜
 static void apv_sys_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig, int probeIdx) {
-    Class cls = objc_getClass(clsName);
+    Class cls = NSClassFromString(@(clsName));
     if (!cls || !class_getInstanceMethod(cls, sel)) {
         sysLog([NSString stringWithFormat:@"装载失败（跳过）: %s %@", clsName, NSStringFromSelector(sel)]);
         return;
@@ -2304,7 +2304,9 @@ static void (*orig_agg_updateVPNItem)(id, SEL);
 static void hook_agg_updateVPNItem(id self, SEL _cmd) {
     apv_probe(kProbeVPNItem, nil);
     orig_agg_updateVPNItem(self, _cmd);
-    apv_vpnRefreshSignalViews(); // 强制重绘 + 清 0.5s 节流（连/断系统本就会重绘，这里兜底即时生效）
+    // v1.9.105：绝不在状态栏更新栈内同步触发重绘——之前这里调 apv_vpnRefreshSignalViews()
+    // 同步 _updateStatusBar，会重入 _updateVPNItem → 无限递归/死锁 → respring 卡死（连安全
+    // 模式都进不去）。VPN 染色由 hook_vpn_fillColor 在系统每次重绘时自动生效，无需主动触发。
 }
 
 // VPN 染色开关切换 / VPN 状态变化后尽力触发一次状态栏重绘。
@@ -2313,12 +2315,16 @@ static void hook_agg_updateVPNItem(id self, SEL _cmd) {
 // 设置切换时少等一个刷新周期、即时变色。失败无所谓（下个刷新周期会跟上）。
 static void apv_vpnRefreshSignalViews(void) {
     sLastVPNProbe = 0; // 下次 _fillColorForUpdate: 立即按最新 VPN 状态/颜色重算
-    @try {
-        id agg = [NSClassFromString(@"SBStatusBarStateAggregator") sharedInstance];
-        SEL upd = @selector(_updateStatusBar);
-        if (agg && [agg respondsToSelector:upd])
-            ((void (*)(id, SEL))objc_msgSend)(agg, upd);
-    } @catch (id e) {}
+    // v1.9.105：延后到下一个 runloop 再请求重绘，绝不在当前调用栈（可能是状态栏更新中）
+    // 同步触发 _updateStatusBar，否则会重入 _updateVPNItem → 死锁。
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            id agg = [NSClassFromString(@"SBStatusBarStateAggregator") sharedInstance];
+            SEL upd = @selector(_updateStatusBar);
+            if (agg && [agg respondsToSelector:upd])
+                ((void (*)(id, SEL))objc_msgSend)(agg, upd);
+        } @catch (id e) {}
+    });
 }
 
 // ------------------------------------------------------------
@@ -2368,7 +2374,7 @@ static void hook_setEditingAnimated(id self, SEL _cmd, BOOL editing, BOOL animat
 // 系统的（无标记）一律压成 nil，彻底不显示。
 static void (*orig_setIndicator)(id, SEL, id);
 static void hook_setIndicator(id self, SEL _cmd, id ind) {
-    if (ind && objc_getAssociatedObject(ind, @selector(hash))) {
+    if (ind && [ind isKindOfClass:[UIView class]] && objc_getAssociatedObject(ind, @selector(hash))) {
         orig_setIndicator(self, _cmd, ind); // 我们的点，放行
     } else {
         orig_setIndicator(self, _cmd, nil); // 系统的 launching/running 指示点：压掉
@@ -2413,8 +2419,13 @@ static void installSystemXFeatures(void) {
     // ③ VPN 变色 — v1.9.104：SystemX 同款真入口 _UIStatusBarIndicatorVPNItem
     //    -_fillColorForUpdate:entry:（染 VPN 指示器图标本身，连=用户色/断=系统色）
     //    + SBStatusBarStateAggregator _updateVPNItem（VPN 连/断事件触发重绘）
-    apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(_fillColorForUpdate:entry:),
-                     (IMP)&hook_vpn_fillColor, (IMP *)&orig_vpn_fillColor, kProbeSignalColor);
+    // v1.9.105：_UIStatusBarIndicatorVPNItem 是状态栏懒加载类，启动早期 objc_getClass 可能
+    //   仍返回 nil（类未 realize）→ 延后到 UI 就绪（主队列 3s 后）再装，确保装载成功。
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(_fillColorForUpdate:entry:),
+                         (IMP)&hook_vpn_fillColor, (IMP *)&orig_vpn_fillColor, kProbeSignalColor);
+    });
     apv_sys_try_hook("SBStatusBarStateAggregator", @selector(_updateVPNItem),
                      (IMP)&hook_agg_updateVPNItem, (IMP *)&orig_agg_updateVPNItem, kProbeVPNItem);
 
