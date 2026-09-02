@@ -2129,8 +2129,10 @@ static void hook_app_updateProcess(id self, SEL _cmd, id process, id state) {
 // ------------------------------------------------------------
 // 原 v1.9.96 把 VPN 自身小图标染色了，老板要的不是这个：他要的是"会变的那个
 // 指示——WiFi 或 4G/5G 信号"染色（连 VPN 时变色提示）。所以染色目标改为：
-//   · _UIStatusBarWifiItem 的 imageView（WiFi 图标）
-//   · _UIStatusBarCellularItem 的 imageView（蜂窝 4G/5G 信号格）
+//   · _UIStatusBarWifiItem 的 _imageView ivar（WiFi 图标）
+//   · _UIStatusBarCellularItem 的 _imageView ivar（蜂窝 4G/5G 信号格）
+//   注意：这些 item 只有 _imageView ivar（_UIStatusBarImageView *），没有 imageView
+//   方法，必须从 ivar 读取，否则发 imageView 消息会崩（见 apv_statusItemImageView）。
 // VPN 是否连接用 NEVPNManager.connection.status（系统私有 API，SpringBoard
 // 也可链接），状态变化通过 Darwin 通知 com.apple.networkextension.status_changed
 // 监听（连上瞬间或断开瞬间触发，强制立即重染色，不靠 polling）。
@@ -2162,15 +2164,27 @@ static BOOL apv_vpnConnected(void) {
     } @catch (id e) { return NO; }
 }
 
+// _UIStatusBarItem 只有 _imageView ivar（_UIStatusBarImageView *），没有 imageView 方法。
+// 直接发 imageView 消息会触发「未识别 selector」→ SpringBoard 崩溃。这里从 ivar 安全读取。
+static UIImageView *apv_statusItemImageView(id item) {
+    if (!item) return nil;
+    @try {
+        Ivar iv = class_getInstanceVariable(object_getClass(item), "_imageView");
+        if (!iv) return nil;
+        id v = object_getIvar(item, iv);
+        return [v isKindOfClass:[UIImageView class]] ? (UIImageView *)v : nil;
+    } @catch (id e) { return nil; }
+}
+
 static void (*orig_wifi_applyUpdate)(id, SEL, id, id);
 static void hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    orig_wifi_applyUpdate(self, _cmd, update, displayItem);
     @try {
+        if (orig_wifi_applyUpdate) orig_wifi_applyUpdate(self, _cmd, update, displayItem);
         BOOL vpn = apv_vpnConnected();
-        UIImageView *v = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        UIImageView *v = apv_statusItemImageView(self);
         apv_probe(kProbeWifiApply, [NSString stringWithFormat:@"imageView=%@ vpn=%d 开关=%d",
                                     v ? NSStringFromClass([v class]) : @"nil", vpn, gColorizeVPN]);
-        if ([v isKindOfClass:[UIImageView class]]) {
+        if (v) {
             if (gColorizeVPN && vpn) {
                 if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
                     v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -2186,13 +2200,13 @@ static void hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) 
 
 static void (*orig_cellular_applyUpdate)(id, SEL, id, id);
 static void hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    orig_cellular_applyUpdate(self, _cmd, update, displayItem);
     @try {
+        if (orig_cellular_applyUpdate) orig_cellular_applyUpdate(self, _cmd, update, displayItem);
         BOOL vpn = apv_vpnConnected();
-        UIImageView *v = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        UIImageView *v = apv_statusItemImageView(self);
         apv_probe(kProbeCellularApply, [NSString stringWithFormat:@"imageView=%@ vpn=%d 开关=%d",
                                         v ? NSStringFromClass([v class]) : @"nil", vpn, gColorizeVPN]);
-        if ([v isKindOfClass:[UIImageView class]]) {
+        if (v) {
             if (gColorizeVPN && vpn) {
                 if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
                     v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -2217,14 +2231,15 @@ static void apv_vpnStatusChanged(CFNotificationCenterRef center, void *observer,
 // v1.9.97：这里不再染色，避免把 VPN 自身小图标搞成绿色。
 static id (*orig_vpn_applyUpdate)(id, SEL, id, id);
 static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    id r = orig_vpn_applyUpdate(self, _cmd, update, displayItem);
+    id r = nil;
     @try {   // 探针：iOS 16 VPN 状态栏是否还走 _UIStatusBarIndicatorVPNItem？
-        id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        if (orig_vpn_applyUpdate) r = orig_vpn_applyUpdate(self, _cmd, update, displayItem);
+        UIImageView *iv = apv_statusItemImageView(self);
         apv_probe(kProbeVPNApply, [NSString stringWithFormat:@"imageView=%@ 有图=%d",
                                    iv ? NSStringFromClass([iv class]) : @"nil",
-                                   ([iv isKindOfClass:[UIImageView class]] && ((UIImageView *)iv).image) ? 1 : 0]);
+                                   (iv && iv.image) ? 1 : 0]);
     } @catch (id e) {
-        apv_probe(kProbeVPNApply, @"imageView 取值抛异常");
+        apv_probe(kProbeVPNApply, @"取值抛异常");
     }
     // 不再染色 VPN item（染错地方）
     return r;
@@ -2240,16 +2255,24 @@ static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
 // ------------------------------------------------------------
 static id (*orig_vpn_additionAnim)(id, SEL, id);
 static id hook_vpn_additionAnim(id self, SEL _cmd, id ident) {
-    apv_probe(kProbeVPNAddAnim, [NSString stringWithFormat:@"ident=%@ 禁用开关=%d",
-                                 [ident description] ?: @"nil", gHideVPNFlyIn]);
-    if (gHideVPNFlyIn) {
-        CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
-        a.duration = 0.0;
-        a.fromValue = [NSNumber numberWithDouble:1.0];
-        a.toValue = [NSNumber numberWithDouble:1.0];
-        return a;
-    }
-    return orig_vpn_additionAnim(self, _cmd, ident);
+    @try {
+        apv_probe(kProbeVPNAddAnim, [NSString stringWithFormat:@"ident=%@ 禁用开关=%d",
+                                     [ident description] ?: @"nil", gHideVPNFlyIn]);
+        if (gHideVPNFlyIn) {
+            CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
+            a.duration = 0.0;
+            a.fromValue = [NSNumber numberWithDouble:1.0];
+            a.toValue = [NSNumber numberWithDouble:1.0];
+            return a;
+        }
+        if (orig_vpn_additionAnim) return orig_vpn_additionAnim(self, _cmd, ident);
+    } @catch (id e) {}
+    // 兜底：返回零时长动画（不返回 nil，避免调用方解引用空指针）
+    CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    a.duration = 0.0;
+    a.fromValue = [NSNumber numberWithDouble:1.0];
+    a.toValue = [NSNumber numberWithDouble:1.0];
+    return a;
 }
 
 static id (*orig_vpnDisconnect_additionAnim)(id, SEL, id);
@@ -2336,7 +2359,7 @@ static void installSystemXFeatures(void) {
                      (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews, kProbeIconLayout);
     apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
                      (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess, kProbeAppProcess);
-    // ③ VPN 变色 — 改染 WiFi/Cellular item 的 imageView（iOS16 上必然命中）
+    // ③ VPN 变色 — 改染 WiFi/Cellular item 的 _imageView ivar（iOS16 上必然命中）
     apv_sys_try_hook("_UIStatusBarWifiItem", @selector(applyUpdate:toDisplayItem:),
                      (IMP)&hook_wifi_applyUpdate, (IMP *)&orig_wifi_applyUpdate, kProbeWifiApply);
     apv_sys_try_hook("_UIStatusBarCellularItem", @selector(applyUpdate:toDisplayItem:),
