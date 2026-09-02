@@ -42,10 +42,10 @@ static BOOL gNotifGroupFrom3 = NO;   // v1.9.91：通知合并档位——关=�
 
 // ---- v1.9.96：SystemX(SystemBox) 移植功能开关（全部默认关闭）----
 static BOOL gRunIndicator = NO;        // APP 运行指示点：正在运行的 APP 图标下方显示彩色小圆点
-static BOOL gNoLockAfterRespring = NO; // 注销（respring）不锁屏
-static BOOL gColorizeVPN = NO;         // 连接 VPN 后状态栏 VPN 图标变色
+// v1.9.97：注销不锁屏（gNoLockAfterRespring）已删除——会让 SpringBoard 进安全模式。
+static BOOL gColorizeVPN = NO;         // 连接 VPN 后把状态栏 WiFi/4G·5G 信号格染色（不染 VPN 图标）
 static BOOL gDisableHomeLongPress = NO;// 禁用桌面长按（不再进抖动编辑态）
-static BOOL gHideVPNFlyIn = NO;        // 禁用 VPN 图标飞入动画（瞬间出现）
+static BOOL gHideVPNFlyIn = NO;        // 禁用 VPN 状态栏图标飞入动画（瞬间出现）
 static UIColor *gRunDotColor = nil;    // 指示点颜色（颜色代码解析结果）
 static UIColor *gVPNColor = nil;       // VPN 图标颜色（颜色代码解析结果）
 
@@ -118,7 +118,7 @@ static void apv_refresh(void) {
     gNotifGroupFrom3 = apv_bool(@"notifGroupFrom3", NO);
     // v1.9.96：SystemX 移植功能（默认全关）
     gRunIndicator = apv_bool(@"runIndicatorEnabled", NO);
-    gNoLockAfterRespring = apv_bool(@"noLockAfterRespring", NO);
+    // v1.9.97：注销不锁屏开关已删除（noLockAfterRespring）。
     gColorizeVPN = apv_bool(@"colorizeVPNStatusBar", NO);
     gDisableHomeLongPress = apv_bool(@"disableHomeScreenLongPress", NO);
     gHideVPNFlyIn = apv_bool(@"hideVPNFlyInAnimation", NO);
@@ -1823,12 +1823,12 @@ static void installNotifGrouping(void) {
 }
 
 // ============================================================
-// v1.9.96：SystemX（包名 SystemBox）五功能移植
+// v1.9.96：SystemX（包名 SystemBox）四功能移植
 //   ① APP 运行指示点   runIndicatorEnabled + runIndicatorColor
-//   ② 注销不锁屏       noLockAfterRespring
-//   ③ 连接 VPN 变色    colorizeVPNStatusBar + vpnStatusBarColor
-//   ④ 禁用桌面长按     disableHomeScreenLongPress
-//   ⑤ 禁用 VPN 飞入    hideVPNFlyInAnimation
+//   ③ 连接 VPN 变色    colorizeVPNStatusBar + vpnStatusBarColor（v1.9.97 改染 WiFi/Cellular）
+//   ④ 禁用桌面长按     disableHomeScreenLongPress（v1.9.97 改 hook setEditing:fromIconView:）
+//   ⑤ 禁用 VPN 飞入    hideVPNFlyInAnimation（v1.9.97 改 hook _UIStatusBarVPNDisconnectItem）
+//   ② 注销不锁屏       noLockAfterRespring — v1.9.97 已删除（实测导致安全模式）
 //
 // hook 点来源：SystemBox.dylib 反编译（451 个 selref）与本设备 SpringBoard
 // 运行时 dump 交叉核对。装载方式与 NDH 一致——类/方法存在才 hook，缺失静默
@@ -1848,24 +1848,28 @@ static void sysLog(NSString *msg) { apvWriteEx(@"[SYS]", msg, 30.0, YES); }
 enum {
     kProbeIconLayout = 0, // SBIconView layoutSubviews（指示点绘制入口）
     kProbeAppProcess,     // SBApplication _updateProcess:withState:（APP 启停事件）
-    kProbeSetUILocked,    // SBLockScreenManager _setUILocked:
-    kProbeLockFromSource, // SBLockScreenManager lockUIFromSource:withOptions:
-    kProbeVPNApply,       // _UIStatusBarIndicatorVPNItem applyUpdate:toDisplayItem:
-    kProbeVPNAddAnim,     // ...additionAnimationForDisplayItemWithIdentifier:
-    kProbeLongPress,      // SBIconView editingModeGestureRecognizerDidFire:
-    kProbeLongPressMgr,   // SBHIconManager iconView:editingModeGestureRecognizerDidFire:
+    kProbeVPNApply,       // _UIStatusBarIndicatorVPNItem applyUpdate:toDisplayItem:（对照探针，v1.9.96 上 0 命中）
+    kProbeVPNAddAnim,     // _UIStatusBarIndicatorVPNItem additionAnimationForDisplayItemWithIdentifier:（对照）
+    kProbeVPNDisconnectAddAnim, // _UIStatusBarVPNDisconnectItem additionAnimation…（iOS16 实际 VPN 飞入路径）
+    kProbeWifiApply,      // _UIStatusBarWifiItem applyUpdate:toDisplayItem:（WiFi 图标染色入口）
+    kProbeCellularApply,  // _UIStatusBarCellularItem applyUpdate:toDisplayItem:（蜂窝 4G/5G 染色入口）
+    kProbeSetEditingMgr,  // SBHIconManager setEditing:fromIconView:（长按→抖动真正入口，iOS16 绕开 didFire delegate）
+    kProbeSetEditingView, // SBIconView setEditing:（编辑态入口备份）
+    kProbeSetEditingViewAnim, // SBIconView setEditing:animated:
     kProbeCount
 };
 typedef struct { const char *name; BOOL installed; int hits; } apv_probe_t;
 static apv_probe_t sProbes[kProbeCount] = {
-    { "SBIconView.layoutSubviews",        NO, 0 },
-    { "SBApplication._updateProcess",     NO, 0 },
-    { "SBLockScreenManager._setUILocked", NO, 0 },
-    { "SBLockScreenManager.lockSrc",      NO, 0 },
-    { "VPNItem.applyUpdate",              NO, 0 },
-    { "VPNItem.additionAnim",             NO, 0 },
-    { "SBIconView.longPressFire",         NO, 0 },
-    { "SBHIconManager.longPressFire",     NO, 0 },
+    { "SBIconView.layoutSubviews",           NO, 0 },
+    { "SBApplication._updateProcess",        NO, 0 },
+    { "VPNItem.applyUpdate",                 NO, 0 },
+    { "VPNItem.additionAnim",                NO, 0 },
+    { "VPNDisconnectItem.additionAnim",      NO, 0 },
+    { "WifiItem.applyUpdate",                NO, 0 },
+    { "CellularItem.applyUpdate",            NO, 0 },
+    { "SBHIconManager.setEditing",           NO, 0 },
+    { "SBIconView.setEditing",               NO, 0 },
+    { "SBIconView.setEditing:animated",      NO, 0 },
 };
 
 // 每个探针只在**首次命中**时落一条（写清触发现场）；之后每 200 次补一条计数，
@@ -2009,20 +2013,51 @@ static void apv_updateRunDot(UIView *iconView) {
     dispatch_once(&bidOnce, ^{ sBidSeen = [[NSMutableSet alloc] init]; });
     apv_logBidOnce(bid, @"指示点: 识别到图标", sBidSeen);
     if (!apv_isRunningBundle(bid)) { dot.hidden = YES; return; }
-    CGSize s = iconView.bounds.size;
-    CGFloat d = 5.0;
-    // 位置：跟系统"更新/等待小圆点"一致——图标名右侧 2pt；
-    // labelView 拿不到或不在同一坐标系时回退到图标底部居中（不会跑到屏幕外）
-    CGRect f = CGRectMake((s.width - d) * 0.5, s.height - 4.0, d, d);
+
+    // v1.9.97：老板反馈——绿点位置改为**名字 label 行**：
+    //   1) 名字短（< label 可用宽）→ 点跟在文字右缘后（与系统"更新/等待"圆点一致）
+    //   2) 名字长（被截断成"…"）→ 把 UILabel 文本**整个藏掉**，点占 label 正中
+    //      （老板原话："不显示名字就显示在软件名字这个位置的正中间"）
+    // 拿不到 labelView 时（极少数路径）回退到图标底部居中——不会跑到屏外。
+    CGFloat d = 7.0;
+    CGRect f;
+    BOOL labelFound = NO;
+    UILabel *innerLabel = nil;          // 我们可能要藏掉的 label（v1.9.97 新增）
     @try {
-        if ([iconView respondsToSelector:@selector(labelView)]) {
-            UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
-            if ([lv isKindOfClass:[UIView class]] && lv.superview == iconView && lv.frame.size.width > 0) {
-                f = CGRectMake(CGRectGetMaxX(lv.frame) + 2.0,
-                               CGRectGetMidY(lv.frame) - d * 0.5, d, d);
+        UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
+        if ([lv isKindOfClass:[UIView class]] && lv.superview == iconView && lv.bounds.size.width > 0) {
+            for (UIView *sub in lv.subviews) {
+                if ([sub isKindOfClass:[UILabel class]]) { innerLabel = (UILabel *)sub; break; }
             }
+            CGRect lf = [lv convertRect:lv.bounds toView:iconView];
+            CGFloat lblW = lf.size.width;
+            CGFloat textW = 0;
+            if (innerLabel && innerLabel.text.length) {
+                UIFont *fnt = innerLabel.font ?: [UIFont systemFontOfSize:11];
+                NSDictionary *attrs = @{NSFontAttributeName: fnt};
+                textW = [innerLabel.text boundingRectWithSize:CGSizeMake(CGFLOAT_MAX, lf.size.height)
+                                                     options:NSStringDrawingUsesLineFragmentOrigin
+                                                  attributes:attrs context:nil].size.width;
+            }
+            if (textW > lblW + 0.5) {
+                // 长名 → 顶替名字：藏掉 UILabel，点放 label 正中
+                if (innerLabel) innerLabel.hidden = YES;
+                f = CGRectMake(CGRectGetMidX(lf) - d * 0.5, CGRectGetMidY(lf) - d * 0.5, d, d);
+            } else {
+                // 短名 → 复原 UILabel，点贴 label 文字右缘后（label 中心 + textW/2 + 1.5pt 间距）
+                if (innerLabel) innerLabel.hidden = NO;
+                CGFloat cx = CGRectGetMidX(lf);
+                CGFloat cy = CGRectGetMidY(lf);
+                f = CGRectMake(cx + textW * 0.5 + 1.5, cy - d * 0.5, d, d);
+            }
+            labelFound = YES;
         }
     } @catch (id e) {}
+    if (!labelFound) {
+        CGSize s = iconView.bounds.size;
+        f = CGRectMake((s.width - d) * 0.5, s.height - 4.0, d, d);
+        if (innerLabel) innerLabel.hidden = NO;
+    }
     dot.frame = f;
     dot.layer.cornerRadius = d * 0.5;
     dot.backgroundColor = gRunDotColor ?: [UIColor whiteColor];
@@ -2082,112 +2117,127 @@ static void hook_app_updateProcess(id self, SEL _cmd, id process, id state) {
 }
 
 // ------------------------------------------------------------
-// ② 注销不锁屏
+// ② 注销不锁屏 — v1.9.97 已删除
 // ------------------------------------------------------------
-// 判定"这次启动是注销而不是冷开机"：比较系统开机时间（kern.boottime）与
-// 本进程启动时间（KERN_PROC_PID → p_starttime）。冷开机时 SpringBoard 在
-// 开机几秒内就起来了；注销（respring）时设备已经跑了一段时间才重启
-// SpringBoard。两者相差 > 30s 即判定为 respring，此时吞掉"第一次上锁"
-// 并主动解锁。只吃一次——之后用户按电源键锁屏完全走原生逻辑。
+// 老板实机测试发现：开着「注销不锁屏」注销一次，SpringBoard 进了安全模式
+// （吞锁 + 自动解锁竞态，与系统锁屏状态机打架）。该功能整体下线，
+// plist 里的 noLockAfterRespring 开关也一并移除。下面这块代码不要回滚。
 // ------------------------------------------------------------
-static BOOL gRespringLaunch = NO;
-static BOOL gLockSwallowed = NO;
-
-static BOOL apv_isRespringLaunch(void) {
-    struct timeval boot;
-    size_t len = sizeof(boot);
-    if (sysctlbyname("kern.boottime", &boot, &len, NULL, 0) != 0) return NO;
-    struct kinfo_proc kp;
-    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
-    len = sizeof(kp);
-    if (sysctl(mib, 4, &kp, &len, NULL, 0) != 0) return NO;
-    double bootT  = (double)boot.tv_sec + (double)boot.tv_usec / 1e6;
-    double startT = (double)kp.kp_proc.p_starttime.tv_sec + (double)kp.kp_proc.p_starttime.tv_usec / 1e6;
-    double delta = startT - bootT;
-    sysLog([NSString stringWithFormat:@"启动判定: SpringBoard 于开机后 %.0f 秒启动（>30s 判定为注销）", delta]);
-    return delta > 30.0;
-}
-
-static BOOL apv_shouldSwallowLock(BOOL locked) {
-    return (locked && gNoLockAfterRespring && gRespringLaunch && !gLockSwallowed);
-}
-
-static void apv_doAutoUnlock(id lsm) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        @try {
-            SEL sel = @selector(unlockUIFromSource:withOptions:);
-            if (![lsm respondsToSelector:sel]) {
-                sysLog(@"[noLock] 自动解锁失败：SBLockScreenManager 不响应 unlockUIFromSource:");
-                return;
-            }
-            ((BOOL (*)(id, SEL, int, id))objc_msgSend)(lsm, sel, 1, nil);
-            sysLog(@"[noLock] 已请求自动解锁 unlockUIFromSource:1");
-        } @catch (id e) {}
-    });
-}
-
-static void (*orig_setUILocked)(id, SEL, BOOL);
-static void hook_setUILocked(id self, SEL _cmd, BOOL locked) {
-    apv_probe(kProbeSetUILocked, [NSString stringWithFormat:@"locked=%d 吞锁条件=%d(开关%d/注销启动%d/未吞过%d)",
-                                  locked, apv_shouldSwallowLock(locked),
-                                  gNoLockAfterRespring, gRespringLaunch, !gLockSwallowed]);
-    if (apv_shouldSwallowLock(locked)) {
-        gLockSwallowed = YES;
-        sysLog(@"[noLock] 吃掉注销后的 _setUILocked:YES");
-        orig_setUILocked(self, _cmd, NO);
-        apv_doAutoUnlock(self);
-        return;
-    }
-    orig_setUILocked(self, _cmd, locked);
-}
-
-static void (*orig_lockUIFromSource)(id, SEL, int, id);
-static void hook_lockUIFromSource(id self, SEL _cmd, int source, id options) {
-    apv_probe(kProbeLockFromSource, [NSString stringWithFormat:@"source=%d 吞锁条件=%d(开关%d/注销启动%d/未吞过%d)",
-                                     source, apv_shouldSwallowLock(YES),
-                                     gNoLockAfterRespring, gRespringLaunch, !gLockSwallowed]);
-    if (apv_shouldSwallowLock(YES)) {
-        gLockSwallowed = YES;
-        sysLog([NSString stringWithFormat:@"[noLock] 吃掉注销后的 lockUIFromSource:%d", source]);
-        apv_doAutoUnlock(self);
-        return;
-    }
-    orig_lockUIFromSource(self, _cmd, source, options);
-}
 
 // ------------------------------------------------------------
-// ③ 连接 VPN 变色 / ⑤ 禁用 VPN 飞入动画
+// ③ 连接 VPN 染色 — 改染 WiFi/Cellular（v1.9.97 老板反馈）
 // ------------------------------------------------------------
-// 两者都在同一个私有指示器类 _UIStatusBarIndicatorVPNItem 上：
-//   · 变色：改它自己的 imageView 的 tintColor（图标是模板图，tintColor 生效）
-//   · 飞入：入场动画由 additionAnimationForDisplayItemWithIdentifier: 提供，
-//           换成 0 时长空动画即可瞬间出现（不返回 nil，避免调用方解引用空）
+// 原 v1.9.96 把 VPN 自身小图标染色了，老板要的不是这个：他要的是"会变的那个
+// 指示——WiFi 或 4G/5G 信号"染色（连 VPN 时变色提示）。所以染色目标改为：
+//   · _UIStatusBarWifiItem 的 imageView（WiFi 图标）
+//   · _UIStatusBarCellularItem 的 imageView（蜂窝 4G/5G 信号格）
+// VPN 是否连接用 NEVPNManager.connection.status（系统私有 API，SpringBoard
+// 也可链接），状态变化通过 Darwin 通知 com.apple.networkextension.status_changed
+// 监听（连上瞬间或断开瞬间触发，强制立即重染色，不靠 polling）。
 // ------------------------------------------------------------
-static id (*orig_vpn_applyUpdate)(id, SEL, id, id);
-static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    id r = orig_vpn_applyUpdate(self, _cmd, update, displayItem);
-    @try {   // 探针：VPN 指示器的刷新到底有没有走到这里，imageView 拿不拿得到
-        id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
-        apv_probe(kProbeVPNApply, [NSString stringWithFormat:@"imageView=%@ 有图=%d 变色开关=%d",
-                                   iv ? NSStringFromClass([iv class]) : @"nil",
-                                   ([iv isKindOfClass:[UIImageView class]] && ((UIImageView *)iv).image) ? 1 : 0,
-                                   gColorizeVPN]);
-    } @catch (id e) {
-        apv_probe(kProbeVPNApply, @"imageView 取值抛异常");
-    }
-    if (!gColorizeVPN) return r;
+// 私有 API 声明
+@interface NEVPNConnection : NSObject
+@property(nonatomic,readonly) long long status;
+@end
+@interface NEVPNManager : NSObject
++ (instancetype)sharedManager;
+@property(nonatomic,readonly) NEVPNConnection *connection;
+@end
+
+static BOOL apv_vpnConnected(void) {
     @try {
-        id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
-        if ([iv isKindOfClass:[UIImageView class]]) {
-            UIImageView *v = (UIImageView *)iv;
-            if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
-                v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-            v.tintColor = gVPNColor ?: [UIColor orangeColor];
+        Class M = NSClassFromString(@"NEVPNManager");
+        if (!M) return NO;
+        SEL sSEL = @selector(sharedManager);
+        if (![M respondsToSelector:sSEL]) return NO;
+        id mgr = ((id (*)(Class, SEL))objc_msgSend)(M, sSEL);
+        SEL cSEL = @selector(connection);
+        if (![mgr respondsToSelector:cSEL]) return NO;
+        id conn = ((id (*)(id, SEL))objc_msgSend)(mgr, cSEL);
+        SEL stSEL = @selector(status);
+        if (![conn respondsToSelector:stSEL]) return NO;
+        long long st = ((long long (*)(id, SEL))objc_msgSend)(conn, stSEL);
+        // NEVPNStatusConnected = 4（disconnected=1, connecting=2, connected=4, disconnecting=5）
+        return (st == 4 || st == 5);
+    } @catch (id e) { return NO; }
+}
+
+static void (*orig_wifi_applyUpdate)(id, SEL, id, id);
+static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    id r = orig_wifi_applyUpdate(self, _cmd, update, displayItem);
+    @try {
+        BOOL vpn = apv_vpnConnected();
+        UIImageView *v = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        apv_probe(kProbeWifiApply, [NSString stringWithFormat:@"imageView=%@ vpn=%d 开关=%d",
+                                    v ? NSStringFromClass([v class]) : @"nil", vpn, gColorizeVPN]);
+        if ([v isKindOfClass:[UIImageView class]]) {
+            if (gColorizeVPN && vpn) {
+                if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
+                    v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+                v.tintColor = gVPNColor ?: [UIColor orangeColor];
+            } else {
+                // 开关关 / VPN 断 → 恢复系统默认 tint（nil 让系统接管）
+                v.tintColor = nil;
+            }
         }
     } @catch (id e) {}
     return r;
 }
 
+static void (*orig_cellular_applyUpdate)(id, SEL, id, id);
+static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    id r = orig_cellular_applyUpdate(self, _cmd, update, displayItem);
+    @try {
+        BOOL vpn = apv_vpnConnected();
+        UIImageView *v = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        apv_probe(kProbeCellularApply, [NSString stringWithFormat:@"imageView=%@ vpn=%d 开关=%d",
+                                        v ? NSStringFromClass([v class]) : @"nil", vpn, gColorizeVPN]);
+        if ([v isKindOfClass:[UIImageView class]]) {
+            if (gColorizeVPN && vpn) {
+                if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
+                    v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+                v.tintColor = gVPNColor ?: [UIColor orangeColor];
+            } else {
+                v.tintColor = nil;
+            }
+        }
+    } @catch (id e) {}
+    return r;
+}
+
+// VPN 状态变化（Darwin 通知）：触发一次 SysLog，后续重染色靠 WiFi/Cellular
+// item 自己的 applyUpdate（系统会在数据变化时主动调）。
+static void apv_vpnStatusChanged(CFNotificationCenterRef center, void *observer,
+                                 CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    sysLog([NSString stringWithFormat:@"[VPN] 状态变化：vpn=%d 开关=%d",
+            apv_vpnConnected(), gColorizeVPN]);
+}
+
+// VPN 旧染色对象（_UIStatusBarIndicatorVPNItem）保留作对照探针——日志说它 0 命中。
+// v1.9.97：这里不再染色，避免把 VPN 自身小图标搞成绿色。
+static id (*orig_vpn_applyUpdate)(id, SEL, id, id);
+static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    id r = orig_vpn_applyUpdate(self, _cmd, update, displayItem);
+    @try {   // 探针：iOS 16 VPN 状态栏是否还走 _UIStatusBarIndicatorVPNItem？
+        id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        apv_probe(kProbeVPNApply, [NSString stringWithFormat:@"imageView=%@ 有图=%d",
+                                   iv ? NSStringFromClass([iv class]) : @"nil",
+                                   ([iv isKindOfClass:[UIImageView class]] && ((UIImageView *)iv).image) ? 1 : 0]);
+    } @catch (id e) {
+        apv_probe(kProbeVPNApply, @"imageView 取值抛异常");
+    }
+    // 不再染色 VPN item（染错地方）
+    return r;
+}
+
+// ------------------------------------------------------------
+// ⑤ 禁用 VPN 飞入动画
+// ------------------------------------------------------------
+// v1.9.96 hook 的是 _UIStatusBarIndicatorVPNItem，日志实锤 0 命中（iOS16 VPN
+// 状态栏实际类是 _UIStatusBarVPNDisconnectItem，dump 里在 UIKitCore.h）。
+// 这里同时挂两个——前者做对照探针，后者才是真路径（VPN 连接时该 item 出现/
+// 消失时系统会问 additionAnimation…，命中后才真的禁掉飞入）。
+// ------------------------------------------------------------
 static id (*orig_vpn_additionAnim)(id, SEL, id);
 static id hook_vpn_additionAnim(id self, SEL _cmd, id ident) {
     apv_probe(kProbeVPNAddAnim, [NSString stringWithFormat:@"ident=%@ 禁用开关=%d",
@@ -2202,34 +2252,65 @@ static id hook_vpn_additionAnim(id self, SEL _cmd, id ident) {
     return orig_vpn_additionAnim(self, _cmd, ident);
 }
 
-// ------------------------------------------------------------
-// ④ 禁用桌面长按
-// ------------------------------------------------------------
-// 长按图标进抖动编辑态的回调就是 editingModeGestureRecognizerDidFire:，
-// 开了开关直接不往下走（图标菜单/其它手势不受影响）。
-// ------------------------------------------------------------
-static id (*orig_icon_editingFired)(id, SEL, id);
-static id hook_icon_editingFired(id self, SEL _cmd, id gr) {
-    apv_probe(kProbeLongPress, [NSString stringWithFormat:@"gesture=%@ 禁用开关=%d",
-                                gr ? NSStringFromClass([gr class]) : @"nil", gDisableHomeLongPress]);
-    if (gDisableHomeLongPress) {
-        sysLog(@"[长按] 拦截 SBIconView editingModeGestureRecognizerDidFire:（桌面长按已禁用）");
-        return nil;
+static id (*orig_vpnDisconnect_additionAnim)(id, SEL, id);
+static id hook_vpnDisconnect_additionAnim(id self, SEL _cmd, id ident) {
+    apv_probe(kProbeVPNDisconnectAddAnim, [NSString stringWithFormat:@"ident=%@ 禁用开关=%d",
+                                            [ident description] ?: @"nil", gHideVPNFlyIn]);
+    if (gHideVPNFlyIn) {
+        CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
+        a.duration = 0.0;
+        a.fromValue = [NSNumber numberWithDouble:1.0];
+        a.toValue = [NSNumber numberWithDouble:1.0];
+        return a;
     }
-    return orig_icon_editingFired(self, _cmd, gr);
+    return orig_vpnDisconnect_additionAnim(self, _cmd, ident);
 }
 
-// 备用路径：长按也可能走 delegate（SBHIconManager iconView:editingModeGestureRecognizerDidFire:）。
-// 两条都堵，探针会告诉我们系统实际走的是哪条（或两条都走）。
-static id (*orig_iconMgr_editingFired)(id, SEL, id, id);
-static id hook_iconMgr_editingFired(id self, SEL _cmd, id iconView, id gr) {
-    apv_probe(kProbeLongPressMgr, [NSString stringWithFormat:@"gesture=%@ 禁用开关=%d",
-                                   gr ? NSStringFromClass([gr class]) : @"nil", gDisableHomeLongPress]);
-    if (gDisableHomeLongPress) {
-        sysLog(@"[长按] 拦截 SBHIconManager iconView:editingModeGestureRecognizerDidFire:（桌面长按已禁用）");
-        return nil;
+// ------------------------------------------------------------
+// ④ 禁用桌面长按 — v1.9.97 改 hook 真正的编辑态入口
+// ------------------------------------------------------------
+// v1.9.96 hook 了 SBIconView editingModeGestureRecognizerDidFire: 和 SBHIconManager
+// iconView:editingModeGestureRecognizerDidFire: 两个 delegate，日志两条都 0 命中。
+// 真因：iOS16 SpringBoard 长按图标直接调 SBHIconManager setEditing:YES fromIconView:
+// 拉起抖动，根本不走这两个 delegate 方法。所以禁掉长按要拦 setEditing:YES。
+// 三路并堵：
+//   1) SBHIconManager setEditing:fromIconView:（主路径，从图标触发抖动）
+//   2) SBIconView setEditing:（编辑态备份入口）
+//   3) SBIconView setEditing:animated:（同上）
+// editing=YES 直接 return（不开编辑态，叉就不会出现）。context menu 等其它手势
+// 不受影响（context menu 不依赖 setEditing）。
+// ------------------------------------------------------------
+static void (*orig_setEditingFromIconView)(id, SEL, BOOL, id);
+static void hook_setEditingFromIconView(id self, SEL _cmd, BOOL editing, id iconView) {
+    apv_probe(kProbeSetEditingMgr, [NSString stringWithFormat:@"editing=%d 开关=%d",
+                                    editing, gDisableHomeLongPress]);
+    if (gDisableHomeLongPress && editing) {
+        sysLog(@"[长按] 拦截 SBHIconManager setEditing:YES fromIconView:（长按不再进抖动/卸载）");
+        return;
     }
-    return orig_iconMgr_editingFired(self, _cmd, iconView, gr);
+    orig_setEditingFromIconView(self, _cmd, editing, iconView);
+}
+
+static void (*orig_setEditing)(id, SEL, BOOL);
+static void hook_setEditing(id self, SEL _cmd, BOOL editing) {
+    apv_probe(kProbeSetEditingView, [NSString stringWithFormat:@"editing=%d 开关=%d",
+                                     editing, gDisableHomeLongPress]);
+    if (gDisableHomeLongPress && editing) {
+        sysLog(@"[长按] 拦截 SBIconView setEditing:YES（长按不再进抖动/卸载）");
+        return;
+    }
+    orig_setEditing(self, _cmd, editing);
+}
+
+static void (*orig_setEditingAnimated)(id, SEL, BOOL, BOOL);
+static void hook_setEditingAnimated(id self, SEL _cmd, BOOL editing, BOOL animated) {
+    apv_probe(kProbeSetEditingViewAnim, [NSString stringWithFormat:@"editing=%d anim=%d 开关=%d",
+                                         editing, animated, gDisableHomeLongPress]);
+    if (gDisableHomeLongPress && editing) {
+        sysLog(@"[长按] 拦截 SBIconView setEditing:YES animated:（长按不再进抖动/卸载）");
+        return;
+    }
+    orig_setEditingAnimated(self, _cmd, editing, animated);
 }
 
 static NSString *apv_colorCode(UIColor *c) {
@@ -2242,41 +2323,54 @@ static NSString *apv_colorCode(UIColor *c) {
 static void installSystemXFeatures(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{ sRunCache = [[NSMutableDictionary alloc] init]; });
-    gRespringLaunch = apv_isRespringLaunch();
 
-    // 先落一条开关快照：日志里能直接看出"是功能没生效"还是"开关/颜色根本没读到"
+    // v1.9.97 开关快照：注销不锁屏已下线；VPN 染色目标已改为 WiFi/Cellular
     sysLog([NSString stringWithFormat:
-            @"开关状态: 指示点=%d(%@) 注销不锁屏=%d VPN变色=%d(%@) 禁长按=%d 禁VPN飞入=%d | 本次启动=%@ | 诊断日志=%d",
-            gRunIndicator, apv_colorCode(gRunDotColor), gNoLockAfterRespring,
-            gColorizeVPN, apv_colorCode(gVPNColor), gDisableHomeLongPress, gHideVPNFlyIn,
-            gRespringLaunch ? @"注销(respring)" : @"冷开机", gVolDiag]);
+            @"开关状态: 指示点=%d(%@) VPN变色[染WiFi/Cellular]=%d(%@) 禁长按=%d 禁VPN飞入=%d | 诊断日志=%d",
+            gRunIndicator, apv_colorCode(gRunDotColor),
+            gColorizeVPN, apv_colorCode(gVPNColor),
+            gDisableHomeLongPress, gHideVPNFlyIn, gVolDiag]);
 
     // ① APP 运行指示点
     apv_sys_try_hook("SBIconView", @selector(layoutSubviews),
                      (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews, kProbeIconLayout);
     apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
                      (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess, kProbeAppProcess);
-    // ② 注销不锁屏：内部状态机 + 外部上锁入口两条路径都堵
-    apv_sys_try_hook("SBLockScreenManager", @selector(_setUILocked:),
-                     (IMP)&hook_setUILocked, (IMP *)&orig_setUILocked, kProbeSetUILocked);
-    apv_sys_try_hook("SBLockScreenManager", @selector(lockUIFromSource:withOptions:),
-                     (IMP)&hook_lockUIFromSource, (IMP *)&orig_lockUIFromSource, kProbeLockFromSource);
-    // ③ VPN 变色 / ⑤ VPN 飞入动画（两者的方法都继承自 _UIStatusBarItem，class_getInstanceMethod 能查到）
+    // ③ VPN 变色 — 改染 WiFi/Cellular item 的 imageView（iOS16 上必然命中）
+    apv_sys_try_hook("_UIStatusBarWifiItem", @selector(applyUpdate:toDisplayItem:),
+                     (IMP)&hook_wifi_applyUpdate, (IMP *)&orig_wifi_applyUpdate, kProbeWifiApply);
+    apv_sys_try_hook("_UIStatusBarCellularItem", @selector(applyUpdate:toDisplayItem:),
+                     (IMP)&hook_cellular_applyUpdate, (IMP *)&orig_cellular_applyUpdate, kProbeCellularApply);
+    // VPN item 旧路径留对照探针（v1.9.96 上 0 命中）
     apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(applyUpdate:toDisplayItem:),
                      (IMP)&hook_vpn_applyUpdate, (IMP *)&orig_vpn_applyUpdate, kProbeVPNApply);
+    // ④ 禁用桌面长按 — 真入口 SBHIconManager setEditing:fromIconView: + SBIconView setEditing
+    apv_sys_try_hook("SBHIconManager", @selector(setEditing:fromIconView:),
+                     (IMP)&hook_setEditingFromIconView, (IMP *)&orig_setEditingFromIconView, kProbeSetEditingMgr);
+    apv_sys_try_hook("SBIconView", @selector(setEditing:),
+                     (IMP)&hook_setEditing, (IMP *)&orig_setEditing, kProbeSetEditingView);
+    apv_sys_try_hook("SBIconView", @selector(setEditing:animated:),
+                     (IMP)&hook_setEditingAnimated, (IMP *)&orig_setEditingAnimated, kProbeSetEditingViewAnim);
+    // ⑤ 禁用 VPN 飞入动画 — 旧 VPNItem 留对照，新增真路径 _UIStatusBarVPNDisconnectItem
     apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(additionAnimationForDisplayItemWithIdentifier:),
                      (IMP)&hook_vpn_additionAnim, (IMP *)&orig_vpn_additionAnim, kProbeVPNAddAnim);
-    // ④ 禁用桌面长按：SBIconView 自身 + SBHIconManager 代理，两条都堵
-    apv_sys_try_hook("SBIconView", @selector(editingModeGestureRecognizerDidFire:),
-                     (IMP)&hook_icon_editingFired, (IMP *)&orig_icon_editingFired, kProbeLongPress);
-    apv_sys_try_hook("SBHIconManager", @selector(iconView:editingModeGestureRecognizerDidFire:),
-                     (IMP)&hook_iconMgr_editingFired, (IMP *)&orig_iconMgr_editingFired, kProbeLongPressMgr);
+    apv_sys_try_hook("_UIStatusBarVPNDisconnectItem", @selector(additionAnimationForDisplayItemWithIdentifier:),
+                     (IMP)&hook_vpnDisconnect_additionAnim, (IMP *)&orig_vpnDisconnect_additionAnim, kProbeVPNDisconnectAddAnim);
 
     // 开关本来就开着时（如注销后恢复），等桌面布局完再刷一次指示点
     if (gRunIndicator) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ apv_refreshAllIconDots(); });
     }
+
+    // VPN 状态变化：连上/断开触发 SysLog，重染色靠 WifiItem/CellularItem 自己的 applyUpdate
+    // （状态栏数据一变系统就会主动调，不用 polling）
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        NULL,
+        (CFNotificationCallback)apv_vpnStatusChanged,
+        CFSTR("com.apple.networkextension.vpn.status_changed"),
+        NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 
     // 探针汇总：启动完 5s 一次（看哪些 hook 在启动期就该被触发）/
     // 30s 一次（用户已经开始划桌面、开 APP 了）。"已装/0 次"= hook 点选错了，得换。

@@ -309,21 +309,7 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>注销不锁屏</string>
-			<key>key</key>
-			<string>noLockAfterRespring</string>
-			<key>default</key>
-			<false/>
-			<key>defaults</key>
-			<string>com.huhansibuxin.airpodsvolume</string>
-			<key>PostNotification</key>
-			<string>com.huhansibuxin.airpodsvolume-updated</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>连接 VPN 变色</string>
+			<string>连接 VPN 变色（WiFi/4G·5G 信号格）</string>
 			<key>key</key>
 			<string>colorizeVPNStatusBar</string>
 			<key>default</key>
@@ -391,15 +377,15 @@
 
 通知合并（NotifsDontHide 并入）：同一 App 的通知从第 2 条起就合并成一栏（iOS 原生为第 5 条起）。打开「通知从第 3 条起才合并成一组」则改为第 3 条起合并，开关即时生效、无需注销。⚠️ 合并版启用后请卸载独立的 NotifsDontHide 包，避免双重 hook 冲突。
 
-桌面与状态栏（v1.9.96 新增，全部默认关闭、开关即时生效无需注销）：
-· APP 运行指示点：正在运行的 APP 图标下方显示一个彩色小圆点（APP 一退出就消失）。颜色在「指示点颜色代码」里直接填，支持 #RRGGBB（如 #00FF00 绿）或 255,255,255 两种写法，留空则用默认白色。
-· 注销不锁屏：注销（respring）后跳过这次上锁、直接回桌面；正常开机、手动锁屏不受影响。
-· 连接 VPN 变色 / VPN 颜色代码：VPN 连上后状态栏 VPN 图标换成你填的颜色。
-· 禁用 VPN 飞入动画：VPN 图标瞬间出现，不再滑入。
-· 禁用桌面长按：长按图标不再进入抖动编辑态（图标菜单不受影响）。
+桌面与状态栏（v1.9.97 调整 — 1 个删除、3 个 真 hook 点修复、1 个 染色对象换掉）：
+· APP 运行指示点：正在运行的 APP 图标下方显示一个彩色小圆点（APP 一退出就消失）。点放在 app 名字右缘后；如果 app 名字太长（被系统截断），则**隐藏名字**、点放在名字位的正中。颜色在「指示点颜色代码」里直接填，支持 #RRGGBB（如 #00FF00 绿）或 255,255,255 两种写法，留空则用默认白色。
+· ~~注销不锁屏~~：**v1.9.97 已删除**。开此功能 + 注销会让 SpringBoard 进安全模式（吞锁与系统锁屏状态机打架），别再用。
+· 连接 VPN 变色：VPN 连上后把状态栏**会变的那一格**（WiFi 图标 或 4G/5G 信号格）染成「VPN 颜色代码」里的色——不是 VPN 自身图标。
+· 禁用 VPN 飞入动画：VPN 状态栏图标瞬间出现，不再从左往右滑入。
+· 禁用桌面长按：长按图标不再进入抖动编辑态、也不会出现叉用于卸载（图标菜单不受影响）。
 
 怎么确认抓没抓到：SSH 进设备后 grep SYS 日志即可（日志路径见上方诊断日志说明）。
-· [SYS] 开关状态：一行看全五个开关读到的是开是关、颜色解析成了什么、本次启动被判定成注销还是冷开机。
+· [SYS] 开关状态：一行看全四个开关读到的是开是关、颜色解析成了什么。
 · [SYS] 装载成功 / 装载失败（跳过）：每个 hook 点在这个 iOS 版本上到底存不存在。
 · [SYS] 探针命中 XXX：这个 hook 真的被系统调用到了（附现场信息）。
 · [SYS] 探针汇总：形如「名字[已装/3]」，已装但 0 次 = hook 点选错了，得换点。</string>
