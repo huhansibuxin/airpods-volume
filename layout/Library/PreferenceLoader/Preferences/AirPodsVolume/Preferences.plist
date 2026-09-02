@@ -264,10 +264,137 @@
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>APP 运行指示点</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>APP 运行指示点</string>
+			<key>key</key>
+			<string>runIndicatorEnabled</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSEditTextCell</string>
+			<key>label</key>
+			<string>指示点颜色代码</string>
+			<key>key</key>
+			<string>runIndicatorColor</string>
+			<key>default</key>
+			<string>#FFFFFF</string>
+			<key>placeholder</key>
+			<string>#RRGGBB 或 255,255,255</string>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>锁屏与状态栏</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>注销不锁屏</string>
+			<key>key</key>
+			<string>noLockAfterRespring</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>连接 VPN 变色</string>
+			<key>key</key>
+			<string>colorizeVPNStatusBar</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSEditTextCell</string>
+			<key>label</key>
+			<string>VPN 颜色代码</string>
+			<key>key</key>
+			<string>vpnStatusBarColor</string>
+			<key>default</key>
+			<string>#FF9F0A</string>
+			<key>placeholder</key>
+			<string>#RRGGBB 或 255,159,10</string>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>禁用 VPN 飞入动画</string>
+			<key>key</key>
+			<string>hideVPNFlyInAnimation</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>桌面手势</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>禁用桌面长按</string>
+			<key>key</key>
+			<string>disableHomeScreenLongPress</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.huhansibuxin.airpodsvolume</string>
+			<key>PostNotification</key>
+			<string>com.huhansibuxin.airpodsvolume-updated</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>功能说明 · 版本 1.9.95（每次更新插件，版本号在此同步）
+			<string>功能说明 · 版本 1.9.96（每次更新插件，版本号在此同步）
 
-通知合并（NotifsDontHide 并入）：同一 App 的通知从第 2 条起就合并成一栏（iOS 原生为第 5 条起）。打开「通知从第 3 条起才合并成一组」则改为第 3 条起合并，开关即时生效、无需注销。⚠️ 合并版启用后请卸载独立的 NotifsDontHide 包，避免双重 hook 冲突。</string>
+通知合并（NotifsDontHide 并入）：同一 App 的通知从第 2 条起就合并成一栏（iOS 原生为第 5 条起）。打开「通知从第 3 条起才合并成一组」则改为第 3 条起合并，开关即时生效、无需注销。⚠️ 合并版启用后请卸载独立的 NotifsDontHide 包，避免双重 hook 冲突。
+
+桌面与状态栏（v1.9.96 新增，全部默认关闭、开关即时生效无需注销）：
+· APP 运行指示点：正在运行的 APP 图标下方显示一个彩色小圆点（APP 一退出就消失）。颜色在「指示点颜色代码」里直接填，支持 #RRGGBB（如 #00FF00 绿）或 255,255,255 两种写法，留空则用默认白色。
+· 注销不锁屏：注销（respring）后跳过这次上锁、直接回桌面；正常开机、手动锁屏不受影响。
+· 连接 VPN 变色 / VPN 颜色代码：VPN 连上后状态栏 VPN 图标换成你填的颜色。
+· 禁用 VPN 飞入动画：VPN 图标瞬间出现，不再滑入。
+· 禁用桌面长按：长按图标不再进入抖动编辑态（图标菜单不受影响）。</string>
 		</dict>
 	</array>
 	<key>title</key>

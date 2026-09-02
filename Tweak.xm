@@ -6,6 +6,9 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <os/lock.h>
+#import <QuartzCore/QuartzCore.h>
+#include <sys/sysctl.h>
+#include <unistd.h>
 
 // ============================================================
 // 偏好设置（TGK 风格 plist）
@@ -37,6 +40,57 @@ static BOOL gLimitRinger = YES;      // 戴 AirPods 时限制铃声音量（v1.9
 static BOOL gRingerCap30 = NO;       // v1.9.82：铃封顶档位——关=40%，开=30%（仅在 gLimitRinger 打开时有效）
 static BOOL gNotifGroupFrom3 = NO;   // v1.9.91：通知合并档位——关=第 2 条起合并成一栏（NDH 原行为），开=第 3 条起才合并
 
+// ---- v1.9.96：SystemX(SystemBox) 移植功能开关（全部默认关闭）----
+static BOOL gRunIndicator = NO;        // APP 运行指示点：正在运行的 APP 图标下方显示彩色小圆点
+static BOOL gNoLockAfterRespring = NO; // 注销（respring）不锁屏
+static BOOL gColorizeVPN = NO;         // 连接 VPN 后状态栏 VPN 图标变色
+static BOOL gDisableHomeLongPress = NO;// 禁用桌面长按（不再进抖动编辑态）
+static BOOL gHideVPNFlyIn = NO;        // 禁用 VPN 图标飞入动画（瞬间出现）
+static UIColor *gRunDotColor = nil;    // 指示点颜色（颜色代码解析结果）
+static UIColor *gVPNColor = nil;       // VPN 图标颜色（颜色代码解析结果）
+
+// 读字符串偏好（直连 cfprefsd，与 apv_bool 一样拿新鲜值，不受进程内缓存影响）
+static NSString *apv_string(NSString *key, NSString *def) {
+    CFPropertyListRef v = CFPreferencesCopyValue((__bridge CFStringRef)key,
+                                                 (__bridge CFStringRef)kAPVDomain,
+                                                 kCFPreferencesCurrentUser,
+                                                 kCFPreferencesAnyHost);
+    NSString *s = nil;
+    if (v) {
+        if (CFGetTypeID(v) == CFStringGetTypeID()) s = [(__bridge NSString *)v copy];
+        CFRelease(v);
+    }
+    return s.length ? s : def;
+}
+
+// 颜色代码解析：支持 #RRGGBB / RRGGBB / "R,G,B"(0-255) 三种写法；解析不了或留空用 fallback。
+// （老板要求：设置里不做颜色选择器，直接手填颜色代码）
+static UIColor *apv_colorFromCode(NSString *code, NSString *fallback) {
+    NSString *s = [code stringByTrimmingCharactersInSet:
+                   [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (s.length == 0) s = fallback;
+    if ([s hasPrefix:@"#"]) s = [s substringFromIndex:1];
+    if (s.length == 6) {
+        unsigned int rgb = 0;
+        NSScanner *sc = [NSScanner scannerWithString:s];
+        if ([sc scanHexInt:&rgb]) {
+            return [UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0
+                                   green:((rgb >> 8) & 0xFF) / 255.0
+                                    blue:(rgb & 0xFF) / 255.0
+                                   alpha:1.0];
+        }
+    }
+    NSArray *parts = [s componentsSeparatedByString:@","];
+    if (parts.count == 3) {
+        CGFloat r = [parts[0] floatValue], g = [parts[1] floatValue], b = [parts[2] floatValue];
+        return [UIColor colorWithRed:MIN(MAX(r / 255.0f, 0.0f), 1.0f)
+                               green:MIN(MAX(g / 255.0f, 0.0f), 1.0f)
+                                blue:MIN(MAX(b / 255.0f, 0.0f), 1.0f)
+                               alpha:1.0];
+    }
+    return [UIColor whiteColor];
+}
+
 // 戴耳机时通知音(Ringtone/Alert)的封顶值，全局唯一出口，禁止再散落硬编码 0.4/0.3：
 //   gLimitRinger 关           → 1.0（不限制）
 //   gLimitRinger 开 + 档位 40% → 0.4
@@ -62,6 +116,14 @@ static void apv_refresh(void) {
     gLimitRinger = apv_bool(@"limitRingerWhenConnected", YES);
     gRingerCap30 = apv_bool(@"ringerCap30", NO);
     gNotifGroupFrom3 = apv_bool(@"notifGroupFrom3", NO);
+    // v1.9.96：SystemX 移植功能（默认全关）
+    gRunIndicator = apv_bool(@"runIndicatorEnabled", NO);
+    gNoLockAfterRespring = apv_bool(@"noLockAfterRespring", NO);
+    gColorizeVPN = apv_bool(@"colorizeVPNStatusBar", NO);
+    gDisableHomeLongPress = apv_bool(@"disableHomeScreenLongPress", NO);
+    gHideVPNFlyIn = apv_bool(@"hideVPNFlyInAnimation", NO);
+    gRunDotColor = apv_colorFromCode(apv_string(@"runIndicatorColor", @"#FFFFFF"), @"#FFFFFF");
+    gVPNColor = apv_colorFromCode(apv_string(@"vpnStatusBarColor", @"#FF9F0A"), @"#FF9F0A");
 }
 
 @interface AVSystemController : NSObject
@@ -1751,6 +1813,300 @@ static void installNotifGrouping(void) {
 }
 
 // ============================================================
+// v1.9.96：SystemX（包名 SystemBox）五功能移植
+//   ① APP 运行指示点   runIndicatorEnabled + runIndicatorColor
+//   ② 注销不锁屏       noLockAfterRespring
+//   ③ 连接 VPN 变色    colorizeVPNStatusBar + vpnStatusBarColor
+//   ④ 禁用桌面长按     disableHomeScreenLongPress
+//   ⑤ 禁用 VPN 飞入    hideVPNFlyInAnimation
+//
+// hook 点来源：SystemBox.dylib 反编译（451 个 selref）与本设备 SpringBoard
+// 运行时 dump 交叉核对。装载方式与 NDH 一致——类/方法存在才 hook，缺失静默
+// 跳过（将来 iOS 改版不会连累 SpringBoard）。装载结果与命中情况写 [SYS] 日志，
+// 受「诊断日志」总开关门控。全部功能默认关闭。
+// ============================================================
+
+static void sysLog(NSString *msg) { apvWrite(@"[SYS]", msg, 30.0); }
+
+// 带装载结果日志的 hook：排查"哪条没挂上"直接看日志，不用猜
+static void apv_sys_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig) {
+    Class cls = objc_getClass(clsName);
+    if (!cls || !class_getInstanceMethod(cls, sel)) {
+        sysLog([NSString stringWithFormat:@"装载失败（跳过）: %s %@", clsName, NSStringFromSelector(sel)]);
+        return;
+    }
+    MSHookMessageEx(cls, sel, imp, orig);
+    sysLog([NSString stringWithFormat:@"装载成功: %s %@", clsName, NSStringFromSelector(sel)]);
+}
+
+// ------------------------------------------------------------
+// ① APP 运行指示点
+// ------------------------------------------------------------
+// 自绘小圆点（不碰系统 SBIconDotLabelAccessoryView / labelAccessoryType 枚举——
+// 那套私有枚举值各版本不同，赌错就是满屏乱点；自绘可控且零依赖）。
+// 判定"运行中"：SBApplicationController → SBApplication.processState.isRunning
+// 事件驱动：hook SBApplication 的进程状态更新回调，状态一变就重画，不做轮询。
+// ------------------------------------------------------------
+static const NSInteger kAPVDotTag = 0x41565044; // 'APVD'
+static NSMutableDictionary *sRunCache = nil;    // bundleID -> NSNumber(BOOL)
+static os_unfair_lock sRunLock = OS_UNFAIR_LOCK_INIT;
+
+static NSString *apv_iconBundleID(UIView *iconView) {
+    @try {
+        if (![iconView respondsToSelector:@selector(icon)]) return nil;
+        id icon = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(icon));
+        if (!icon || ![icon respondsToSelector:@selector(applicationBundleID)]) return nil;
+        id bid = ((id (*)(id, SEL))objc_msgSend)(icon, @selector(applicationBundleID));
+        return [bid isKindOfClass:[NSString class]] ? bid : nil;
+    } @catch (id e) { return nil; }
+}
+
+static BOOL apv_isRunningBundle(NSString *bid) {
+    if (!bid.length) return NO;
+    os_unfair_lock_lock(&sRunLock);
+    NSNumber *cached = [sRunCache objectForKey:bid];
+    os_unfair_lock_unlock(&sRunLock);
+    if (cached) return [cached boolValue];
+
+    BOOL running = NO;
+    @try {
+        id ctrl = ((id (*)(Class, SEL))objc_msgSend)(NSClassFromString(@"SBApplicationController"),
+                                                     @selector(sharedInstance));
+        id app = ((id (*)(id, SEL, id))objc_msgSend)(ctrl, @selector(applicationWithBundleIdentifier:), bid);
+        id st = ((id (*)(id, SEL))objc_msgSend)(app, @selector(processState));
+        running = ((BOOL (*)(id, SEL))objc_msgSend)(st, @selector(isRunning));
+    } @catch (id e) {}
+    os_unfair_lock_lock(&sRunLock);
+    [sRunCache setObject:[NSNumber numberWithBool:running] forKey:bid];
+    os_unfair_lock_unlock(&sRunLock);
+    return running;
+}
+
+static void apv_invalidateRunCache(void) {
+    os_unfair_lock_lock(&sRunLock);
+    [sRunCache removeAllObjects];
+    os_unfair_lock_unlock(&sRunLock);
+}
+
+static void apv_updateRunDot(UIView *iconView) {
+    if (!iconView) return;
+    UIView *dot = [iconView viewWithTag:kAPVDotTag];
+    if (!gRunIndicator) {            // 开关关：只负责收掉已经画出来的点
+        if (dot) dot.hidden = YES;
+        return;
+    }
+    if (!dot) {
+        dot = [[UIView alloc] initWithFrame:CGRectZero];
+        dot.tag = kAPVDotTag;
+        dot.userInteractionEnabled = NO;
+        dot.hidden = YES;
+        [iconView addSubview:dot];
+    }
+    NSString *bid = apv_iconBundleID(iconView);
+    if (!bid.length) { dot.hidden = YES; return; }
+    if (!apv_isRunningBundle(bid)) { dot.hidden = YES; return; }
+    CGSize s = iconView.bounds.size;
+    CGFloat d = 5.0;
+    // 位置：跟系统"更新/等待小圆点"一致——图标名右侧 2pt；
+    // labelView 拿不到或不在同一坐标系时回退到图标底部居中（不会跑到屏幕外）
+    CGRect f = CGRectMake((s.width - d) * 0.5, s.height - 4.0, d, d);
+    @try {
+        if ([iconView respondsToSelector:@selector(labelView)]) {
+            UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
+            if ([lv isKindOfClass:[UIView class]] && lv.superview == iconView && lv.frame.size.width > 0) {
+                f = CGRectMake(CGRectGetMaxX(lv.frame) + 2.0,
+                               CGRectGetMidY(lv.frame) - d * 0.5, d, d);
+            }
+        }
+    } @catch (id e) {}
+    dot.frame = f;
+    dot.layer.cornerRadius = d * 0.5;
+    dot.backgroundColor = gRunDotColor ?: [UIColor whiteColor];
+    dot.hidden = NO;
+    [iconView bringSubviewToFront:dot];
+}
+
+static void apv_recurseIconDots(UIView *v, NSInteger depth) {
+    if (!v || depth > 12) return;
+    static Class sIconViewCls = nil;
+    if (!sIconViewCls) sIconViewCls = NSClassFromString(@"SBIconView");
+    if (sIconViewCls && [v isKindOfClass:sIconViewCls]) apv_updateRunDot(v);
+    for (UIView *sub in v.subviews) apv_recurseIconDots(sub, depth + 1);
+}
+
+static void apv_refreshAllIconDots(void) {
+    @try {
+        for (UIWindow *w in [UIApplication sharedApplication].windows) apv_recurseIconDots(w, 0);
+    } @catch (id e) {}
+}
+
+static void (*orig_iconView_layoutSubviews)(UIView *, SEL);
+static void hook_iconView_layoutSubviews(UIView *self, SEL _cmd) {
+    orig_iconView_layoutSubviews(self, _cmd);
+    @try { apv_updateRunDot(self); } @catch (id e) {}
+}
+
+static void (*orig_app_updateProcess)(id, SEL, id, id);
+static void hook_app_updateProcess(id self, SEL _cmd, id process, id state) {
+    orig_app_updateProcess(self, _cmd, process, state);
+    if (!gRunIndicator) return;
+    apv_invalidateRunCache();
+    // 状态刚变，processState 未必已经落定，稍等 0.5s 再刷一次桌面
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ apv_refreshAllIconDots(); });
+}
+
+// ------------------------------------------------------------
+// ② 注销不锁屏
+// ------------------------------------------------------------
+// 判定"这次启动是注销而不是冷开机"：比较系统开机时间（kern.boottime）与
+// 本进程启动时间（KERN_PROC_PID → p_starttime）。冷开机时 SpringBoard 在
+// 开机几秒内就起来了；注销（respring）时设备已经跑了一段时间才重启
+// SpringBoard。两者相差 > 30s 即判定为 respring，此时吞掉"第一次上锁"
+// 并主动解锁。只吃一次——之后用户按电源键锁屏完全走原生逻辑。
+// ------------------------------------------------------------
+static BOOL gRespringLaunch = NO;
+static BOOL gLockSwallowed = NO;
+
+static BOOL apv_isRespringLaunch(void) {
+    struct timeval boot;
+    size_t len = sizeof(boot);
+    if (sysctlbyname("kern.boottime", &boot, &len, NULL, 0) != 0) return NO;
+    struct kinfo_proc kp;
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid() };
+    len = sizeof(kp);
+    if (sysctl(mib, 4, &kp, &len, NULL, 0) != 0) return NO;
+    double bootT  = (double)boot.tv_sec + (double)boot.tv_usec / 1e6;
+    double startT = (double)kp.kp_proc.p_starttime.tv_sec + (double)kp.kp_proc.p_starttime.tv_usec / 1e6;
+    double delta = startT - bootT;
+    sysLog([NSString stringWithFormat:@"启动判定: SpringBoard 于开机后 %.0f 秒启动（>30s 判定为注销）", delta]);
+    return delta > 30.0;
+}
+
+static BOOL apv_shouldSwallowLock(BOOL locked) {
+    return (locked && gNoLockAfterRespring && gRespringLaunch && !gLockSwallowed);
+}
+
+static void apv_doAutoUnlock(id lsm) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            SEL sel = @selector(unlockUIFromSource:withOptions:);
+            if (![lsm respondsToSelector:sel]) {
+                sysLog(@"[noLock] 自动解锁失败：SBLockScreenManager 不响应 unlockUIFromSource:");
+                return;
+            }
+            ((BOOL (*)(id, SEL, int, id))objc_msgSend)(lsm, sel, 1, nil);
+            sysLog(@"[noLock] 已请求自动解锁 unlockUIFromSource:1");
+        } @catch (id e) {}
+    });
+}
+
+static void (*orig_setUILocked)(id, SEL, BOOL);
+static void hook_setUILocked(id self, SEL _cmd, BOOL locked) {
+    if (apv_shouldSwallowLock(locked)) {
+        gLockSwallowed = YES;
+        sysLog(@"[noLock] 吃掉注销后的 _setUILocked:YES");
+        orig_setUILocked(self, _cmd, NO);
+        apv_doAutoUnlock(self);
+        return;
+    }
+    orig_setUILocked(self, _cmd, locked);
+}
+
+static void (*orig_lockUIFromSource)(id, SEL, int, id);
+static void hook_lockUIFromSource(id self, SEL _cmd, int source, id options) {
+    if (apv_shouldSwallowLock(YES)) {
+        gLockSwallowed = YES;
+        sysLog([NSString stringWithFormat:@"[noLock] 吃掉注销后的 lockUIFromSource:%d", source]);
+        apv_doAutoUnlock(self);
+        return;
+    }
+    orig_lockUIFromSource(self, _cmd, source, options);
+}
+
+// ------------------------------------------------------------
+// ③ 连接 VPN 变色 / ⑤ 禁用 VPN 飞入动画
+// ------------------------------------------------------------
+// 两者都在同一个私有指示器类 _UIStatusBarIndicatorVPNItem 上：
+//   · 变色：改它自己的 imageView 的 tintColor（图标是模板图，tintColor 生效）
+//   · 飞入：入场动画由 additionAnimationForDisplayItemWithIdentifier: 提供，
+//           换成 0 时长空动画即可瞬间出现（不返回 nil，避免调用方解引用空）
+// ------------------------------------------------------------
+static id (*orig_vpn_applyUpdate)(id, SEL, id, id);
+static id hook_vpn_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    id r = orig_vpn_applyUpdate(self, _cmd, update, displayItem);
+    if (!gColorizeVPN) return r;
+    @try {
+        id iv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
+        if ([iv isKindOfClass:[UIImageView class]]) {
+            UIImageView *v = (UIImageView *)iv;
+            if (v.image && v.image.renderingMode != UIImageRenderingModeAlwaysTemplate)
+                v.image = [v.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+            v.tintColor = gVPNColor ?: [UIColor orangeColor];
+        }
+    } @catch (id e) {}
+    return r;
+}
+
+static id (*orig_vpn_additionAnim)(id, SEL, id);
+static id hook_vpn_additionAnim(id self, SEL _cmd, id ident) {
+    if (gHideVPNFlyIn) {
+        CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
+        a.duration = 0.0;
+        a.fromValue = [NSNumber numberWithDouble:1.0];
+        a.toValue = [NSNumber numberWithDouble:1.0];
+        return a;
+    }
+    return orig_vpn_additionAnim(self, _cmd, ident);
+}
+
+// ------------------------------------------------------------
+// ④ 禁用桌面长按
+// ------------------------------------------------------------
+// 长按图标进抖动编辑态的回调就是 editingModeGestureRecognizerDidFire:，
+// 开了开关直接不往下走（图标菜单/其它手势不受影响）。
+// ------------------------------------------------------------
+static id (*orig_icon_editingFired)(id, SEL, id);
+static id hook_icon_editingFired(id self, SEL _cmd, id gr) {
+    if (gDisableHomeLongPress) {
+        sysLog(@"[长按] 拦截 editingModeGestureRecognizerDidFire（桌面长按已禁用）");
+        return nil;
+    }
+    return orig_icon_editingFired(self, _cmd, gr);
+}
+
+static void installSystemXFeatures(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ sRunCache = [[NSMutableDictionary alloc] init]; });
+    gRespringLaunch = apv_isRespringLaunch();
+
+    // ① APP 运行指示点
+    apv_sys_try_hook("SBIconView", @selector(layoutSubviews),
+                     (IMP)&hook_iconView_layoutSubviews, (IMP *)&orig_iconView_layoutSubviews);
+    apv_sys_try_hook("SBApplication", @selector(_updateProcess:withState:),
+                     (IMP)&hook_app_updateProcess, (IMP *)&orig_app_updateProcess);
+    // ② 注销不锁屏：内部状态机 + 外部上锁入口两条路径都堵
+    apv_sys_try_hook("SBLockScreenManager", @selector(_setUILocked:),
+                     (IMP)&hook_setUILocked, (IMP *)&orig_setUILocked);
+    apv_sys_try_hook("SBLockScreenManager", @selector(lockUIFromSource:withOptions:),
+                     (IMP)&hook_lockUIFromSource, (IMP *)&orig_lockUIFromSource);
+    // ③ VPN 变色 / ⑤ VPN 飞入动画
+    apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(applyUpdate:toDisplayItem:),
+                     (IMP)&hook_vpn_applyUpdate, (IMP *)&orig_vpn_applyUpdate);
+    apv_sys_try_hook("_UIStatusBarIndicatorVPNItem", @selector(additionAnimationForDisplayItemWithIdentifier:),
+                     (IMP)&hook_vpn_additionAnim, (IMP *)&orig_vpn_additionAnim);
+    // ④ 禁用桌面长按
+    apv_sys_try_hook("SBIconView", @selector(editingModeGestureRecognizerDidFire:),
+                     (IMP)&hook_icon_editingFired, (IMP *)&orig_icon_editingFired);
+
+    // 开关本来就开着时（如注销后恢复），等桌面布局完再刷一次指示点
+    if (gRunIndicator) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ apv_refreshAllIconDots(); });
+    }
+}
+
+// ============================================================
 // 设置变更监听（v1.9.93 关键修复）
 //
 // ⚠️ 之前挂的是 [[NSNotificationCenter defaultCenter] addObserverForName:kAPVChanged]，
@@ -1766,7 +2122,13 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
                              CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     // Darwin 回调不在主线程，状态刷新回主队列（与路由事件回调同一串行域）
     dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL runDotWasOn = gRunIndicator;
         apv_refresh();
+        // v1.9.96：APP 运行指示点开关切换 → 立即重画/收掉圆点（免注销）
+        if (gRunIndicator || runDotWasOn) {
+            apv_invalidateRunCache();
+            apv_refreshAllIconDots();
+        }
         // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
         // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
         if (sAirPodsConnected) {
@@ -1922,6 +2284,10 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
         // 通知框架类随 SpringBoard 启动即已加载（NDH 在 %ctor 直挂同样可行），
         // 后台队列挂安全 hook（类缺失静默跳过），开关档位 hook 内实时读、免注销生效
         installNotifGrouping();
+
+        // v1.9.96：SystemX 移植的五功能（APP 运行指示点/注销不锁屏/VPN 变色/
+        // 禁用桌面长按/禁用 VPN 飞入）。全部默认关闭，装载在后台队列，不占启动主线程。
+        installSystemXFeatures();
 
         // 回主队列：状态初始化 + 音频调用（此时 SpringBoard 启动最忙阶段已过）。
         // 放主队列是为了与各事件回调（均在 main queue）保持同一串行域，
