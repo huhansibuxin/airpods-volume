@@ -2371,13 +2371,26 @@ static void hook_setEditingAnimated(id self, SEL _cmd, BOOL editing, BOOL animat
 // 不压的话，系统每次启动帧都会把我们的指示点覆盖成它自己的 → 启动期看到"app 身上"
 // 那个（系统的）、启动完系统清掉、我们的点回到文字下 → 这就是老板说的"跳"。
 // 我们的点用 setIndicator: 挂、且带 @selector(hash) 关联标记 → 放行；
-// 系统的（无标记）一律压成 nil，彻底不显示。
+// 系统的（无标记）之前一律压成 nil —— 但 v1.9.106 证实：把 setIndicator: 传 nil
+// 会破坏 SBIconView 指示点生命周期不变量（系统在"应显示却为空"时反复重建→重入
+// setIndicator:→nil→…），触发 47baeef3 系统框架无限循环 → 看门狗杀 SpringBoard →
+// 卡主屏/进不去安全模式（4 份 .ips 全是 47baeef3 纯系统循环，我们的 dylib 根本不在栈上）。
+// 修正：系统的指示点【保留视图、只隐藏】（hidden+alpha=0），不破坏不变量 → 不再死循环，
+// 视觉上同样不显示那个"跟着 app 动"的点。
 static void (*orig_setIndicator)(id, SEL, id);
 static void hook_setIndicator(id self, SEL _cmd, id ind) {
     if (ind && [ind isKindOfClass:[UIView class]] && objc_getAssociatedObject(ind, @selector(hash))) {
         orig_setIndicator(self, _cmd, ind); // 我们的点，放行
+    } else if (ind) {
+        // 系统的 launching/running 指示点：保留视图（维持系统不变量），仅隐藏
+        @try {
+            [ind setHidden:YES];
+            if ([ind respondsToSelector:@selector(setAlpha:)])
+                ((void (*)(id, SEL, double))objc_msgSend)(ind, @selector(setAlpha:), 0.0);
+        } @catch (id e) {}
+        orig_setIndicator(self, _cmd, ind);
     } else {
-        orig_setIndicator(self, _cmd, nil); // 系统的 launching/running 指示点：压掉
+        orig_setIndicator(self, _cmd, nil); // 真·nil：原样透传
     }
 }
 
