@@ -1913,12 +1913,13 @@ static void apv_sys_try_hook(const char *clsName, SEL sel, IMP imp, IMP *orig, i
 // ------------------------------------------------------------
 // ① APP 运行指示点
 // ------------------------------------------------------------
-// 自绘小圆点（不碰系统 SBIconDotLabelAccessoryView / labelAccessoryType 枚举——
-// 那套私有枚举值各版本不同，赌错就是满屏乱点；自绘可控且零依赖）。
+// v1.9.103（Lynx2 机制）：不再自绘 tag 找点——改用 SBIconView **原生 indicator 属性**
+// （setIndicator: 挂靠，iPad dock 同款机制），点用纯 NSLayoutConstraint 约束定位。
+// 旧 kAPVDotTag 常量随 tag 方案删除（-Werror 不允许未使用常量）。
 // 判定"运行中"：SBApplicationController → SBApplication.processState.isRunning
-// 事件驱动：hook SBApplication 的进程状态更新回调，状态一变就重画，不做轮询。
+// 事件驱动：SBApplicationProcessStateDidChange 通知 + hook SBApplication 进程状态
+// 更新回调，状态一变就重画，不做轮询。
 // ------------------------------------------------------------
-static const NSInteger kAPVDotTag = 0x41565044; // 'APVD'（v1.9.103 起不再用 tag 找点，保留常量兼容旧引用）
 static NSMutableDictionary *sRunCache = nil;    // bundleID -> NSNumber(BOOL) 运行状态缓存
 static os_unfair_lock sRunLock = OS_UNFAIR_LOCK_INIT;
 
