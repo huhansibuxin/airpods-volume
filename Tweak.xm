@@ -2163,8 +2163,8 @@ static BOOL apv_vpnConnected(void) {
 }
 
 static void (*orig_wifi_applyUpdate)(id, SEL, id, id);
-static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    id r = orig_wifi_applyUpdate(self, _cmd, update, displayItem);
+static void hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    orig_wifi_applyUpdate(self, _cmd, update, displayItem);
     @try {
         BOOL vpn = apv_vpnConnected();
         UIImageView *v = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
@@ -2181,12 +2181,12 @@ static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
             }
         }
     } @catch (id e) {}
-    return r;
+    return;
 }
 
 static void (*orig_cellular_applyUpdate)(id, SEL, id, id);
-static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
-    id r = orig_cellular_applyUpdate(self, _cmd, update, displayItem);
+static void hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    orig_cellular_applyUpdate(self, _cmd, update, displayItem);
     @try {
         BOOL vpn = apv_vpnConnected();
         UIImageView *v = ((id (*)(id, SEL))objc_msgSend)(self, @selector(imageView));
@@ -2202,7 +2202,7 @@ static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem
             }
         }
     } @catch (id e) {}
-    return r;
+    return;
 }
 
 // VPN 状态变化（Darwin 通知）：触发一次 SysLog，后续重染色靠 WiFi/Cellular
