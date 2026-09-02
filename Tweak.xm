@@ -2044,7 +2044,12 @@ static void apv_recurseIconDots(UIView *v, NSInteger depth) {
 
 static void apv_refreshAllIconDots(void) {
     @try {
-        for (UIWindow *w in [UIApplication sharedApplication].windows) apv_recurseIconDots(w, 0);
+        // iOS 15 起 UIApplication.windows 已废弃，而工程开了 -Werror（部署目标 15.0），
+        // 直接用会编译不过 → 改成遍历每个 UIWindowScene 自己的 windows。
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in ((UIWindowScene *)scene).windows) apv_recurseIconDots(w, 0);
+        }
     } @catch (id e) {}
 }
 
