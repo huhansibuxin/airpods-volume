@@ -2176,10 +2176,14 @@ static UIImageView *apv_statusItemImageView(id item) {
     } @catch (id e) { return nil; }
 }
 
-static void (*orig_wifi_applyUpdate)(id, SEL, id, id);
-static void hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+// 注意：applyUpdate:toDisplayItem: 真实返回类型是 id（见 UIKitCore.h 头文件），
+// 不是 void。若 hook 声明成 void、调用方从 x0 读到垃圾指针当成返回对象 → 后续发消息
+// 崩（updateWithData: 递归里未识别 selector）。所以 hook 必须返回 id 并回传 orig 的结果。
+static id (*orig_wifi_applyUpdate)(id, SEL, id, id);
+static id hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    id r = nil;
     @try {
-        if (orig_wifi_applyUpdate) orig_wifi_applyUpdate(self, _cmd, update, displayItem);
+        if (orig_wifi_applyUpdate) r = orig_wifi_applyUpdate(self, _cmd, update, displayItem);
         BOOL vpn = apv_vpnConnected();
         UIImageView *v = apv_statusItemImageView(self);
         apv_probe(kProbeWifiApply, [NSString stringWithFormat:@"imageView=%@ vpn=%d 开关=%d",
@@ -2195,13 +2199,14 @@ static void hook_wifi_applyUpdate(id self, SEL _cmd, id update, id displayItem) 
             }
         }
     } @catch (id e) {}
-    return;
+    return r;
 }
 
-static void (*orig_cellular_applyUpdate)(id, SEL, id, id);
-static void hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+static id (*orig_cellular_applyUpdate)(id, SEL, id, id);
+static id hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayItem) {
+    id r = nil;
     @try {
-        if (orig_cellular_applyUpdate) orig_cellular_applyUpdate(self, _cmd, update, displayItem);
+        if (orig_cellular_applyUpdate) r = orig_cellular_applyUpdate(self, _cmd, update, displayItem);
         BOOL vpn = apv_vpnConnected();
         UIImageView *v = apv_statusItemImageView(self);
         apv_probe(kProbeCellularApply, [NSString stringWithFormat:@"imageView=%@ vpn=%d 开关=%d",
@@ -2216,7 +2221,7 @@ static void hook_cellular_applyUpdate(id self, SEL _cmd, id update, id displayIt
             }
         }
     } @catch (id e) {}
-    return;
+    return r;
 }
 
 // VPN 状态变化（Darwin 通知）：触发一次 SysLog，后续重染色靠 WiFi/Cellular
