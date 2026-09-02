@@ -2044,12 +2044,10 @@ static void apv_updateRunDot(UIView *iconView) {
     BOOL labelFound = NO;
     BOOL hideLabel = NO;
     UILabel *innerLabel = nil;
-    UIView *labelContainer = nil;
 
     @try {
         UIView *lv = ((id (*)(id, SEL))objc_msgSend)(iconView, @selector(labelView));
         if ([lv isKindOfClass:[UIView class]] && lv.superview == iconView && lv.bounds.size.width > 0) {
-            labelContainer = lv;
             // 优先找直接子 UILabel；SBIconSimpleLabelView 是 UIImageView，真正文字可能在 deeper
             for (UIView *sub in lv.subviews) {
                 if ([sub isKindOfClass:[UILabel class]]) { innerLabel = (UILabel *)sub; break; }
@@ -2068,7 +2066,6 @@ static void apv_updateRunDot(UIView *iconView) {
                 // 用 innerLabel 自己的 frame（labelView 坐标系）计算，最准确
                 CGRect textFrame = [innerLabel convertRect:innerLabel.bounds toView:iconView];
                 CGFloat textW = textFrame.size.width;
-                CGFloat textH = textFrame.size.height;
                 CGFloat cy = CGRectGetMidY(textFrame);
                 // 长名判定：文字宽度超过 labelView 可用宽，或者文字被系统截断（UILabel 显示文本与完整文本不同）
                 BOOL truncated = (textW > lf.size.width - 2.0);
@@ -2456,8 +2453,14 @@ static void hook_setEditingAnimated(id self, SEL _cmd, BOOL editing, BOOL animat
 }
 
 static void installSystemXFeatures(void) {
+    // v1.9.101：初始化运行/绿点/VPN 缓存字典
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ sRunCache = [[NSMutableDictionary alloc] init]; });
+    dispatch_once(&once, ^{
+        sRunCache = [[NSMutableDictionary alloc] init];
+        sDotFrameCache = [[NSMutableDictionary alloc] init];
+        sDotColorCache = [[NSMutableDictionary alloc] init];
+        sDotHiddenSet = [[NSMutableSet alloc] init];
+    });
 
     // v1.9.101 开关快照：注销不锁屏/VPN飞入已下线；染色双保险；长按多入口拦截
     sysLog([NSString stringWithFormat:
@@ -2466,14 +2469,6 @@ static void installSystemXFeatures(void) {
             gColorizeVPN, apv_colorCode(gVPNColor),
             gDisableHomeLongPress, gVolDiag]);
 
-    // v1.9.101：初始化绿点/VPN 缓存字典
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        sRunCache = [[NSMutableDictionary alloc] init];
-        sDotFrameCache = [[NSMutableDictionary alloc] init];
-        sDotColorCache = [[NSMutableDictionary alloc] init];
-        sDotHiddenSet = [[NSMutableSet alloc] init];
-    });
     apv_refreshVPNCache();
 
     // ① APP 运行指示点
@@ -2552,8 +2547,6 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
             apv_refreshAllIconDots();
         }
         apv_refreshVPNCache();
-        // 强制状态栏重绘：发送一个无害的 UIApplication 状态栏更新（若系统支持）
-        @try { [[UIApplication sharedApplication] statusBar].hidden = NO; } @catch (id e) {}
         // v1.9.83：开关变更**立即应用**——若当前戴耳机，马上按新档位重新压制。
         // （摘下状态不需要压：摘下强制 100% 常驻，下次戴上路由事件会按新档位压。）
         if (sAirPodsConnected) {
