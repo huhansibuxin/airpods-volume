@@ -1899,6 +1899,21 @@ static void apv_mrCB(CFNotificationCenterRef center, void *observer,
 
 static void installMediaRemoteAudit(void) {
     @try {
+        // v1.9.101 崩溃修复说明：
+        // v1.9.100 用 dlsym 取 kMRMediaRemote*Notification **NSString 常量**再
+        // isKindOfClass:/%@ 打日志 —— iOS 16 共享缓存里这些符号对 dlsym 而言是
+        // 未经 rebase 的链式修复指针（SIGBUS 0xdac11950），objc_msgSend 当场炸，
+        // @try 拦不住 Mach 异常 → 两次启动均崩进安全模式（.ips 已实锤：
+        // faulting frame #1 = installMediaRemoteAudit）。
+        // ⚠️ 铁律：**永远不要对 dlsym 到的非函数符号做 ObjC 消息发送**。
+        //
+        // 正确姿势（联网核实 SketchyBar / TouchBarMediaKeys 等公开实现）：
+        //  - 通知名常量的值 == 它自己的名字字面量，直接写 CFSTR 字面量即可；
+        //  - **必须先调 MRMediaRemoteRegisterForNowPlayingNotifications**，
+        //    否则通知永远不投递（v1.9.96 双重失败：名字错 + 没注册）；
+        //  - MediaRemote 把通知发到 NSNotificationCenter（macOS 公开实现同款），
+        //    Darwin 中心也一并挂（iOS 上双保险）；
+        //  - 只 dlsym **函数**符号（函数指针不涉及对象 rebase，安全）。
         void *hdl = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY);
         if (!hdl) {
             routeLog(@"mr-audit 装载失败：dlopen MediaRemote 返回 NULL");
@@ -1906,26 +1921,48 @@ static void installMediaRemoteAudit(void) {
         }
         sMRReg = (void (*)(dispatch_queue_t))dlsym(hdl, "MRMediaRemoteRegisterForNowPlayingNotifications");
         sMRGetPlaying = (void (*)(dispatch_queue_t, void (^)(BOOL)))dlsym(hdl, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
-        NSString *nApp  = (__bridge NSString *)dlsym(hdl, "kMRMediaRemoteNowPlayingApplicationDidChangeNotification");
-        NSString *nPlay = (__bridge NSString *)dlsym(hdl, "kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification");
-        NSString *nInfo = (__bridge NSString *)dlsym(hdl, "kMRMediaRemoteNowPlayingInfoDidChangeNotification");
         routeLog([NSString stringWithFormat:
-                  @"mr-audit dlsym: reg=%d getPlaying=%d | app=%@ isPlaying=%@ info=%@",
-                  sMRReg ? 1 : 0, sMRGetPlaying ? 1 : 0,
-                  nApp ?: @"NULL", nPlay ?: @"NULL", nInfo ?: @"NULL"]);
+                  @"mr-audit dlsym: reg=%d getPlaying=%d（只取函数，不碰常量）",
+                  sMRReg ? 1 : 0, sMRGetPlaying ? 1 : 0]);
+
+        // 三个通知名字面量（值 == 名字，公开实现核实）：
+        //   IsPlaying 变化 = 播放/暂停（最准的"播放开始/停止"信号）
+        //   Info 变化      = 元数据变化（切歌/进度，播放中高频）
+        //   Application 变化 = 换 App 播放
+        NSString *names[3] = {
+            @"kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification",
+            @"kMRMediaRemoteNowPlayingInfoDidChangeNotification",
+            @"kMRMediaRemoteNowPlayingApplicationDidChangeNotification",
+        };
+        const char *tags[3] = { "isplaying", "info", "app" };
         CFNotificationCenterRef dc = CFNotificationCenterGetDarwinNotifyCenter();
-        if ([nApp isKindOfClass:[NSString class]])
-            CFNotificationCenterAddObserver(dc, (void *)"app", apv_mrCB,
-                (__bridge CFStringRef)nApp, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-        if ([nPlay isKindOfClass:[NSString class]])
-            CFNotificationCenterAddObserver(dc, (void *)"isplaying", apv_mrCB,
-                (__bridge CFStringRef)nPlay, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-        if ([nInfo isKindOfClass:[NSString class]])
-            CFNotificationCenterAddObserver(dc, (void *)"info", apv_mrCB,
-                (__bridge CFStringRef)nInfo, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-        // 必须先调这个注册订阅，mediaserverd 才会给本进程发 now-playing 系通知
+        for (int i = 0; i < 3; i++) {
+            const char *tag = tags[i]; // block 内按值捕获，避免依赖循环变量
+            // Darwin 中心（iOS 上很多 tweak 用这条路收 MediaRemote 通知）
+            CFNotificationCenterAddObserver(dc, (void *)tag, apv_mrCB,
+                (__bridge CFStringRef)names[i], NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+            // NSNotificationCenter（macOS 公开实现 SketchyBar 同款通路）
+            [[NSNotificationCenter defaultCenter] addObserverForName:names[i]
+                object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        @try {
+                            if (sMRGetPlaying) {
+                                sMRGetPlaying(dispatch_get_main_queue(), ^(BOOL playing) {
+                                    routeLog([NSString stringWithFormat:
+                                              @"mr-audit(%s): NSC 通知到达 → 官方查询 isPlaying=%d",
+                                              tag, playing ? 1 : 0]);
+                                    apv_npAuditCore(playing, tag);
+                                });
+                            } else {
+                                apv_npAuditCore(apv_readIsPlaying(), tag);
+                            }
+                        } @catch (id e) {}
+                    });
+                }];
+        }
+        // 先注册订阅，mediaserverd 才会给本进程发 now-playing 系通知
         if (sMRReg) sMRReg(dispatch_get_main_queue());
-        routeLog(@"mr-audit 装载完成：Darwin 观察者已挂 + RegisterForNowPlayingNotifications 已调用");
+        routeLog(@"mr-audit 装载完成：Darwin+NSC 双路观察者已挂 + RegisterForNowPlayingNotifications 已调用");
     } @catch (id e) {
         routeLog(@"mr-audit 装载异常");
     }
