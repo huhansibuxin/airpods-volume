@@ -1707,6 +1707,97 @@ static void apv_nowPlayingDidChange(CFNotificationCenterRef center, void *observ
         } @catch (id e) {}
     });
 }
+
+// v1.9.97：播放开始审计的**主力实现**——hook SBMediaController 的 now-playing 回调。
+//
+// 为什么弃用 Darwin 通知（v1.9.96 的做法）：
+//   注册 CFSTR("com.apple.mediaremote.nowplayingappdidchange") 后，老板实机
+//   播放抖音/音乐，日志里 nowplaying-audit = 0 次。注册代码在 %ctor 主线程、
+//   ctor running 确认跑过 → 注册本身没问题；结论只能是**这个 Darwin 通知名
+//   在 SpringBoard 进程里根本没火**（名字不匹配时 CFNotificationCenter 是静默
+//   no-op：不报错、不触发，极难察觉）。字符串靠猜就是这种下场。
+//
+// 改用 SpringBoard **自身会调用到的 Objective-C 方法**（头文件已实锤存在，
+// 见 SpringBoard/SBMediaController.h）：
+//   - _mediaRemoteNowPlayingApplicationDidChange:        换 App 播放
+//   - _mediaRemoteNowPlayingInfoDidChange:               同 App 内信息变化
+//   - _mediaRemoteNowPlayingApplicationIsPlayingDidChange: 播放/暂停状态变化 ← 最准的"播放开始"
+// 这是方法 hook 不是通知名，只要类存在就必被调用，不存在"名字写错"的失败模式。
+//
+// 开销控制：只在 AirPods 在场（sAirPodsConnected）时才开窗+查路由；
+// 没戴耳机时播放完全不做任何事（startPollWindow 本身极轻，timer 内还有
+// "AirPods 不在场立即停表"短路，所以高频回调也压得住）。
+static BOOL sNPWasPlaying = NO; // 上一次回调时的播放状态（用于识别"开始播放"跳变）
+
+static void apv_npAuditFire(const char *which) {
+    @try {
+        // 三个路由开关全关 → 完全不介入（与 enforceAirPodsRoute 内部同款短路）
+        if (!gAutoRoute && !gStealBack && !gStealHFP) return;
+
+        // ⚠️ 老板要求：**只在"开始播放"那一刻触发一次，播放过程中不再反复判断**。
+        // now-playing 回调（尤其是 info 变化）在播放中是**每秒级高频**的，
+        // 若每次都查路由就是无谓开销。用「未播 → 在播」的**跳变**精确识别播放开始，
+        // 播放中 / 暂停 / 停止 一概不动作。-isPlaying 见 SBMediaController.h。
+        id mc = [NSClassFromString(@"SBMediaController") sharedInstance];
+        BOOL playing = (mc && [mc respondsToSelector:@selector(isPlaying)])
+                     ? ((BOOL (*)(id, SEL))objc_msgSend)(mc, @selector(isPlaying)) : NO;
+
+        if (playing == sNPWasPlaying) return;        // 状态没变：播放中/仍在停 → 不管
+        BOOL justStarted = (playing && !sNPWasPlaying);
+        sNPWasPlaying = playing;
+        if (!justStarted) return;                    // 停止播放 → 不动作
+
+        // 开始播放 → 查一次路由。判定权交回 enforceAirPodsRoute()，它内部自判：
+        //   输出已在 AirPods → 只更新状态，不切、不开窗（零开销，不盲目重复切）
+        //   输出不在 AirPods → 按 attached/stolen 强制切 + 按需开 60s 窗口兜底
+        // AirPods 不在场 → 它内部直接 return，同样零开销。
+        routeLog([NSString stringWithFormat:
+                  @"nowplaying-audit(%s): 播放开始 → 查/切路由一次", which]);
+        enforceAirPodsRoute();
+    } @catch (id e) {}
+}
+
+static void (*orig_npAppDidChange)(id, SEL, id) = NULL;
+static void (*orig_npInfoDidChange)(id, SEL, id) = NULL;
+static void (*orig_npPlayingDidChange)(id, SEL, id) = NULL;
+
+static void hook_npAppDidChange(id self, SEL _cmd, id arg) {
+    apv_npAuditFire("app");
+    if (orig_npAppDidChange) orig_npAppDidChange(self, _cmd, arg);
+}
+static void hook_npInfoDidChange(id self, SEL _cmd, id arg) {
+    apv_npAuditFire("info");
+    if (orig_npInfoDidChange) orig_npInfoDidChange(self, _cmd, arg);
+}
+static void hook_npPlayingDidChange(id self, SEL _cmd, id arg) {
+    apv_npAuditFire("isplaying");
+    if (orig_npPlayingDidChange) orig_npPlayingDidChange(self, _cmd, arg);
+}
+
+static void installNowPlayingAudit(void) {
+    Class cls = NSClassFromString(@"SBMediaController");
+    if (!cls) {
+        routeLog(@"nowplaying-audit 装载失败：SBMediaController 未找到");
+        return;
+    }
+    struct { SEL sel; IMP rep; IMP *orig; } jobs[3] = {
+        { @selector(_mediaRemoteNowPlayingApplicationDidChange:),
+          (IMP)hook_npAppDidChange,     (IMP *)&orig_npAppDidChange },
+        { @selector(_mediaRemoteNowPlayingInfoDidChange:),
+          (IMP)hook_npInfoDidChange,    (IMP *)&orig_npInfoDidChange },
+        { @selector(_mediaRemoteNowPlayingApplicationIsPlayingDidChange:),
+          (IMP)hook_npPlayingDidChange, (IMP *)&orig_npPlayingDidChange },
+    };
+    int ok = 0;
+    for (int i = 0; i < 3; i++) {
+        if ([cls instancesRespondToSelector:jobs[i].sel]) {
+            MSHookMessageEx(cls, jobs[i].sel, jobs[i].rep, jobs[i].orig);
+            ok++;
+        }
+    }
+    routeLog([NSString stringWithFormat:
+              @"nowplaying-audit hook 装载：SBMediaController %d/3 个回调已挂", ok]);
+}
 // ============================================================
 // 通知合并成一组（源出 NotifsDontHide Feature 1，v1.9.91 并入）
 // ============================================================
@@ -1923,6 +2014,9 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
             }
         } @catch (id e) {}
 
+        // v1.9.97 播放开始审计：hook SBMediaController 的 now-playing 回调。
+        // 独立于蓝牙/路由通知——那条路被吞时，一播声音就兜底切回 AirPods。
+        installNowPlayingAudit();
         // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
         installNowPlaying1x1();
         // 1×1 模块内部布局：只隐藏上一曲/下一曲（展开态完全原生）
