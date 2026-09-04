@@ -1690,6 +1690,23 @@ static void handleRouteEventDebounced(void) {
         handleRouteEvent(@"coalesced");
     });
 }
+
+// v1.9.96：播放开始审计回调（独立信号源）。
+// now playing app 变化（开始/切换/停止播放）经 Darwin 通知上来，
+// 与蓝牙连接/路由变化通知互不依赖——后者偶发被吞时，只要用户一播声音
+// 此回调就火，开轮询窗口 + 立即查路由，把"被吞的连接事件"这个单点故障去掉。
+// 播放开始极难被吞（不播声音根本放不出来），且是事件驱动（非定时器），
+// 不违反零轮询原则。
+static void apv_nowPlayingDidChange(CFNotificationCenterRef center, void *observer,
+                                     CFStringRef name, const void *object, CFDictionaryRef info) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            routeLog(@"nowplaying-audit: 播放活动变化 → 开窗口+查路由");
+            startPollWindow();
+            handleRouteEventDebounced();
+        } @catch (id e) {}
+    });
+}
 // ============================================================
 // 通知合并成一组（源出 NotifsDontHide Feature 1，v1.9.91 并入）
 // ============================================================
@@ -1865,6 +1882,22 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
         stopPoll();
         handleRouteEventDebounced(); // v1.9.92：burst 合并
     }];
+
+    // v1.9.96：播放开始审计（独立兜底源，见 apv_nowPlayingDidChange）。
+    // 注册在 Darwin 通知中心——与上面四个 NSNotificationCenter 源互斥独立，
+    // 任一被吞都不影响其余。播放活动是比蓝牙/路由更底层、更可靠的"需要切耳机"信号。
+    // 两个都挂、都 app 无关（抖音视频 / 音乐软件 / 任意媒体 App 一视同仁）：
+    //   appdidchange   = 某 App 成为 now-playing（开播 / 切到别的 App 播）
+    //   infodidchange  = 同一 App 内播放状态变化（暂停→播放、进度），
+    //                    兜底"同 App 内再播同一个视频"也拿得到播放开始。
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+        (__bridge const void *)@"apv-np-audit", apv_nowPlayingDidChange,
+        CFSTR("com.apple.mediaremote.nowplayingappdidchange"), NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+        (__bridge const void *)@"apv-np-audit-info", apv_nowPlayingDidChange,
+        CFSTR("com.apple.mediaremote.nowplayinginfodidchange"), NULL,
+        CFNotificationSuspensionBehaviorDeliverImmediately);
 
     // 设置变更 → 刷新开关缓存（PreferenceLoader plist 的 PostNotification）
     // v1.9.93：改用 Darwin 通知中心（跨进程）；NSNotificationCenter 收不到设置页的变更
