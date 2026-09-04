@@ -1725,6 +1725,30 @@ static void handleRouteEventDebounced(void) {
 static BOOL sNPWasPlaying = NO;            // 上次播放状态（跳变识别）
 static NSTimeInterval sLastNPAuditFire = 0; // 上次审计时刻（10s 节流）
 
+// ―― v1.9.103-debug 探针：定"CC 播放按钮"路线 A/B ――
+// 播放开始时查系统眼里的"当前 now playing App"：PID + 名称。
+//   名称=抖音 → 抖音被认作 now playing App → 路线 A（Set 播放状态 API，纯 SpringBoard）
+//   名称空/不是抖音 → 路线 B（抖音注入 hook 播放器）
+// 只在"播放开始"跳变那一刻触发一次，事件驱动零轮询。全部 dlsym 函数符号（安全）。
+static void (*sMRGetPID)(dispatch_queue_t, void (^)(int)) = NULL;
+static void (*sMRGetName)(int, dispatch_queue_t, void (^)(CFStringRef)) = NULL;
+
+static void apv_npProbeLog(int pid, NSString *name) {
+    routeLog([NSString stringWithFormat:
+              @"np-probe: now playing App PID=%d name=%@（名称=抖音→路线A；空/其它→路线B）",
+              pid, name ?: @"(空)"]);
+}
+
+static void apv_npProbeNow(void) {
+    if (!sMRGetPID) return;
+    sMRGetPID(dispatch_get_main_queue(), ^(int pid) {
+        if (!sMRGetName) { apv_npProbeLog(pid, nil); return; }
+        sMRGetName(0, dispatch_get_main_queue(), ^(CFStringRef nm) {
+            apv_npProbeLog(pid, nm ? (__bridge NSString *)nm : nil);
+        });
+    });
+}
+
 static void apv_npAuditCore(BOOL playing, const char *which) {
     @try {
         // 三个路由开关全关 → 完全不介入（与 enforceAirPodsRoute 内部同款短路）
@@ -1746,6 +1770,7 @@ static void apv_npAuditCore(BOOL playing, const char *which) {
                   @"nowplaying-audit(%s): %@(isPlaying %d→%d) → 切一次路由",
                   which, stateChanged ? @"播放状态变化" : @"播放中复查",
                   prev ? 1 : 0, playing ? 1 : 0]);
+        if (stateChanged && playing) apv_npProbeNow(); // v1.9.103-debug：播放开始探针
 
         // 每次触发都实实在在切一次（老板：戴耳机不分场景都切；绕过幂等防
         // "状态机以为在耳机、实际 A2DP 没建立"的漏切）。
@@ -1804,6 +1829,9 @@ static void installMediaRemoteAudit(void) {
         }
         sMRReg = (void (*)(dispatch_queue_t))dlsym(hdl, "MRMediaRemoteRegisterForNowPlayingNotifications");
         sMRGetPlaying = (void (*)(dispatch_queue_t, void (^)(BOOL)))dlsym(hdl, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
+        // v1.9.103-debug 探针用（缺了只是探针不工作，不影响审计本体）
+        sMRGetPID = (void (*)(dispatch_queue_t, void (^)(int)))dlsym(hdl, "MRMediaRemoteGetNowPlayingApplicationPID");
+        sMRGetName = (void (*)(int, dispatch_queue_t, void (^)(CFStringRef)))dlsym(hdl, "MRMediaRemoteGetNowPlayingApplicationDisplayName");
         if (!sMRGetPlaying) {
             routeLog(@"播放审计未启用：GetNowPlayingApplicationIsPlaying 符号缺失");
             return;
