@@ -1761,7 +1761,7 @@ static void apv_npProbe(const char *src) {
               @"np-hit: 信号源[%s] 命中 (isPlaying=%d)", src, apv_readIsPlaying() ? 1 : 0]);
 }
 
-static void apv_npAuditFire(const char *which) {
+static void apv_npAuditCore(BOOL playing, const char *which) {
     @try {
         // 三个路由开关全关 → 完全不介入（与 enforceAirPodsRoute 内部同款短路）
         if (!gAutoRoute && !gStealBack && !gStealHFP) return;
@@ -1774,7 +1774,6 @@ static void apv_npAuditFire(const char *which) {
         // 而**持续播放中 isPlaying 恒为 YES，不产生跳变 → 一次都不触发**（零开销）。
         // （now-playing info 回调在播放中是每秒级高频，若每次都查路由就是无谓开销，
         //   跳变判定把它完全挡掉。-isPlaying 见 SBMediaController.h 第 81 行。）
-        BOOL playing = apv_readIsPlaying(); // 走 orig，避免命中自己 hook 的 getter
 
         BOOL prev = sNPWasPlaying;
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
@@ -1813,6 +1812,10 @@ static void apv_npAuditFire(const char *which) {
     } @catch (id e) {}
 }
 
+static void apv_npAuditFire(const char *which) {
+    apv_npAuditCore(apv_readIsPlaying(), which);
+}
+
 static void (*orig_npAppDidChange)(id, SEL, id) = NULL;
 static void (*orig_npInfoDidChange)(id, SEL, id) = NULL;
 static void (*orig_npPlayingDidChange)(id, SEL, id) = NULL;
@@ -1843,15 +1846,89 @@ static void hook_npPlayingDidChange(id self, SEL _cmd, id arg) {
 // 都会**持续查询**这个 getter，只要有媒体在放就会被反复调用；而上面三个
 // _mediaRemoteXxxDidChange: 回调是否在 iOS 16 真被调用，尚未实机证实。
 // 开销：getter 里只做一次 BOOL 比较（跳变检测），跳变时才做重活，可忽略。
+static BOOL sGetterAliveLogged = NO; // 一次性探针：getter 到底有没有人调（区分"没调用"vs"调了但恒NO"）
 static BOOL hook_isPlaying(id self, SEL _cmd) {
     BOOL v = orig_isPlaying ? orig_isPlaying(self, _cmd) : NO;
     @try {
+        if (!sGetterAliveLogged) {
+            sGetterAliveLogged = YES;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                routeLog([NSString stringWithFormat:@"np-getter: 首次被调用(v=%d) → getter 有人查询", v ? 1 : 0]);
+            });
+        }
         if (v != sNPWasPlaying) {           // 只在跳变时记录/处理
             apv_npProbe("np-getter");
             apv_npAuditFire("getter");
         }
     } @catch (id e) {}
     return v;
+}
+
+// ============================================================
+// MediaRemote **官方通道**（v1.9.100）——播放兜底的真正主力
+// ============================================================
+// 实测（v1.9.99 诊断版）：抖音 + 音乐 App 播放/暂停各多轮，SBMediaController 的
+// 3 个 _mediaRemote 回调 + isPlaying getter **全部 0 命中** → iOS 16 的 SpringBoard
+// 根本不走 SBMediaController（遗留类，CC/锁屏媒体控件直连 MediaRemote）。
+//
+// 正确通道：dlopen MediaRemote.framework → dlsym **把通知名常量从二进制里读出来**
+// （字符串来自系统自身，彻底消灭 v1.9.96"猜名字→静默 no-op"的失败模式）→
+// 官方 API MRMediaRemoteRegisterForNowPlayingNotifications 注册订阅 →
+// 通知到达后用官方 API MRMediaRemoteGetNowPlayingApplicationIsPlaying 查真实状态。
+static void (*sMRReg)(dispatch_queue_t) = NULL;
+static void (*sMRGetPlaying)(dispatch_queue_t, void (^)(BOOL)) = NULL;
+
+static void apv_mrCB(CFNotificationCenterRef center, void *observer,
+                     CFStringRef name, const void *object, CFDictionaryRef info) {
+    const char *which = observer ? (const char *)observer : "mr";
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            if (sMRGetPlaying) {
+                sMRGetPlaying(dispatch_get_main_queue(), ^(BOOL playing) {
+                    routeLog([NSString stringWithFormat:
+                              @"mr-audit(%s): 通知到达 → 官方查询 isPlaying=%d",
+                              which, playing ? 1 : 0]);
+                    apv_npAuditCore(playing, which);
+                });
+            } else {
+                apv_npAuditCore(apv_readIsPlaying(), which);
+            }
+        } @catch (id e) {}
+    });
+}
+
+static void installMediaRemoteAudit(void) {
+    @try {
+        void *hdl = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY);
+        if (!hdl) {
+            routeLog(@"mr-audit 装载失败：dlopen MediaRemote 返回 NULL");
+            return;
+        }
+        sMRReg = (void (*)(dispatch_queue_t))dlsym(hdl, "MRMediaRemoteRegisterForNowPlayingNotifications");
+        sMRGetPlaying = (void (*)(dispatch_queue_t, void (^)(BOOL)))dlsym(hdl, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
+        NSString *nApp  = (__bridge NSString *)dlsym(hdl, "kMRMediaRemoteNowPlayingApplicationDidChangeNotification");
+        NSString *nPlay = (__bridge NSString *)dlsym(hdl, "kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification");
+        NSString *nInfo = (__bridge NSString *)dlsym(hdl, "kMRMediaRemoteNowPlayingInfoDidChangeNotification");
+        routeLog([NSString stringWithFormat:
+                  @"mr-audit dlsym: reg=%d getPlaying=%d | app=%@ isPlaying=%@ info=%@",
+                  sMRReg ? 1 : 0, sMRGetPlaying ? 1 : 0,
+                  nApp ?: @"NULL", nPlay ?: @"NULL", nInfo ?: @"NULL"]);
+        CFNotificationCenterRef dc = CFNotificationCenterGetDarwinNotifyCenter();
+        if ([nApp isKindOfClass:[NSString class]])
+            CFNotificationCenterAddObserver(dc, (void *)"app", apv_mrCB,
+                (__bridge CFStringRef)nApp, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+        if ([nPlay isKindOfClass:[NSString class]])
+            CFNotificationCenterAddObserver(dc, (void *)"isplaying", apv_mrCB,
+                (__bridge CFStringRef)nPlay, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+        if ([nInfo isKindOfClass:[NSString class]])
+            CFNotificationCenterAddObserver(dc, (void *)"info", apv_mrCB,
+                (__bridge CFStringRef)nInfo, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+        // 必须先调这个注册订阅，mediaserverd 才会给本进程发 now-playing 系通知
+        if (sMRReg) sMRReg(dispatch_get_main_queue());
+        routeLog(@"mr-audit 装载完成：Darwin 观察者已挂 + RegisterForNowPlayingNotifications 已调用");
+    } @catch (id e) {
+        routeLog(@"mr-audit 装载异常");
+    }
 }
 
 static void installNowPlayingAudit(void) {
@@ -2106,7 +2183,11 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
 
         // v1.9.97 播放开始审计：hook SBMediaController 的 now-playing 回调。
         // 独立于蓝牙/路由通知——那条路被吞时，一播声音就兜底切回 AirPods。
+        // （v1.9.100 实测：iOS 16 SpringBoard 不调用 SBMediaController → 保留但非主力）
         installNowPlayingAudit();
+        // v1.9.100 播放兜底**主力**：MediaRemote 官方通道（dlsym 通知名常量，
+        // 不猜字符串；官方 API 注册订阅 + 查真实播放状态）
+        installMediaRemoteAudit();
         // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
         installNowPlaying1x1();
         // 1×1 模块内部布局：只隐藏上一曲/下一曲（展开态完全原生）
