@@ -1710,81 +1710,31 @@ static void handleRouteEventDebounced(void) {
 
 // v1.9.96 的 Darwin 通知回调 apv_nowPlayingDidChange 已删（v1.9.99）：
 // 实机验证那两个通知名在 SpringBoard 里 0 命中（静默 no-op），整个函数成死代码。
-// v1.9.97：播放开始审计的**主力实现**——hook SBMediaController 的 now-playing 回调。
-//
-// 为什么弃用 Darwin 通知（v1.9.96 的做法）：
-//   注册 CFSTR("com.apple.mediaremote.nowplayingappdidchange") 后，老板实机
-//   播放抖音/音乐，日志里 nowplaying-audit = 0 次。注册代码在 %ctor 主线程、
-//   ctor running 确认跑过 → 注册本身没问题；结论只能是**这个 Darwin 通知名
-//   在 SpringBoard 进程里根本没火**（名字不匹配时 CFNotificationCenter 是静默
-//   no-op：不报错、不触发，极难察觉）。字符串靠猜就是这种下场。
-//
-// 改用 SpringBoard **自身会调用到的 Objective-C 方法**（头文件已实锤存在，
-// 见 SpringBoard/SBMediaController.h）：
-//   - _mediaRemoteNowPlayingApplicationDidChange:        换 App 播放
-//   - _mediaRemoteNowPlayingInfoDidChange:               同 App 内信息变化
-//   - _mediaRemoteNowPlayingApplicationIsPlayingDidChange: 播放/暂停状态变化 ← 最准的"播放开始"
-// 这是方法 hook 不是通知名，只要类存在就必被调用，不存在"名字写错"的失败模式。
-//
-// 开销控制：只在 AirPods 在场（sAirPodsConnected）时才开窗+查路由；
-// 没戴耳机时播放完全不做任何事（startPollWindow 本身极轻，timer 内还有
-// "AirPods 不在场立即停表"短路，所以高频回调也压得住）。
-static BOOL sNPWasPlaying = NO;        // 上一次回调时的播放状态（用于识别状态跳变）
-static NSTimeInterval sLastNPAuditFire = 0; // 上次触发审计的时刻（10s 节流用）
-
-// 候选源 4 的原实现指针（hook isPlaying getter 用）。提前声明，
-// 因为下面的 apv_readIsPlaying 要用到它。
-static BOOL (*orig_isPlaying)(id, SEL) = NULL;
-
-// 安全读取播放状态。
-// ⚠️ 必须走 **orig_isPlaying**（而不是 objc_msgSend → 会命中我们自己 hook 的
-// getter → 里面又调 apv_npAuditFire → 再读 → 无限递归）。未 hook 时退回 msgSend。
-static BOOL apv_readIsPlaying(void) {
-    id mc = [NSClassFromString(@"SBMediaController") sharedInstance];
-    if (!mc) return NO;
-    SEL s = @selector(isPlaying);
-    if (![mc respondsToSelector:s]) return NO;
-    if (orig_isPlaying) return orig_isPlaying(mc, s);
-    return ((BOOL (*)(id, SEL))objc_msgSend)(mc, s);
-}
-
-// v1.9.99 **诊断探针**：记录"哪个候选信号源真的打到了"。
-// 老板指出核心是"找对播放通知"——之前在信号源未经验证的前提下堆逻辑是本末倒置
-// （v1.9.97 播多次 0 触发，到底是"回调没来"还是"被判断吞了"没有数据区分）。
-// 现在每个候选源命中就记一条，播一次就能从日志看出哪些源真的会火。
-static NSTimeInterval sLastNPProbe = 0;
-static void apv_npProbe(const char *src) {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - sLastNPProbe < 2.0) return; // 2s 限流，防高频源刷屏
-    sLastNPProbe = now;
-    routeLog([NSString stringWithFormat:
-              @"np-hit: 信号源[%s] 命中 (isPlaying=%d)", src, apv_readIsPlaying() ? 1 : 0]);
-}
+// ============================================================
+// 播放开始审计（v1.9.102 稳定版：MediaRemote 官方通道，单路精准命中）
+// ============================================================
+// 演进史（全部实机验证，教训详见 skill: ios-mediaremote-playback-audit）：
+//   v1.9.96 猜 Darwin 通知名      → 静默 no-op，0 命中
+//   v1.9.97-99 hook SBMediaController → 遗留类 iOS 16 根本不调用，0 命中（已删）
+//   v1.9.100 dlsym NSString 常量  → 未 rebase 指针 SIGBUS，崩进安全模式（已删）
+//   v1.9.101 字面量 + 注册 API     → 实锤命中（33 通知/19 触发）
+// ⭐ 铁律： Darwin 通知名不能猜；dlsym 只碰函数符号；必须调
+//    MRMediaRemoteRegisterForNowPlayingNotifications 否则通知永不投递。
+// 触发逻辑（老板要求）：播放开始/暂停/停止/打断各切一次；播放中 10s 节流复查；
+// 全程事件驱动，零轮询。
+static BOOL sNPWasPlaying = NO;            // 上次播放状态（跳变识别）
+static NSTimeInterval sLastNPAuditFire = 0; // 上次审计时刻（10s 节流）
 
 static void apv_npAuditCore(BOOL playing, const char *which) {
     @try {
         // 三个路由开关全关 → 完全不介入（与 enforceAirPodsRoute 内部同款短路）
         if (!gAutoRoute && !gStealBack && !gStealHFP) return;
 
-        // ⚠️ 老板要求（v1.9.99 明确）：**播放过程中不用管，但"播放开始"和
-        // "打断/暂停/停止"这些状态变化点都要收到，并切一次**。
-        // 实现：用 isPlaying 的**双向跳变**识别——
-        //   NO → YES = 播放开始
-        //   YES → NO = 暂停 / 停止 / 被系统打断
-        // 而**持续播放中 isPlaying 恒为 YES，不产生跳变 → 一次都不触发**（零开销）。
-        // （now-playing info 回调在播放中是每秒级高频，若每次都查路由就是无谓开销，
-        //   跳变判定把它完全挡掉。-isPlaying 见 SBMediaController.h 第 81 行。）
-
+        // 触发条件（满足任一）：
+        //  A. isPlaying 双向跳变：NO→YES 播放开始 / YES→NO 暂停·停止·被打断
+        //  B. 播放中且距上次 ≥10s：覆盖抖音自动连播这类"无跳变的新一次播放"
         BOOL prev = sNPWasPlaying;
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-
-        // 触发条件（满足任一即查一次路由）：
-        //  A. **播放状态跳变**：NO→YES（开始播放）/ YES→NO（暂停·停止·被打断）
-        //  B. **正在播放 且 距上次审计 ≥ 10s**：覆盖「连续播放但内容切换」——
-        //     抖音刷到下一个视频时 isPlaying 恒为 YES、**不产生跳变**，但那同样
-        //     是一次新的"播放开始"、同样可能被吞（老板原话："每次播放开始的时候
-        //     都有可能被吞"）。10s 节流把播放中每秒级高频的 info 回调全挡掉，
-        //     所以这是**事件驱动 + 节流**，不是定时器轮询，不违反零轮询原则。
         BOOL stateChanged = (playing != prev);
         BOOL refreshDue = (playing && (now - sLastNPAuditFire >= 10.0));
         if (!stateChanged && !refreshDue) return;
@@ -1797,204 +1747,94 @@ static void apv_npAuditCore(BOOL playing, const char *which) {
                   which, stateChanged ? @"播放状态变化" : @"播放中复查",
                   prev ? 1 : 0, playing ? 1 : 0]);
 
-        // ⚠️ 老板要求（v1.9.99）：**每次播放开始都要实实在在切一次**，
-        // 不再依赖"输出已在 AirPods 就不切"的状态判断——因为"每次播放开始都有
-        // 可能被吞"，且状态判断本身未必准（A2DP 未必真建立），无条件切更保险。
-        // 唯一前提：AirPods 在场（不在场时 pickRoute 切不动，也不会误伤其它输出）。
-        // 通话场景不排除——老板："戴上耳机不管什么场景都切"。
+        // 每次触发都实实在在切一次（老板：戴耳机不分场景都切；绕过幂等防
+        // "状态机以为在耳机、实际 A2DP 没建立"的漏切）。
+        // 前提仅 AirPods 在场（不在场切不动也不误伤其它输出）。
         if (airPodsInBluetoothDevices() || currentOutputIsAirPods()) {
-            forceRouteToAirPodsEx("np-start", YES); // YES = 绕过幂等，已在线也切
+            forceRouteToAirPodsEx("np-start", YES); // YES = 绕过幂等
         }
-        // 状态机照常更新（stolen/attached 判定、HFP 处理、按需开 60s 窗口兜底）。
-        // 注意：其内部的 forceRouteToAirPods 走 dispatch_after 0.2~0.4s，
-        // 会被上面刚设的 3s 冷却挡掉 → 不会重复切，本次只切一次。
+        // 状态机照常跑（stolen/attached、HFP、按需开 60s 窗口兜底）。
+        // 其内部 forceRouteToAirPods 会被上面刚设的 3s 冷却挡掉 → 不会重复切。
         enforceAirPodsRoute();
     } @catch (id e) {}
 }
 
-static void apv_npAuditFire(const char *which) {
-    apv_npAuditCore(apv_readIsPlaying(), which);
+// 审计统一入口（Darwin / NSC 两路都汇到这里）。
+// ⚠️ 总控 = 设置里**本来就有的三个路由开关**（自动切换/抢回/HFP，老板明确
+// 不加新键）：全关 → 连状态查询都不做，一次 BOOL 比较直接返回，零开销。
+// 查询节流：IsPlaying 通知（系统仅在真实播放/暂停时才发）→ 每次都查；
+// Info/App 通知（播放中每秒级高频）→ 距上次审计 ≥10s 才查。
+// → 稳态播放下最多 10s 一次 XPC 查询 + 一次 BOOL 比较；主线程无同步重活。
+static void apv_npAuditHandle(const char *which, BOOL exact) {
+    if (!gAutoRoute && !gStealBack && !gStealHFP) return;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (!exact && (now - sLastNPAuditFire) < 10.0) return;
+    if (!sMRGetPlaying) return;
+    sMRGetPlaying(dispatch_get_main_queue(), ^(BOOL playing) {
+        apv_npAuditCore(playing, which);
+    });
 }
 
-static void (*orig_npAppDidChange)(id, SEL, id) = NULL;
-static void (*orig_npInfoDidChange)(id, SEL, id) = NULL;
-static void (*orig_npPlayingDidChange)(id, SEL, id) = NULL;
-
-// ⚠️ v1.9.98 修复的关键顺序 bug：
-// 之前是「先 apv_npAuditFire 读 isPlaying，后调 orig」——orig 还没跑，
-// SBMediaController 的播放状态**根本没更新**，读到的 isPlaying 恒为旧值 NO
-// → 「未播→在播」跳变永远不成立 → 回调全被 return 吞掉（实机播多次 0 触发）。
-// 必须**先调 orig 让系统更新状态，再读 isPlaying** 判断跳变。
-static void hook_npAppDidChange(id self, SEL _cmd, id arg) {
-    if (orig_npAppDidChange) orig_npAppDidChange(self, _cmd, arg);
-    apv_npProbe("np-cb-app");
-    apv_npAuditFire("app");
-}
-static void hook_npInfoDidChange(id self, SEL _cmd, id arg) {
-    if (orig_npInfoDidChange) orig_npInfoDidChange(self, _cmd, arg);
-    apv_npProbe("np-cb-info");
-    apv_npAuditFire("info");
-}
-static void hook_npPlayingDidChange(id self, SEL _cmd, id arg) {
-    if (orig_npPlayingDidChange) orig_npPlayingDidChange(self, _cmd, arg);
-    apv_npProbe("np-cb-playing");
-    apv_npAuditFire("isplaying");
-}
-
-// v1.9.99 **候选源 4**：hook SBMediaController -isPlaying（getter 本身）。
-// 为什么它是"最可能可靠"的：控制中心 now-playing 模块、锁屏媒体控件、音量 HUD
-// 都会**持续查询**这个 getter，只要有媒体在放就会被反复调用；而上面三个
-// _mediaRemoteXxxDidChange: 回调是否在 iOS 16 真被调用，尚未实机证实。
-// 开销：getter 里只做一次 BOOL 比较（跳变检测），跳变时才做重活，可忽略。
-static BOOL sGetterAliveLogged = NO; // 一次性探针：getter 到底有没有人调（区分"没调用"vs"调了但恒NO"）
-static BOOL hook_isPlaying(id self, SEL _cmd) {
-    BOOL v = orig_isPlaying ? orig_isPlaying(self, _cmd) : NO;
-    @try {
-        if (!sGetterAliveLogged) {
-            sGetterAliveLogged = YES;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                routeLog([NSString stringWithFormat:@"np-getter: 首次被调用(v=%d) → getter 有人查询", v ? 1 : 0]);
-            });
-        }
-        if (v != sNPWasPlaying) {           // 只在跳变时记录/处理
-            apv_npProbe("np-getter");
-            apv_npAuditFire("getter");
-        }
-    } @catch (id e) {}
-    return v;
-}
-
-// ============================================================
-// MediaRemote **官方通道**（v1.9.100）——播放兜底的真正主力
-// ============================================================
-// 实测（v1.9.99 诊断版）：抖音 + 音乐 App 播放/暂停各多轮，SBMediaController 的
-// 3 个 _mediaRemote 回调 + isPlaying getter **全部 0 命中** → iOS 16 的 SpringBoard
-// 根本不走 SBMediaController（遗留类，CC/锁屏媒体控件直连 MediaRemote）。
-//
-// 正确通道：dlopen MediaRemote.framework → dlsym **把通知名常量从二进制里读出来**
-// （字符串来自系统自身，彻底消灭 v1.9.96"猜名字→静默 no-op"的失败模式）→
-// 官方 API MRMediaRemoteRegisterForNowPlayingNotifications 注册订阅 →
-// 通知到达后用官方 API MRMediaRemoteGetNowPlayingApplicationIsPlaying 查真实状态。
+// MediaRemote 官方通道函数符号（只 dlsym 函数，永不碰常量——v1.9.100 SIGBUS 教训）
 static void (*sMRReg)(dispatch_queue_t) = NULL;
 static void (*sMRGetPlaying)(dispatch_queue_t, void (^)(BOOL)) = NULL;
 
+// 三个通知的 observer 标签（Darwin 中心回调靠指针相等判定 IsPlaying 精确源）
+static const char kNPTagPlaying[] = "isplaying";
+static const char kNPTagInfo[]    = "info";
+static const char kNPTagApp[]     = "app";
+
+// Darwin 中心回调：线程不定 → 回主队列，只做指针比较，零消息发送
 static void apv_mrCB(CFNotificationCenterRef center, void *observer,
                      CFStringRef name, const void *object, CFDictionaryRef info) {
-    const char *which = observer ? (const char *)observer : "mr";
+    const char *tag = observer ? (const char *)observer : kNPTagApp;
+    BOOL exact = (observer == (const void *)kNPTagPlaying);
     dispatch_async(dispatch_get_main_queue(), ^{
-        @try {
-            if (sMRGetPlaying) {
-                sMRGetPlaying(dispatch_get_main_queue(), ^(BOOL playing) {
-                    routeLog([NSString stringWithFormat:
-                              @"mr-audit(%s): 通知到达 → 官方查询 isPlaying=%d",
-                              which, playing ? 1 : 0]);
-                    apv_npAuditCore(playing, which);
-                });
-            } else {
-                apv_npAuditCore(apv_readIsPlaying(), which);
-            }
-        } @catch (id e) {}
+        apv_npAuditHandle(tag, exact);
     });
 }
 
 static void installMediaRemoteAudit(void) {
     @try {
-        // v1.9.101 崩溃修复说明：
-        // v1.9.100 用 dlsym 取 kMRMediaRemote*Notification **NSString 常量**再
-        // isKindOfClass:/%@ 打日志 —— iOS 16 共享缓存里这些符号对 dlsym 而言是
-        // 未经 rebase 的链式修复指针（SIGBUS 0xdac11950），objc_msgSend 当场炸，
-        // @try 拦不住 Mach 异常 → 两次启动均崩进安全模式（.ips 已实锤：
-        // faulting frame #1 = installMediaRemoteAudit）。
-        // ⚠️ 铁律：**永远不要对 dlsym 到的非函数符号做 ObjC 消息发送**。
-        //
-        // 正确姿势（联网核实 SketchyBar / TouchBarMediaKeys 等公开实现）：
-        //  - 通知名常量的值 == 它自己的名字字面量，直接写 CFSTR 字面量即可；
-        //  - **必须先调 MRMediaRemoteRegisterForNowPlayingNotifications**，
-        //    否则通知永远不投递（v1.9.96 双重失败：名字错 + 没注册）；
-        //  - MediaRemote 把通知发到 NSNotificationCenter（macOS 公开实现同款），
-        //    Darwin 中心也一并挂（iOS 上双保险）；
-        //  - 只 dlsym **函数**符号（函数指针不涉及对象 rebase，安全）。
         void *hdl = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY);
         if (!hdl) {
-            routeLog(@"mr-audit 装载失败：dlopen MediaRemote 返回 NULL");
+            routeLog(@"播放审计未启用：dlopen MediaRemote 返回 NULL");
             return;
         }
         sMRReg = (void (*)(dispatch_queue_t))dlsym(hdl, "MRMediaRemoteRegisterForNowPlayingNotifications");
         sMRGetPlaying = (void (*)(dispatch_queue_t, void (^)(BOOL)))dlsym(hdl, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
-        routeLog([NSString stringWithFormat:
-                  @"mr-audit dlsym: reg=%d getPlaying=%d（只取函数，不碰常量）",
-                  sMRReg ? 1 : 0, sMRGetPlaying ? 1 : 0]);
-
-        // 三个通知名字面量（值 == 名字，公开实现核实）：
-        //   IsPlaying 变化 = 播放/暂停（最准的"播放开始/停止"信号）
-        //   Info 变化      = 元数据变化（切歌/进度，播放中高频）
-        //   Application 变化 = 换 App 播放
+        if (!sMRGetPlaying) {
+            routeLog(@"播放审计未启用：GetNowPlayingApplicationIsPlaying 符号缺失");
+            return;
+        }
+        // 三个通知名字面量（值 == 名字，SketchyBar 等公开实现核实）：
+        //   IsPlaying = 播放/暂停（系统仅在真实状态变化时发，精确源）
+        //   Info      = 元数据变化（播放中高频，走 10s 节流）
+        //   Application = 换 App 播放（同样节流）
         NSString *names[3] = {
             @"kMRMediaRemoteNowPlayingApplicationIsPlayingDidChangeNotification",
             @"kMRMediaRemoteNowPlayingInfoDidChangeNotification",
             @"kMRMediaRemoteNowPlayingApplicationDidChangeNotification",
         };
-        const char *tags[3] = { "isplaying", "info", "app" };
+        const char *tags[3] = { kNPTagPlaying, kNPTagInfo, kNPTagApp };
         CFNotificationCenterRef dc = CFNotificationCenterGetDarwinNotifyCenter();
         for (int i = 0; i < 3; i++) {
-            const char *tag = tags[i]; // block 内按值捕获，避免依赖循环变量
-            // Darwin 中心（iOS 上很多 tweak 用这条路收 MediaRemote 通知）
-            CFNotificationCenterAddObserver(dc, (void *)tag, apv_mrCB,
+            const char *tag = tags[i];
+            // Darwin 中心
+            CFNotificationCenterAddObserver(dc, (void *)tags[i], apv_mrCB,
                 (__bridge CFStringRef)names[i], NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
-            // NSNotificationCenter（macOS 公开实现 SketchyBar 同款通路）
+            // NSNotificationCenter（mainQueue 直达主线程，无需再 hop）
             [[NSNotificationCenter defaultCenter] addObserverForName:names[i]
                 object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        @try {
-                            if (sMRGetPlaying) {
-                                sMRGetPlaying(dispatch_get_main_queue(), ^(BOOL playing) {
-                                    routeLog([NSString stringWithFormat:
-                                              @"mr-audit(%s): NSC 通知到达 → 官方查询 isPlaying=%d",
-                                              tag, playing ? 1 : 0]);
-                                    apv_npAuditCore(playing, tag);
-                                });
-                            } else {
-                                apv_npAuditCore(apv_readIsPlaying(), tag);
-                            }
-                        } @catch (id e) {}
-                    });
+                    apv_npAuditHandle(tag, i == 0);
                 }];
         }
-        // 先注册订阅，mediaserverd 才会给本进程发 now-playing 系通知
+        // 必须先注册订阅，mediaserverd 才会给本进程投递 now-playing 系通知
         if (sMRReg) sMRReg(dispatch_get_main_queue());
-        routeLog(@"mr-audit 装载完成：Darwin+NSC 双路观察者已挂 + RegisterForNowPlayingNotifications 已调用");
+        routeLog(@"播放审计装载完成（MediaRemote 通道，受路由开关总控）");
     } @catch (id e) {
-        routeLog(@"mr-audit 装载异常");
+        routeLog(@"播放审计装载异常");
     }
-}
-
-static void installNowPlayingAudit(void) {
-    Class cls = NSClassFromString(@"SBMediaController");
-    if (!cls) {
-        routeLog(@"nowplaying-audit 装载失败：SBMediaController 未找到");
-        return;
-    }
-    struct { SEL sel; IMP rep; IMP *orig; } jobs[4] = {
-        { @selector(_mediaRemoteNowPlayingApplicationDidChange:),
-          (IMP)hook_npAppDidChange,     (IMP *)&orig_npAppDidChange },
-        { @selector(_mediaRemoteNowPlayingInfoDidChange:),
-          (IMP)hook_npInfoDidChange,    (IMP *)&orig_npInfoDidChange },
-        { @selector(_mediaRemoteNowPlayingApplicationIsPlayingDidChange:),
-          (IMP)hook_npPlayingDidChange, (IMP *)&orig_npPlayingDidChange },
-        // 候选源 4：isPlaying getter 本身（v1.9.99）。CC 模块/锁屏控件会持续查询它，
-        // 只要有媒体就会反复调用 → 4 个候选源里最可能"必火"的那个。
-        { @selector(isPlaying),
-          (IMP)hook_isPlaying,          (IMP *)&orig_isPlaying },
-    };
-    int ok = 0;
-    for (int i = 0; i < 4; i++) {
-        if ([cls instancesRespondToSelector:jobs[i].sel]) {
-            MSHookMessageEx(cls, jobs[i].sel, jobs[i].rep, jobs[i].orig);
-            ok++;
-        }
-    }
-    routeLog([NSString stringWithFormat:
-              @"nowplaying-audit hook 装载：SBMediaController %d/4 个源已挂(3回调+isPlaying getter)", ok]);
 }
 // ============================================================
 // 通知合并成一组（源出 NotifsDontHide Feature 1，v1.9.91 并入）
@@ -2218,12 +2058,8 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
             }
         } @catch (id e) {}
 
-        // v1.9.97 播放开始审计：hook SBMediaController 的 now-playing 回调。
-        // 独立于蓝牙/路由通知——那条路被吞时，一播声音就兜底切回 AirPods。
-        // （v1.9.100 实测：iOS 16 SpringBoard 不调用 SBMediaController → 保留但非主力）
-        installNowPlayingAudit();
-        // v1.9.100 播放兜底**主力**：MediaRemote 官方通道（dlsym 通知名常量，
-        // 不猜字符串；官方 API 注册订阅 + 查真实播放状态）
+        // 播放开始审计（v1.9.102 稳定版）：MediaRemote 官方通道——
+        // 播放开始/暂停/停止/打断各切一次；受既有三个路由开关总控。
         installMediaRemoteAudit();
         // 控制中心 Now Playing 模块压成 1x1（BetterCC 同款机制，只做 media 一支）
         installNowPlaying1x1();
