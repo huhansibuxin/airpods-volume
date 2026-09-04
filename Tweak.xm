@@ -1742,8 +1742,9 @@ static void apv_npAuditFire(const char *which) {
         BOOL playing = (mc && [mc respondsToSelector:@selector(isPlaying)])
                      ? ((BOOL (*)(id, SEL))objc_msgSend)(mc, @selector(isPlaying)) : NO;
 
-        if (playing == sNPWasPlaying) return;        // 状态没变：播放中/仍在停 → 不管
-        BOOL justStarted = (playing && !sNPWasPlaying);
+        BOOL prev = sNPWasPlaying;
+        if (playing == prev) return;                 // 状态没变：播放中/仍在停 → 不管
+        BOOL justStarted = (playing && !prev);
         sNPWasPlaying = playing;
         if (!justStarted) return;                    // 停止播放 → 不动作
 
@@ -1752,7 +1753,8 @@ static void apv_npAuditFire(const char *which) {
         //   输出不在 AirPods → 按 attached/stolen 强制切 + 按需开 60s 窗口兜底
         // AirPods 不在场 → 它内部直接 return，同样零开销。
         routeLog([NSString stringWithFormat:
-                  @"nowplaying-audit(%s): 播放开始 → 查/切路由一次", which]);
+                  @"nowplaying-audit(%s): 播放开始(isPlaying=%d prev=%d) → 查/切路由一次",
+                  which, playing ? 1 : 0, prev ? 1 : 0]);
         enforceAirPodsRoute();
     } @catch (id e) {}
 }
@@ -1761,17 +1763,34 @@ static void (*orig_npAppDidChange)(id, SEL, id) = NULL;
 static void (*orig_npInfoDidChange)(id, SEL, id) = NULL;
 static void (*orig_npPlayingDidChange)(id, SEL, id) = NULL;
 
+// ⚠️ v1.9.98 修复的关键顺序 bug：
+// 之前是「先 apv_npAuditFire 读 isPlaying，后调 orig」——orig 还没跑，
+// SBMediaController 的播放状态**根本没更新**，读到的 isPlaying 恒为旧值 NO
+// → 「未播→在播」跳变永远不成立 → 回调全被 return 吞掉（实机播多次 0 触发）。
+// 必须**先调 orig 让系统更新状态，再读 isPlaying** 判断跳变。
+static NSTimeInterval sLastNPCbLog = 0;
+static void apv_npCbProbe(const char *which) {
+    // 回调到达探针（3s 限流，防播放中 info 高频刷屏）：
+    // 用来区分「回调根本没来（方法不被调用）」还是「来了但被跳变判断吞了」。
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - sLastNPCbLog < 3.0) return;
+    sLastNPCbLog = now;
+    routeLog([NSString stringWithFormat:@"np-cb(%s): 回调已到达", which]);
+}
 static void hook_npAppDidChange(id self, SEL _cmd, id arg) {
-    apv_npAuditFire("app");
     if (orig_npAppDidChange) orig_npAppDidChange(self, _cmd, arg);
+    apv_npCbProbe("app");
+    apv_npAuditFire("app");
 }
 static void hook_npInfoDidChange(id self, SEL _cmd, id arg) {
-    apv_npAuditFire("info");
     if (orig_npInfoDidChange) orig_npInfoDidChange(self, _cmd, arg);
+    apv_npCbProbe("info");
+    apv_npAuditFire("info");
 }
 static void hook_npPlayingDidChange(id self, SEL _cmd, id arg) {
-    apv_npAuditFire("isplaying");
     if (orig_npPlayingDidChange) orig_npPlayingDidChange(self, _cmd, arg);
+    apv_npCbProbe("isplaying");
+    apv_npAuditFire("isplaying");
 }
 
 static void installNowPlayingAudit(void) {
