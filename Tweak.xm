@@ -1759,6 +1759,11 @@ static void apv_npAuditCore(BOOL playing, const char *which) {
     } @catch (id e) {}
 }
 
+// MediaRemote 官方通道函数符号（只 dlsym 函数，永不碰常量——v1.9.100 SIGBUS 教训）。
+// 提前声明：apv_npAuditHandle 要用。
+static void (*sMRReg)(dispatch_queue_t) = NULL;
+static void (*sMRGetPlaying)(dispatch_queue_t, void (^)(BOOL)) = NULL;
+
 // 审计统一入口（Darwin / NSC 两路都汇到这里）。
 // ⚠️ 总控 = 设置里**本来就有的三个路由开关**（自动切换/抢回/HFP，老板明确
 // 不加新键）：全关 → 连状态查询都不做，一次 BOOL 比较直接返回，零开销。
@@ -1774,10 +1779,6 @@ static void apv_npAuditHandle(const char *which, BOOL exact) {
         apv_npAuditCore(playing, which);
     });
 }
-
-// MediaRemote 官方通道函数符号（只 dlsym 函数，永不碰常量——v1.9.100 SIGBUS 教训）
-static void (*sMRReg)(dispatch_queue_t) = NULL;
-static void (*sMRGetPlaying)(dispatch_queue_t, void (^)(BOOL)) = NULL;
 
 // 三个通知的 observer 标签（Darwin 中心回调靠指针相等判定 IsPlaying 精确源）
 static const char kNPTagPlaying[] = "isplaying";
