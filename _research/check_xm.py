@@ -109,6 +109,28 @@ for name, dpos in sorted(seen_vars.items()):
           % (name, dpos, upos, "OK" if safe else "!!! USED BEFORE DECL"))
 print("  （共扫描 %d 个 static 变量/函数指针）" % len(seen_vars))
 
+print("== 类类型指针声明顺序（v1.9.104 CI 漏检教训：static APVRouteObserver *x")
+print("   写在 @interface 之前 → clang 'unknown type name'）==")
+# 只检查**本文件定义**的类（有 @interface 才管）：framework 类型（NSArray/UIView 等）
+# 来自系统头文件，不要求本地声明。
+local_ifaces = {}
+for m in re.finditer(r"^@interface\s+([A-Z]\w*)\b", t, re.M):
+    local_ifaces.setdefault(m.group(1), m.start())
+cls_decl = re.compile(r"^static\s+([A-Z]\w*)\s*\*", re.M)
+cls_ok = True
+for m in cls_decl.finditer(t):
+    cname = m.group(1)
+    if cname not in local_ifaces:
+        continue
+    if local_ifaces[cname] > m.start():
+        cls_ok = False
+        print("  %-24s !!! 本文件 @interface 在 static 声明之后" % cname)
+    else:
+        print("  %-24s OK" % cname)
+if cls_ok:
+    print("  （本文件类类型顺序全部 OK）")
+ok = ok and cls_ok
+
 print()
 print("RESULT:", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

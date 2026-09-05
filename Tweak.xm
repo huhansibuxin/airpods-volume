@@ -1876,10 +1876,10 @@ static void apv_routeListChanged(void) {
     handleRouteEventDebounced();
 }
 
-static APVRouteObserver *sRouteObserver = nil;
-
 @interface APVRouteObserver : NSObject <MPAVRoutingControllerDelegate>
 @end
+
+static APVRouteObserver *sRouteObserver = nil; // 必须在 @interface 之后（ObjC 类类型先声明才能用作指针类型）
 
 @implementation APVRouteObserver
 - (id)routingControllerAvailableRoutesDidChange:(id)controller {
