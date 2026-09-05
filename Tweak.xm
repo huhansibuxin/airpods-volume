@@ -1199,9 +1199,30 @@ static BOOL replPerformPresentationRequest(id self, SEL _cmd, id session, id req
 - (void)fetchAvailableRoutesWithCompletionHandler:(void (^)(void))handler;
 - (BOOL)pickRoute:(id)route;
 - (id)pickedRoute;
+- (void)setDelegate:(id)delegate; // v1.9.104 A1：路由列表变化事件源
+- (id)delegate;
+@end
+
+// v1.9.104 A1：可用路由列表变化回调。签名按设备运行时 dump 实锤
+// （D:\woekbude\springboard-dump\headers\Frameworks\MediaPlayer.h:1676
+//   -[MPAVRoutingViewController routingControllerAvailableRoutesDidChange:]，
+//   MediaControls.h 里 MRURoutingViewController / MediaControlsEndpointsManager
+//   同样是这个方法名）——不是猜的，避免 v1.9.96 那种"猜通知名 → 静默 no-op"。
+@protocol MPAVRoutingControllerDelegate <NSObject>
+@optional
+- (id)routingControllerAvailableRoutesDidChange:(id)controller;
+- (id)routingController:(id)controller pickedRoutesDidChange:(id)routes;
+// 另有 routingController:didFailToPickRouteWithError: 与
+// routingController:shouldHijackRoute:alertStyle:busyRouteName:presentingAppName:completion:
+//（MediaPlayer.h:1674/1687，APVRouteObserver 全部 no-op 实现，见下）
 @end
 
 static id sMPARouter = nil;              // 复用的 MPAVRoutingController 实例
+// v1.9.104：统一由 apv_ensureRouter() 创建（此前 forceRouteToAirPodsEx /
+// forceCallToAirPods 在主线程懒建，%ctor 后台队列也建一份 → 跨线程竞态，
+// 两个线程同时判 !sMPARouter 会创建两个实例，且 MPAVRoutingController
+// 在线程 A 建、线程 B 用本身就不安全）。现在全主线程单点创建。
+static void apv_ensureRouter(void);      // 定义在 handleRouteEventDebounced 之后
 static NSTimeInterval sLastRouteForce = 0; // 强制切换冷却（3s 逃生通道；戴上时重置）
 static BOOL sPrevAirInBT = NO; // 上次蓝牙列表是否含 AirPods（戴上 0→1 重置冷却）
 
@@ -1357,11 +1378,8 @@ static void forceRouteToAirPodsEx(const char *why, BOOL ignoreAlready) {
     // 幂等去重：输出已是 AirPods 就不再切（多通知源叠加时避免重复）
     if (!ignoreAlready && currentOutputIsAirPods()) return;
     @try {
-        if (!sMPARouter) {
-            sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
-            [sMPARouter setDiscoveryMode:1];
-            [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}]; // 触发刷新
-        }
+        apv_ensureRouter(); // v1.9.104：统一单点创建（主线程）+ 挂 delegate
+        if (!sMPARouter) return;
         NSArray *routes = [sMPARouter availableRoutes];
         id airRoute = nil;
         for (id r in routes) {
@@ -1405,6 +1423,93 @@ static void forceRouteToAirPods(const char *why) {
     forceRouteToAirPodsEx(why, NO);
 }
 
+// ============================================================
+// v1.9.104 B1：HFP 抢回多级复查 + 重试
+// ============================================================
+// 背景（2026-09-05 日志实锤）：20:20:38 连车载，pickRoute 返回 ok=1，但 0.6s 后
+// carOwns 仍为 1（当天唯一一次失败；对照组 10:45 / 11:36 / 11:43 全是 carOwns=0）。
+// 更糟的是之后**整整 3 分 46 秒零日志**——一次重试都没有，通话全程走车载，
+// 直到 20:24:24 通话结束才靠媒体路径（stolen）抢回。
+//
+// 旧代码两个缺陷：
+//   1) 只复查一次且卡死在 0.6s。A2DP 切换 0.6s 够用，HFP 通话路由更慢
+//      （要重新协商 SCO 链路），0.6s 就判"失败"偏早。
+//   2) pickRoute 返回 YES 只代表"系统收下了请求"，不代表真切过去；
+//      失败后**没有任何重试**，只能等下一轮轮询碰运气。
+//
+// 修法：复查链（见下方时刻表）。任一轮 carOwns=0 立即收摊——**成功路径
+// 零额外开销**；仍为 1 就再 pick 一次。平时与旧路径完全一样，不加任何轮询。
+//
+// ⭐ 复查链必须"脱钩" hfpCallActive()（2026-09-05 20:20 事故的核心教训）：
+//   enforceAirPodsRoute 的 HFP 分支门卫是 `hfpNow = hfpCallActive()`，
+//   只要这一刻读不到 BluetoothHFP 端口就整个分支跳过、一次都不抢。
+//   而 carOwnsCall() 是三路检测（HFP 输出 / HFP 输入 / 系统输出），
+//   两者会不一致：HFP 端口读不到了、车载却仍占着系统输出 →
+//   carOwns=1 但门已关 → 抢回彻底停摆（日志里就是那 3 分 46 秒空白）。
+//   所以链一旦起，后续只看 carOwnsCall()，不再问 hfpCallActive()。
+// ============================================================
+#define APV_CALL_FORCE_MAX_ROUND 8
+static BOOL sCallForceVerifying = NO;          // 复查链进行中：不让外层重复起链
+static NSTimeInterval sCallForceChainStart = 0; // 起链时刻（保险解锁用）
+static int sCallForceAirMiss = 0;              // 复查链中 AirPods 连续不在场轮数（≥2 才放弃）
+
+// 与上一轮的间隔；累计复查时刻 = 0.6 / 1.5 / 3 / 6 / 10 / 15 / 21 / 30 秒。
+// 前密后疏：切换通常 1s 内完成（成功即停），拖到几十秒的是"系统假答应"，
+// 那种情况给足重试机会。总时长 30s 是权衡——再长会干扰老板主动用车载通话。
+static NSTimeInterval apv_verifyGapForRound(int round) {
+    switch (round) {
+        case 1: return 0.6;  // → 0.6
+        case 2: return 0.9;  // → 1.5
+        case 3: return 1.5;  // → 3
+        case 4: return 3.0;  // → 6
+        case 5: return 4.0;  // → 10
+        case 6: return 5.0;  // → 15
+        case 7: return 6.0;  // → 21
+        default: return 9.0; // → 30
+    }
+}
+
+static void apv_callForceVerify(int round, NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        @try {
+            BOOL owns = carOwnsCall();
+            routeLog([NSString stringWithFormat:@"call-force verify(#%d) carOwns=%d", round, owns]);
+            if (!owns) { sCallForceVerifying = NO; return; } // 车载已放手 = 抢回成功
+            if (round >= APV_CALL_FORCE_MAX_ROUND) {
+                routeLog(@"call-force give-up(8 轮未成) 等下一轮事件/轮询");
+                sCallForceVerifying = NO;
+                return;
+            }
+            // AirPods 不在场 → 切不动（availableRoutes 里根本没有它）。
+            // ⚠️ v1.9.104：**不能一轮不在场就放弃**——车载抢占的瞬间 AirPods
+            // 会同时从蓝牙列表（0.8s TTL 缓存）和音频路由里消失几百毫秒
+            //（与 poll tick 的抖动是同一件事），复查链第一轮 0.6s 就到，正好
+            // 撞上抖动窗口会误判"老板没戴耳机、就是要用车载"→ 链永久收摊。
+            // 修法与 poll tick 一致：连续 2 轮不在场（累计 ≥0.9s，缓存必然
+            // 已刷新）才认定真摘下；第 1 轮 miss 记账后照常续链观察。
+            if (airPodsInBluetoothDevices() || currentOutputIsAirPods()) {
+                sCallForceAirMiss = 0;
+            } else if (++sCallForceAirMiss >= 2) {
+                sCallForceAirMiss = 0;
+                routeLog(@"call-force abort(AirPods 连续 2 轮不在场,视为摘下)");
+                sCallForceVerifying = NO;
+                return;
+            }
+            NSArray *routes = [sMPARouter availableRoutes];
+            for (id r in routes) {
+                if (isAirPodsName([r routeName])) {
+                    [sMPARouter pickRoute:r]; // 重抢；不更新 sLastCallForce（不走 0.8s 冷却）
+                    break;
+                }
+            }
+            apv_callForceVerify(round + 1, apv_verifyGapForRound(round + 1));
+        } @catch (id e) {
+            sCallForceVerifying = NO;
+        }
+    });
+}
+
 // 强制把通话路由抢回 AirPods（v1.9.50 定型）
 // 实机验证（2026-08-25 车在，7+ 次全成功）：S1 MPAVRoutingController pickRoute:
 // 是唯一生效策略——MediaRemote 不仅能切 A2DP 媒体，也能切 HFP 通话路由
@@ -1415,29 +1520,31 @@ static void forceRouteToAirPods(const char *why) {
 static NSTimeInterval sLastCallForce = 0;
 static void forceCallToAirPods(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    // v1.9.104 B1：复查链跑着的时候交给链主导，避免外层轮询每 1.5s 再插一脚
+    // （多 pick 无害但日志噪音大，且会打乱复查节奏）。保险：链最长 30s 收摊，
+    // 35s 还在说明 dispatch 异常，强制解锁免得永久卡死抢回能力。
+    if (sCallForceVerifying) {
+        if (now - sCallForceChainStart > 35.0) sCallForceVerifying = NO;
+        else return;
+    }
     if (now - sLastCallForce < 0.8) return;
     sLastCallForce = now;
     @try {
         if (!carOwnsCall()) return;
-        if (!sMPARouter) {
-            sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
-            [sMPARouter setDiscoveryMode:1];
-            [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}];
-        }
+        apv_ensureRouter(); // v1.9.104：统一单点创建（主线程）+ 挂 delegate
+        if (!sMPARouter) return;
         NSArray *routes = [sMPARouter availableRoutes];
         id airRoute = nil;
         for (id r in routes) { if (isAirPodsName([r routeName])) { airRoute = r; break; } }
         if (airRoute) {
-            // v1.9.95：补上成败日志 + 0.6s 后复查——此前车载 HFP 抢回**完全静默**
-            //（一行日志都没有），老板没法确认抢回是否真成功。carOwnsCall 三路
-            // 检测（HFP 输出/输入端口/系统输出）走 0.4s/0.3s TTL 缓存，0.6s 后
-            // 复查自动拿新值：carOwns=0 = 车载已放手 = 抢回成功。
+            // pickRoute 返回 YES 只代表系统收下了请求，不代表真切过去
+            // （carOwnsCall 三路检测走 0.4s/0.3s TTL 缓存）。
+            // v1.9.104 B1：复查链 0.6/1.5/3/6/10/15/21/30s，失败自动重抢最多 8 轮。
             BOOL ok = [sMPARouter pickRoute:airRoute];
             routeLog([NSString stringWithFormat:@"call-force ok=%d carBefore=%d", ok, carOwnsCall()]);
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                routeLog([NSString stringWithFormat:@"call-force verify0.6 carOwns=%d", carOwnsCall()]);
-            });
+            sCallForceVerifying = YES;
+            sCallForceChainStart = now;
+            apv_callForceVerify(1, 0.6);
         } else {
             // 列表还没刷新出来（实例刚建）：0.4s 后重试一次，再不行靠车模式轮询兜底
             routeLog(@"call-force no-route-yet");
@@ -1492,15 +1599,21 @@ static BOOL carOwnsCall(void);
 static dispatch_source_t sPollTimer = NULL;
 static BOOL sPollRunning = NO;
 static NSTimeInterval sPollWindowEnd = 0;
+// v1.9.104：车载抢通话追踪期截止时刻（语义见 enforceAirPodsRoute 内注释）
+static NSTimeInterval sCarStealUntil = 0;
+// v1.9.104：连续"AirPods 不在场"的 tick 计数（抖动容忍，见轮询 handler）
+static int sPollMissCount = 0;
 
 static void startPollWindow(void) {
     if (!sPollTimer) return;
     sPollWindowEnd = [[NSDate date] timeIntervalSince1970] + 60.0; // 1 分钟窗口（抢车载）
+    sPollMissCount = 0; // v1.9.104：开窗即清零抖动计数
     if (!sPollRunning) { dispatch_resume(sPollTimer); sPollRunning = YES; }
 }
 
 static void stopPoll(void) {
     sPollWindowEnd = 0;
+    sPollMissCount = 0;
     if (sPollRunning) { dispatch_suspend(sPollTimer); sPollRunning = NO; }
 }
 
@@ -1574,8 +1687,18 @@ static void enforceAirPodsRoute(void) {
         // v1.9.62：HFP 通话（微信视频/语音）期间，只处理 HFP 路由抢回，
         // 不碰 A2DP 媒体路由，避免 pickRoute/MPAV 操作干扰通话音频。
         BOOL hfpNow = hfpCallActive();
+        BOOL carOwns = carOwnsCall();
+        // v1.9.104：车载抢通话追踪期。hfpCallActive() 只看 currentRoute 里
+        // 有没有 BluetoothHFP 端口，实测会闪断（路由切换瞬间读不到）；而
+        // carOwnsCall() 是三路检测（HFP 输出 / HFP 输入 / 系统输出），车载
+        // 占着输出时它仍为 1。以前只认 hfpNow 这道门，门一关整个 HFP 分支
+        // 跳过、一次都不抢 —— 2026-09-05 20:20 那次"抢回失败后 3 分 46 秒
+        // 零日志"就是这么来的（日志里窗口还开着、轮询还在跑，但每次进来
+        // 都被这道门挡在门外）。
+        // 现在：只要看到车载占着（carOwns=1）就续 60s 追踪期。
+        if (carOwns) sCarStealUntil = now + 60.0;
         if (hfpNow) {
-            if (gStealHFP && carOwnsCall()) {
+            if (gStealHFP && carOwns) {
                 routeLog(@"enforce carOwnsCall=1 (HFP call active) -> forceCallToAirPods");
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
@@ -1586,6 +1709,17 @@ static void enforceAirPodsRoute(void) {
             // 仍更新输出状态，避免挂断后状态机依据过时的 wasAP 做错误判定
             sOutputWasAirPods = currentOutputIsAirPods();
             return;
+        }
+        // v1.9.104：HFP 端口读不到、但车载仍占着输出（追踪期内）→ 补一次抢回。
+        // ⚠️ 这里**不 return**：既然不是真通话，就没理由阻断下面的 A2DP 分支
+        // （A2DP 抢回在车载场景下同样要紧）。真通话时上面已 return。
+        if (gStealHFP && carOwns && now < sCarStealUntil) {
+            routeLog(@"enforce carOwnsCall=1 (追踪期，HFP 端口不可见) -> forceCallToAirPods");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                forceCallToAirPods();
+            });
+            startPollWindow();
         }
 
         BOOL outIsAP = currentOutputIsAirPods();
@@ -1706,6 +1840,78 @@ static void handleRouteEventDebounced(void) {
         sRouteEvtPending = NO;
         handleRouteEvent(@"coalesced");
     });
+}
+
+// ============================================================
+// v1.9.104 A1：可用路由列表变化事件源（堵"AirPods 不在场 = 插件全盲"的洞）
+// ============================================================
+// 背景（2026-09-05 日志实锤）：老板 17:26 连车载没抢过来。日志显示
+// 17:16:17 → 18:21:26 整整 65 分钟插件零事件——sLastEvtState 还是 static
+// 初值 -1，证明 handleRouteEvent 一次都没被调用过。同类现象当天反复出现
+// （13:34~14:14 共 9 次装载全部 conn=0、全部零事件）。
+//
+// 根因：现有 4 个事件源在"AirPods 不在场 + 车机已配对自动回连"组合下全哑火
+//   BluetoothDeviceConnectSuccess   → 已配对车机**自动回连不发**（首次配对才发）
+//   AVOutputContextOutputDevices…   → AirPods 不在场时无输出变化可报
+//   AVAudioSessionRouteChange       → SpringBoard 自己没有活跃音频会话
+//   1.5s 轮询兜底                   → ctor 时 conn=0，startPollWindow 根本没开
+//
+// 修法：给已有的 sMPARouter（discoveryMode=1，持续发现设备）挂 delegate。
+// 车机/耳机进出可用路由列表时系统主动回调，既不依赖 AirPods 是否在场，
+// 也不依赖 SpringBoard 有没有音频会话。纯事件驱动，零轮询。
+//
+// ⭐ 与 v1.9.96 的本质区别：那次是"猜 Darwin 通知名"（静默 no-op，0 命中），
+//   这次的方法名从设备运行时 dump 的头文件查出来（MediaPlayer.h:1676），
+//   且 delegate 由我们 setDelegate 显式挂上、可由 respondsToSelector 验证。
+// ============================================================
+
+// 节流：discoveryMode=1 会周期性刷新可用路由，回调可能比想象中频繁。
+// 路由列表变化不需要亚秒级响应（戴上/被抢另有专属事件源），1s 内最多跑一次，
+// 且跑的是 handleRouteEventDebounced（内部再合并 100ms burst）。
+static NSTimeInterval sLastRouteListCb = 0;
+static void apv_routeListChanged(void) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - sLastRouteListCb < 1.0) return;
+    sLastRouteListCb = now;
+    handleRouteEventDebounced();
+}
+
+static APVRouteObserver *sRouteObserver = nil;
+
+@interface APVRouteObserver : NSObject <MPAVRoutingControllerDelegate>
+@end
+
+@implementation APVRouteObserver
+- (id)routingControllerAvailableRoutesDidChange:(id)controller {
+    @try { apv_routeListChanged(); } @catch (id e) {}
+    return nil;
+}
+// 以下 3 个是同一 delegate 协议里的其它方法（dump 实锤：MediaPlayer.h:1674/1687/1725，
+// MediaControlsEndpointsManager 等都实现了）。框架若不做 respondsToSelector 直接调用，
+// 未实现 = unrecognized selector = SpringBoard 崩安全模式，全部 no-op 兜底。
+- (id)routingController:(id)controller pickedRoutesDidChange:(id)routes { return nil; }
+- (id)routingController:(id)controller didFailToPickRouteWithError:(id)error { return nil; }
+- (id)routingController:(id)controller shouldHijackRoute:(id)route alertStyle:(id)style
+           busyRouteName:(id)busy presentingAppName:(id)app completion:(id)completion {
+    return nil; // 不参与 hijack 确认弹窗流程（返回空 = 不 hijack）
+}
+@end
+
+// sMPARouter 单点创建（主线程）+ 挂 delegate。三处懒创建（forceRouteToAirPodsEx /
+// forceCallToAirPods / %ctor 预建）统一走这里，消除跨线程竞态。
+static void apv_ensureRouter(void) {
+    if (sMPARouter) return;
+    Class cls = NSClassFromString(@"MPAVRoutingController");
+    if (!cls) return;
+    sMPARouter = [[cls alloc] init];
+    [sMPARouter setDiscoveryMode:1];
+    @try {
+        if (!sRouteObserver) sRouteObserver = [[APVRouteObserver alloc] init];
+        // 挂不上不影响其它功能（delegate 只是多一个事件源），静默降级
+        if ([sMPARouter respondsToSelector:@selector(setDelegate:)])
+            [sMPARouter setDelegate:sRouteObserver];
+    } @catch (id e) {}
+    [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}]; // 触发首次刷新
 }
 
 // v1.9.96 的 Darwin 通知回调 apv_nowPlayingDidChange 已删（v1.9.99）：
@@ -1997,13 +2203,22 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
     dispatch_source_set_timer(sPollTimer, dispatch_time(DISPATCH_TIME_NOW, 1.5 * NSEC_PER_SEC),
                               1.5 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(sPollTimer, ^{
-        // 便宜的短路（CPU 审计 v1.9.56）：
-        //  1) 三个路由开关全关 → 停表，一次检测都不做
-        //  2) AirPods 不在场 → 停表，等 btconnect 再开（以前会白跑满 60s 窗口）
-        if ((!gAutoRoute && !gStealBack && !gStealHFP) || !sAirPodsConnected) {
+        // 便宜的短路（CPU 审计 v1.9.56）：三个路由开关全关 → 停表，一次检测都不做
+        if (!gAutoRoute && !gStealBack && !gStealHFP) {
             stopPoll();
             return;
         }
+        // v1.9.104：AirPods 不在场**不再一次就停表**。
+        // 车载抢占的瞬间 AirPods 会同时从音频路由和蓝牙列表里消失几百毫秒
+        // （系统正把 HFP/A2DP 交给车载）→ 旧逻辑立刻 stopPoll，而车机是已配对
+        // 自动回连、不会再发 btconnect 事件 → **永久躺平**，再没人把它唤醒。
+        // 现在连续 3 个 tick（约 4.5s）都不在场才认定真摘下，抖动被自然吸收；
+        // 窗口到期机制照旧兜底，不会退化成常驻轮询。
+        if (!sAirPodsConnected) {
+            if (++sPollMissCount >= 3) stopPoll();
+            return;
+        }
+        sPollMissCount = 0;
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         // 车模式（车载+AirPods 同时在场）：持续监控，窗口续期不断，
         // 保证"车载连接状态下打微信视频被切车载"能在 1.5s 内被抢回
@@ -2075,18 +2290,19 @@ static void apv_prefsChanged(CFNotificationCenterRef center, void *observer,
     // UserNotificationsKit）+ MSHook 装载 + MPAVRoutingController 预建。
     // dlopen 与 MSHookMessageEx 均线程安全，后台执行无副作用；唯一代价是
     // Shortcuts/弹窗拦截和 CC 模块 hook 晚约 1~2 秒生效（启动后无感）。
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+    // v1.9.104：预建从后台队列挪到主队列。sMPARouter 此前在后台建、主线程用，
+    // 是跨线程竞态（两个线程同时判 !sMPARouter → 建出两个实例，还会让
+    // MPAVRoutingController 在线程 A 建、线程 B 用）。现在全主线程单点创建。
+    // dlopen / MSHook 仍在后台跑（那部分线程安全，不受影响）。
+    dispatch_async(dispatch_get_main_queue(), ^{
         @try {
             // 预建 MPAVRoutingController 实例 + 触发刷新：消除首次连接时
             // availableRoutes 为空导致的 no-route-yet 半秒延迟（开盒即能直接切）。
-            // 若主队列事件回调（btconnect 等）已抢先懒建过则跳过，避免重复实例。
-            if (!sMPARouter) {
-                sMPARouter = [[NSClassFromString(@"MPAVRoutingController") alloc] init];
-                [sMPARouter setDiscoveryMode:1];
-                [sMPARouter fetchAvailableRoutesWithCompletionHandler:^{}];
-            }
+            apv_ensureRouter();
         } @catch (id e) {}
+    });
 
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         // 播放开始审计（v1.9.102 稳定版）：MediaRemote 官方通道——
         // 播放开始/暂停/停止/打断各切一次；受既有三个路由开关总控。
         installMediaRemoteAudit();
